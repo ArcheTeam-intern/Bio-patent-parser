@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import Field
 
 from bio_pdf.contracts.common import NonEmptyStr, _StrictModel
+from bio_pdf.contracts.records import CheckResult
 
 JobStatus = Literal[
     "queued",
@@ -104,11 +105,14 @@ class StageOutcome(_StrictModel):
 class ValidationResult(_StrictModel):
     """The aggregate of a record's checks.
 
-    ``review_reasons`` capture rationale beyond the structured checks so the
-    review UI can present actionable guidance.
+    ``checks`` uses the same :class:`CheckResult` contract as the domain
+    records so a validated record can be written back (and reloaded from
+    disk/SQLite) without a type conversion. ``review_reasons`` capture
+    rationale beyond the structured checks so the review UI can present
+    actionable guidance.
     """
 
-    checks: list[dict[str, str]] = Field(default_factory=list)
+    checks: list[CheckResult] = Field(default_factory=list)
     validation_state: Literal[
         "unchecked",
         "checks_passed",

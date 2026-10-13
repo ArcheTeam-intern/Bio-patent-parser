@@ -239,9 +239,18 @@ class MinerUAdapter:
         PDF that will be uploaded via :meth:`upload_local_file`) must be
         provided.
 
+        Source identity: when ``local_file`` is given, the *uploaded bytes*
+        are the parsed source — the request's ``document_id`` must match the
+        local file's SHA-256, otherwise the run mixes identities from two
+        different PDFs and is rejected. When only ``source_url`` is given the
+        remote bytes are parsed and the caller-provided ``document_id`` is
+        trusted, but the manifest records that no local-byte verification was
+        possible.
+
         Raises:
             EngineProtocolUnsupportedError: When the response shape does not
-                match the documented contract.
+                match the documented contract, or when local_file's hash
+                does not match request.document_id.
             EngineUnavailableError: When the API rejects the token / URL.
             EngineTimeoutError: When polling times out locally. The remote
                 job is *not* cancelled; the runner may resume with the same
@@ -255,6 +264,24 @@ class MinerUAdapter:
                 "MinerU V1 requires a public http(s) URL or a local_file to upload",
                 details={"source_url": source_url, "local_file": str(local_file) if local_file else None},
             )
+
+        # Identity check: the document_id must describe the bytes we actually
+        # submitted. A mismatch means text, hashes and screenshots would be
+        # attributed to the wrong PDF.
+        source_identity_verified = False
+        if local_file is not None:
+            from bio_pdf.ingest.inspector import compute_sha256
+
+            local_sha = compute_sha256(local_file)
+            if request.document_id not in (f"sha256:{local_sha}", local_sha):
+                raise EngineProtocolUnsupportedError(
+                    "MinerU run mixes source identities: local_file hash does not match document_id",
+                    details={
+                        "document_id": request.document_id,
+                        "local_file_sha256": local_sha,
+                    },
+                )
+            source_identity_verified = True
 
         request.output_dir.mkdir(parents=True, exist_ok=True)
         raw_path = request.output_dir / "raw_response.json"
@@ -284,17 +311,32 @@ class MinerUAdapter:
         # MinerU's payload is structurally different (it carries
         # ``full_md_link`` and ``content_list`` rather than ``pages``), so we
         # project it into a Docling-shaped document before normalising.
-        projected = _project_mineru_payload(result_payload, page_numbers=set(request.page_numbers))
-        normalized_path.write_text(
-            json.dumps(projected, ensure_ascii=False, indent=2, sort_keys=True),
-            encoding="utf-8",
+        projected = _project_mineru_payload(
+            result_payload, page_numbers=set(request.page_numbers)
         )
-
         document = normalize_docling_document(
             projected,
             parser_run_id=f"{request.job_id}:mineru",
             document_id=request.document_id,
         )
+
+        # MinerU ignores server-side page-range requests; keep the original
+        # page numbers and filter locally so the output honours the request.
+        requested = set(request.page_numbers)
+        produced = {p.page_number for p in document.pages}
+        if requested:
+            unexpected = sorted(produced - requested)
+            if unexpected:
+                document = document.model_copy(
+                    update={
+                        "pages": [p for p in document.pages if p.page_number in requested],
+                        "errors": list(document.errors)
+                        + [f"mineru returned pages outside the request: {unexpected}"],
+                    }
+                )
+
+        # Write the strict contract object, not the upstream projection.
+        normalized_path.write_text(document.model_dump_json(), encoding="utf-8")
 
         manifest = self._manifest(
             request=request,
@@ -302,6 +344,7 @@ class MinerUAdapter:
             task_id=task_id,
             raw_path=raw_path,
             normalized_path=normalized_path,
+            source_identity_verified=source_identity_verified,
         )
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
@@ -534,6 +577,7 @@ class MinerUAdapter:
         task_id: str,
         raw_path: Path,
         normalized_path: Path,
+        source_identity_verified: bool = False,
     ) -> dict[str, Any]:
         return {
             "schema_version": "1.0.0",
@@ -552,6 +596,7 @@ class MinerUAdapter:
                 "structure": True,
                 "vlm": True,
             },
+            "source_identity_verified": source_identity_verified,
             "artifacts": {
                 "normalized": str(normalized_path.relative_to(request.output_dir)),
                 "raw_response": str(raw_path.relative_to(request.output_dir)),
@@ -622,6 +667,97 @@ def _project_mineru_payload(
 
 _PAGE_HEADER_RE = re.compile(r"^\s*<!--\s*page\s+(\d+)\s*-->", re.IGNORECASE)
 
+#: MinerU block types that carry an HTML ``table_body``.
+_TABLE_TYPES = {"table", "table_body"}
+
+
+def _project_table_item(item: dict[str, Any], page_no: int, seq: int) -> dict[str, Any] | None:
+    """Convert a MinerU table item (``table_body`` HTML) into a Docling-shaped table.
+
+    The HTML is parsed with a tolerant regex-based cell walker (no external
+    dependency): ``rowspan``/``colspan`` attributes are honoured so merged
+    headers keep their spans. Rows/cols that cannot be parsed are dropped
+    from the structured view but the raw HTML is preserved on the page as a
+    text block so no information is silently lost.
+    """
+
+    html = item.get("table_body") or ""
+    if not html:
+        return None
+
+    bbox = item.get("bbox") or item.get("position")
+    bbox_out: dict[str, float] | None = None
+    try:
+        if isinstance(bbox, dict):
+            bbox_out = {
+                "l": float(bbox.get("l", bbox.get("left", 0))),
+                "t": float(bbox.get("t", bbox.get("top", 0))),
+                "r": float(bbox.get("r", bbox.get("right", 0))),
+                "b": float(bbox.get("b", bbox.get("bottom", 0))),
+            }
+        elif isinstance(bbox, (list, tuple)) and len(bbox) == 8:
+            # MinerU sometimes emits 8-number bboxes (4 corner points).
+            xs = [float(bbox[i]) for i in (0, 2, 4, 6)]
+            ys = [float(bbox[i]) for i in (1, 3, 5, 7)]
+            bbox_out = {"l": min(xs), "t": min(ys), "r": max(xs), "b": max(ys)}
+        elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            bbox_out = {"l": float(bbox[0]), "t": float(bbox[1]),
+                        "r": float(bbox[2]), "b": float(bbox[3])}
+    except (TypeError, ValueError):
+        bbox_out = None
+
+    cells: list[dict[str, Any]] = []
+    row_idx = -1
+    # Walk <tr> rows, then <td>/<th> cells with their attributes.
+    for tr_m in re.finditer(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL):
+        row_idx += 1
+        col_idx = 0
+        for cell_m in re.finditer(r"<(td|th)\b([^>]*)>(.*?)</\1>", tr_m.group(1), re.IGNORECASE | re.DOTALL):
+            attrs = cell_m.group(2) or ""
+            inner = re.sub(r"<[^>]+>", " ", cell_m.group(3))
+            inner = re.sub(r"\s+", " ", inner).strip()
+
+            def _span(name: str) -> int:
+                sm = re.search(rf"{name}\s*=\s*[\"']?(\d+)", attrs, re.IGNORECASE)
+                return max(int(sm.group(1)), 1) if sm else 1
+
+            cells.append(
+                {
+                    "start_row_offset_idx": row_idx,
+                    "start_col_offset_idx": col_idx,
+                    "row_span": _span("rowspan"),
+                    "col_span": _span("colspan"),
+                    "text": inner,
+                }
+            )
+            col_idx += _span("colspan")
+
+    # Empty placeholder cells (e.g. the void under a merged header) carry no
+    # text and the contract requires text_raw to be non-empty; skip them.
+    # Grid positions of the remaining cells are unaffected because they are
+    # indexed by explicit row/col offsets.
+    cells = [c for c in cells if c["text"]]
+
+    if not cells:
+        return None
+
+    table: dict[str, Any] = {
+        "self_ref": f"mineru:table:{page_no}:{seq}",
+        "prov": [{"page_no": page_no}],
+        "data": {"table_cells": cells},
+    }
+    if bbox_out is not None:
+        table["prov"][0]["bbox"] = {**bbox_out, "coord_origin": "TOPLEFT"}
+
+    # Keep the raw HTML available as evidence (attribute named like Docling
+    # captions so downstream consumers can display it).
+    caption = item.get("table_caption") or item.get("img_caption")
+    if isinstance(caption, list):
+        caption = " ".join(str(c) for c in caption)
+    if caption:
+        table["caption"] = str(caption)
+    return table
+
 
 def _project_content_list(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Build a Docling-shaped pages dict from a MinerU ``content_list``."""
@@ -643,8 +779,19 @@ def _project_content_list(items: list[dict[str, Any]]) -> dict[str, Any]:
                 "width": 612.0,
                 "height": 792.0,
                 "texts": [],
+                "tables": [],
             },
         )
+
+        item_type = str(item.get("type") or item.get("label") or "text").lower()
+
+        # Tables: the content lives in ``table_body`` HTML; projecting only
+        # ``text``/``content`` would silently drop every table.
+        if item_type in _TABLE_TYPES and (item.get("table_body") or ""):
+            table_payload = _project_table_item(item, page_no, len(page["tables"]))
+            if table_payload is not None:
+                page["tables"].append(table_payload)
+                continue
 
         text = item.get("text") or item.get("content") or ""
         if not text:
@@ -659,6 +806,10 @@ def _project_content_list(items: list[dict[str, Any]]) -> dict[str, Any]:
                     "r": float(bbox.get("r", bbox.get("right", 0))),
                     "b": float(bbox.get("b", bbox.get("bottom", 0))),
                 }
+            elif isinstance(bbox, (list, tuple)) and len(bbox) == 8:
+                xs = [float(bbox[i]) for i in (0, 2, 4, 6)]
+                ys = [float(bbox[i]) for i in (1, 3, 5, 7)]
+                bbox_out = {"l": min(xs), "t": min(ys), "r": max(xs), "b": max(ys)}
             elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
                 bbox_out = {"l": float(bbox[0]), "t": float(bbox[1]),
                             "r": float(bbox[2]), "b": float(bbox[3])}
@@ -666,6 +817,8 @@ def _project_content_list(items: list[dict[str, Any]]) -> dict[str, Any]:
                 bbox_out = None
         except (TypeError, ValueError):
             bbox_out = None
+        if bbox_out is not None:
+            bbox_out = {**bbox_out, "coord_origin": "TOPLEFT"}
 
         label = item.get("type") or item.get("label") or "text"
         page["texts"].append(

@@ -9,14 +9,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from bio_pdf.contracts import ValidationResult
+from bio_pdf.contracts import CheckResult, ValidationResult
 
 CHECK_EVIDENCE_EXISTS = "EVIDENCE_EXISTS"
 CHECK_EVIDENCE_GEOMETRY = "EVIDENCE_GEOMETRY_VALID"
 
 
-def _check(check_id: str, outcome: str, details: str) -> dict[str, str]:
-    return {"check_id": check_id, "outcome": outcome, "details": details}
+def _check(check_id: str, outcome: str, details: str) -> CheckResult:
+    return CheckResult(
+        check_id=check_id,
+        outcome=outcome,  # type: ignore[arg-type]
+        details={"message": details},
+    )
 
 
 def validate_evidence(

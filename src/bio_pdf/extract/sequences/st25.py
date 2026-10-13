@@ -29,6 +29,7 @@ from bio_pdf.contracts import (
     ValidationState,
 )
 from bio_pdf.extract.sequences.amino_acids import (
+    ALLOWED_ALPHABETS,
     AMINO_ACID_THREE_TO_ONE,
     ResidueMapper,
 )
@@ -145,18 +146,21 @@ class _St25StateMachine:
         builder.representation = representation
 
         observed_length = len(normalized)
+        has_unresolved = any(r.get("resolved") == "false" for r in residues)
+        if has_unresolved and representation == "one_letter":
+            representation = "unresolved"
 
         evidence_id = (
             f"{self.document_id}:p{builder.residue_page}:st25:{builder.seq_id_no or 'seq'}"
         )
 
         # A sequence is complete only when the observed residue count agrees
-        # with the declared length. A mismatch (or missing declaration with
-        # trailing residues) flags a possibly truncated listing.
+        # with the declared length *and* every position resolved. Unknown
+        # symbols occupy real positions; filtering them out may make a
+        # truncated listing look complete by accident.
         is_complete = (
-            builder.declared_length is None
-            or observed_length == builder.declared_length
-        )
+            builder.declared_length is None or observed_length == builder.declared_length
+        ) and not has_unresolved
 
         record = SequenceRecord(
             sequence_id=f"{self.document_id}:seq:{builder.seq_id_no or 'unnamed'}",
@@ -187,6 +191,10 @@ class _St25StateMachine:
         at least one token has the classic three-letter length. Unknown
         three-letter tokens become ``?`` (length preserved) rather than
         being mis-read as single letters.
+
+        The single-letter fallback keeps every non-whitespace symbol: a
+        character outside the alphabet (``?``, ``*``, ``-``) occupies a real
+        position and is recorded as an unresolved residue, never dropped.
         """
 
         tokens = raw.split()
@@ -194,8 +202,8 @@ class _St25StateMachine:
 
         three_letter_form = (
             len(non_number_tokens) >= 1
-            and all(len(t) <= 3 and t.isalpha() for t in non_number_tokens)
-            and any(len(t) == 3 for t in non_number_tokens)
+            and all(len(t) <= 3 and (t.isalpha() or not t.isalnum()) for t in non_number_tokens)
+            and any(len(t) == 3 and t.isalpha() for t in non_number_tokens)
         )
 
         if three_letter_form:
@@ -214,15 +222,57 @@ class _St25StateMachine:
                 )
             return "".join(out), residues
 
-        # Otherwise treat as a single-letter run (strip whitespace/digits).
-        letters = [ch for ch in raw if ch.isalpha()]
-        return "".join(letters).upper(), []
+        # Single-letter run (or a noisy run): strip whitespace and bare
+        # position numbers, keep every other symbol in order.
+        alphabet = ALLOWED_ALPHABETS.get("protein", frozenset())
+        out_chars: list[str] = []
+        residues = []
+        for ch in "".join(non_number_tokens):
+            if ch.isspace():
+                continue
+            upper = ch.upper()
+            out_chars.append(upper)
+            if upper not in alphabet:
+                residues.append(
+                    {
+                        "position": str(len(out_chars)),
+                        "token": ch,
+                        "one_letter": upper,
+                        "resolved": "false",
+                    }
+                )
+        return "".join(out_chars), residues
 
     def _normalize_nucleic(
         self, raw: str, molecule_type: str
     ) -> tuple[str, list[dict[str, str]]]:
-        letters = [ch for ch in raw if ch.isalpha()]
-        return "".join(letters).upper(), []
+        """Normalise a nucleic block keeping unknown symbols in place.
+
+        Position numbers (bare integers, ST.25 style) are removed; every
+        other character occupies one position. Characters outside the
+        molecule's alphabet are kept verbatim and recorded as unresolved so
+        the observed length stays honest.
+        """
+
+        alphabet = ALLOWED_ALPHABETS.get(molecule_type, frozenset())
+        tokens = [t for t in raw.split() if not _POSITION_NUMBER_RE.match(t)]
+        out_chars: list[str] = []
+        residues: list[dict[str, str]] = []
+        for ch in "".join(tokens):
+            if ch.isspace():
+                continue
+            upper = ch.upper()
+            out_chars.append(upper)
+            if upper not in alphabet:
+                residues.append(
+                    {
+                        "position": str(len(out_chars)),
+                        "token": ch,
+                        "one_letter": upper,
+                        "resolved": "false",
+                    }
+                )
+        return "".join(out_chars), residues
 
     def _protein_representation(
         self, normalized: str, residues: list[dict[str, str]]

@@ -185,14 +185,11 @@ class DoclingAdapter:
             cwd=request.output_dir,
         )
 
-        # Load the normalised document back into memory so we can attach a
-        # manifest with the produced page coverage.
-        from bio_pdf.parsers.normalize_docling import normalise_docling_file
-
-        document = normalise_docling_file(
-            normalised_path,
-            parser_run_id=f"{request.job_id}:docling",
-            document_id=request.document_id,
+        # The child has already written the strict NormalizedDocument contract
+        # to disk; load it back so the manifest reflects exactly what a disk
+        # consumer would read.
+        document = NormalizedDocument.model_validate_json(
+            normalised_path.read_text(encoding="utf-8")
         )
 
         manifest_path = _write_manifest(

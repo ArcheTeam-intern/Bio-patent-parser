@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from bio_pdf.contracts import Measurement, ValidationResult
+from bio_pdf.contracts import CheckResult, Measurement, ValidationResult
 
 CHECK_VALUE = "ACT_VALUE_PARSE"
 CHECK_UNIT = "ACT_UNIT_PRESENT"
@@ -13,8 +13,12 @@ CHECK_TARGET = "ACT_TARGET_LINK"
 CHECK_EVIDENCE_KIND = "ACT_EVIDENCE_KIND"
 
 
-def _check(check_id: str, outcome: str, details: str) -> dict[str, str]:
-    return {"check_id": check_id, "outcome": outcome, "details": details}
+def _check(check_id: str, outcome: str, details: str) -> CheckResult:
+    return CheckResult(
+        check_id=check_id,
+        outcome=outcome,  # type: ignore[arg-type]
+        details={"message": details},
+    )
 
 
 def validate_measurement(
@@ -28,7 +32,7 @@ def validate_measurement(
     parse (it is an explicit "not determined", not a missing value).
     """
 
-    checks: list[dict[str, str]] = []
+    checks: list[CheckResult] = []
     reasons: list[str] = []
 
     if record.value.kind == "unparsed":
@@ -61,7 +65,7 @@ def validate_measurement(
     else:
         checks.append(_check(CHECK_EVIDENCE_KIND, "pass", f"evidence kind: {record.evidence_kind}"))
 
-    state = "conflict" if any(c["outcome"] == "fail" for c in checks) else "checks_passed"
+    state = "conflict" if any(c.outcome == "fail" for c in checks) else "checks_passed"
     return ValidationResult(checks=checks, validation_state=state, review_reasons=reasons)
 
 

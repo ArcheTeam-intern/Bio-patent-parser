@@ -30,36 +30,52 @@ def main() -> None:
         raises_on_error=False,
     )
 
+    # The upstream Docling document JSON is the *raw* artifact; it must not
+    # be presented to consumers as our normalised contract.
     raw_path = Path(request["raw_path"])
     raw_path.parent.mkdir(parents=True, exist_ok=True)
-    raw_path.write_text(
-        json.dumps(
-            {"status": str(getattr(result, "status", "unknown"))},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    normalised_path = Path(request["normalised_path"])
-    normalised_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        result.document.save_as_json(str(normalised_path))
+        raw_document = result.document.export_to_dict()
     except AttributeError:
-        # Older Docling APIs expose ``export_to_dict``.
-        raw = result.document.export_to_dict()
-        normalised_path.write_text(
-            json.dumps(raw, ensure_ascii=False, indent=2, sort_keys=True),
+        raw_document = None
+    if raw_document is not None:
+        raw_path.write_text(
+            json.dumps(raw_document, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    else:
+        raw_path.write_text(
+            json.dumps(
+                {"status": str(getattr(result, "status", "unknown")), "note": "no exportable document"},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
 
-    # Best-effort validation: load back the document and ensure pages exist.
+    normalised_path = Path(request["normalised_path"])
+    normalised_path.parent.mkdir(parents=True, exist_ok=True)
+    if raw_document is None:
+        # Older Docling APIs only expose ``export_to_dict`` (used above);
+        # this branch handles the even older save-as-json-only path.
+        legacy_path = raw_path.with_suffix(".docling.json")
+        result.document.save_as_json(str(legacy_path))
+        raw_document = json.loads(legacy_path.read_text(encoding="utf-8"))
+        raw_path.write_text(
+            json.dumps(raw_document, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
     document = normalize_docling_document(
-        json.loads(normalised_path.read_text(encoding="utf-8")),
+        raw_document,
         parser_run_id=f"{request['job_id']}:docling",
         document_id=request["document_id"],
     )
     if not document.pages:
         raise SystemExit("docling produced no pages")
+
+    # Write the strict contract object so disk consumers and the parent
+    # process read exactly what in-memory consumers see.
+    normalised_path.write_text(document.model_dump_json(), encoding="utf-8")
 
 
 if __name__ == "__main__":

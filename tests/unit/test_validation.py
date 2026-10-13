@@ -33,24 +33,24 @@ def _sequence(**overrides) -> SequenceRecord:
 def test_sequence_length_match_passes() -> None:
     result = validate_sequence(_sequence())
     assert result.validation_state == "checks_passed"
-    assert any(c["check_id"] == "SEQ_DECLARED_LENGTH_MATCH" and c["outcome"] == "pass" for c in result.checks)
+    assert any(c.check_id == "SEQ_DECLARED_LENGTH_MATCH" and c.outcome == "pass" for c in result.checks)
 
 
 def test_sequence_length_mismatch_fails() -> None:
     result = validate_sequence(_sequence(declared_length=10, observed_length=4))
     assert result.validation_state == "conflict"
-    assert any(c["check_id"] == "SEQ_DECLARED_LENGTH_MATCH" and c["outcome"] == "fail" for c in result.checks)
+    assert any(c.check_id == "SEQ_DECLARED_LENGTH_MATCH" and c.outcome == "fail" for c in result.checks)
 
 
 def test_sequence_disallowed_alphabet_fails() -> None:
     result = validate_sequence(_sequence(normalized_sequence="MKT1", raw_sequence="MKT1", observed_length=4))
     assert result.validation_state == "conflict"
-    assert any(c["check_id"] == "SEQ_ALLOWED_ALPHABET" and c["outcome"] == "fail" for c in result.checks)
+    assert any(c.check_id == "SEQ_ALLOWED_ALPHABET" and c.outcome == "fail" for c in result.checks)
 
 
 def test_sequence_incomplete_fails() -> None:
     result = validate_sequence(_sequence(is_complete=False))
-    assert any(c["check_id"] == "SEQ_COMPLETENESS" and c["outcome"] == "fail" for c in result.checks)
+    assert any(c.check_id == "SEQ_COMPLETENESS" and c.outcome == "fail" for c in result.checks)
 
 
 def _measurement(**overrides) -> Measurement:
@@ -78,7 +78,7 @@ def test_measurement_unparsed_value_fails() -> None:
     result = validate_measurement(
         _measurement(value=ActivityValue(kind="unparsed", raw="???"))
     )
-    assert any(c["check_id"] == "ACT_VALUE_PARSE" and c["outcome"] == "fail" for c in result.checks)
+    assert any(c.check_id == "ACT_VALUE_PARSE" and c.outcome == "fail" for c in result.checks)
 
 
 def test_measurement_categorical_nd_is_valid() -> None:
@@ -86,18 +86,18 @@ def test_measurement_categorical_nd_is_valid() -> None:
         _measurement(value=ActivityValue(kind="categorical", qualifier="ND", raw="ND"))
     )
     # ND is a valid parse (explicit "not determined"), not a missing value.
-    assert any(c["check_id"] == "ACT_VALUE_PARSE" and c["outcome"] == "pass" for c in result.checks)
+    assert any(c.check_id == "ACT_VALUE_PARSE" and c.outcome == "pass" for c in result.checks)
 
 
 def test_measurement_missing_unit_flagged() -> None:
     result = validate_measurement(_measurement(unit_raw=None))
-    assert any(c["check_id"] == "ACT_UNIT_PRESENT" and c["outcome"] == "unknown" for c in result.checks)
+    assert any(c.check_id == "ACT_UNIT_PRESENT" and c.outcome == "unknown" for c in result.checks)
 
 
 def test_evidence_missing_is_conflict() -> None:
     result = validate_evidence([], evidence_index={})
     assert result.validation_state == "conflict"
-    assert any(c["check_id"] == "EVIDENCE_EXISTS" and c["outcome"] == "fail" for c in result.checks)
+    assert any(c.check_id == "EVIDENCE_EXISTS" and c.outcome == "fail" for c in result.checks)
 
 
 def test_evidence_exists_with_geometry_passes() -> None:
@@ -106,7 +106,7 @@ def test_evidence_exists_with_geometry_passes() -> None:
         bbox = (0, 0, 10, 10)
 
     result = validate_evidence(["ev-1"], evidence_index={"ev-1": Span()})
-    assert any(c["check_id"] == "EVIDENCE_EXISTS" and c["outcome"] == "pass" for c in result.checks)
+    assert any(c.check_id == "EVIDENCE_EXISTS" and c.outcome == "pass" for c in result.checks)
 
 
 def test_evidence_missing_reference_is_conflict() -> None:

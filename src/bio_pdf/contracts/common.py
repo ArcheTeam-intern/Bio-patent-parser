@@ -46,18 +46,19 @@ NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 PageNumber = Annotated[int, Field(ge=1)]
 
 
-#: Coordinates are stored as ``(x0, y0, x1, y1)`` in PDF user space, where
-#: ``(0, 0)`` is the bottom-left corner of the page. The tuple shape lets us
-#: export stable JSON arrays and consume them from Go/TS without losing
-#: precision through Decimal.
+#: Coordinates are stored as ``(x0, y0, x1, y1)`` in PDF points relative to
+#: the *visible* page, origin at the TOP-LEFT corner (the convention every
+#: parser adapter normalises into — see :mod:`bio_pdf.pdf.geometry`).
+#: The tuple shape lets us export stable JSON arrays and consume them from
+#: Go/TS without losing precision through Decimal.
 BoundingBox = Annotated[
     tuple[float, float, float, float],
     Field(
         min_length=4,
         max_length=4,
         description=(
-            "Axis-aligned box in PDF user space (points). Origin is "
-            "bottom-left; x0 <= x1, y0 <= y1."
+            "Axis-aligned box in PDF points. Origin is the visible page's "
+            "top-left corner; x0 <= x1, y0 <= y1."
         ),
     ),
 ]

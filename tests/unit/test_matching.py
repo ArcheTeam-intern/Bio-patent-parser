@@ -67,7 +67,17 @@ def test_duplicate_candidates_do_not_double_count() -> None:
     candidates = [_seq_candidate("1", "MKTG"), _seq_candidate("1", "MKTG")]
     result = match_sequences(gold, candidates)
     assert result.exact_matches == 1  # gold counted once
-    assert result.false_positives == 0  # second candidate is the same key
+    # One-to-one: the second duplicate candidate has no gold left to match
+    # and is reported as a false positive, not silently absorbed.
+    assert result.false_positives == 1
+
+
+def test_duplicate_golds_cannot_reuse_one_candidate() -> None:
+    gold = [_seq_gold("1", "MKTG"), _seq_gold("2", "MKTG")]
+    candidates = [_seq_candidate("1", "MKTG")]
+    result = match_sequences(gold, candidates)
+    assert result.exact_matches == 1
+    assert result.missed == 1  # the second gold cannot reuse the candidate
 
 
 def test_draft_annotation_excluded_from_denominator() -> None:
@@ -131,3 +141,58 @@ def test_measurement_wrong_target_is_miss() -> None:
     result = match_measurements(gold, candidates)
     assert result.correct == 0
     assert result.missed == 1
+
+def test_wrong_value_with_matching_key_is_not_correct() -> None:
+    # Review report reproduction: gold MIC >128 ug/mL vs candidate 0.001 nM
+    # with the same key must NOT count as correct.
+    gold = [_meas_gold("P1", "E. coli")]
+    bad = _meas_candidate("P1", "E. coli")
+    bad.value = ActivityValue(kind="scalar", number="0.001", raw="0.001")
+    bad.unit_raw = "nM"
+    result = match_measurements(gold, [bad])
+    assert result.correct == 0
+    assert result.wrong_value == 1
+    assert result.missed == 0
+    assert result.false_positives == 0
+
+
+def test_range_gold_does_not_match_scalar_suffix_candidate() -> None:
+    gold = [_meas_gold("P1", "E. coli")]
+    gold[0].value_raw = "1-10"
+    gold[0].unit_raw = "nM"
+    truncated = _meas_candidate("P1", "E. coli")
+    truncated.value = ActivityValue(kind="scalar", number="10", raw="10")
+    truncated.unit_raw = "nM"
+    result = match_measurements(gold, [truncated])
+    assert result.correct == 0
+    assert result.wrong_value == 1
+
+
+def test_range_gold_matches_range_candidate() -> None:
+    gold = [_meas_gold("P1", "E. coli")]
+    gold[0].value_raw = "1-10"
+    gold[0].unit_raw = "nM"
+    good = _meas_candidate("P1", "E. coli")
+    good.value = ActivityValue(kind="range", lower="1", upper="10", raw="1-10")
+    good.unit_raw = "nM"
+    result = match_measurements(gold, [good])
+    assert result.correct == 1
+    assert result.wrong_value == 0
+
+
+def test_unit_mismatch_is_not_correct() -> None:
+    gold = [_meas_gold("P1", "E. coli")]  # >128 µg/mL
+    wrong_unit = _meas_candidate("P1", "E. coli")  # >128 — right shape, no unit
+    wrong_unit.unit_raw = None
+    result = match_measurements(gold, [wrong_unit])
+    assert result.correct == 0
+    assert result.wrong_value == 1
+
+
+def test_one_to_one_candidate_consumption() -> None:
+    # Two identical golds and one candidate: the candidate is consumed once.
+    gold = [_meas_gold("P1", "E. coli"), _meas_gold("P1", "E. coli")]
+    result = match_measurements(gold, [_meas_candidate("P1", "E. coli")])
+    assert result.correct == 1
+    assert result.missed == 1
+    assert result.false_positives == 0

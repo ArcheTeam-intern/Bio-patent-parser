@@ -149,6 +149,23 @@ class DoclingServeAdapter:
             parser_run_id=f"{request.job_id}:docling_serve",
             document_id=request.document_id,
         )
+
+        # docling-serve does not take a page-range parameter on this endpoint;
+        # filter locally so the output honours the requested source pages and
+        # keeps their original numbers.
+        requested = set(request.page_numbers)
+        produced = {p.page_number for p in document.pages}
+        if requested:
+            unexpected = sorted(produced - requested)
+            if unexpected:
+                document = document.model_copy(
+                    update={
+                        "pages": [p for p in document.pages if p.page_number in requested],
+                        "errors": list(document.errors)
+                        + [f"docling_serve returned pages outside the request: {unexpected}"],
+                    }
+                )
+
         normalized_path.write_text(document.model_dump_json(), encoding="utf-8")
 
         manifest = self._manifest(

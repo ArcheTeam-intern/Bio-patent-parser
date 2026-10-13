@@ -55,11 +55,13 @@ def _coerce_bbox(
     *,
     page_height_pt: float,
 ) -> BoundingBox | None:
-    """Convert a Docling bbox (top-left origin, points) to the contract format.
+    """Convert a Docling bbox to the contract format (top-left origin).
 
-    Docling emits top-left coordinates already, so this is essentially a shape
-    validation pass. We accept the bbox as either a 4-list/tuple or an object
-    with ``l``, ``t``, ``r``, ``b`` keys (the legacy format).
+    Docling bboxes may be dicts with ``l``/``t``/``r``/``b`` keys plus an
+    optional ``coord_origin`` (``TOPLEFT`` or ``BOTTOMLEFT``), or a plain
+    4-list ``(l, t, r, b)`` in top-left order. ``BOTTOMLEFT`` boxes are
+    flipped into the contract's top-left frame; the flip needs the page
+    height, which is why it happens here and not at the call sites.
     """
 
     if value is None:
@@ -67,16 +69,18 @@ def _coerce_bbox(
 
     if isinstance(value, dict):
         try:
-            return (
-                float(value["l"]),
-                float(value["t"]),
-                float(value["r"]),
-                float(value["b"]),
-            )
+            l = float(value["l"])
+            t = float(value["t"])
+            r = float(value["r"])
+            b = float(value["b"])
         except (KeyError, TypeError, ValueError) as exc:
             raise NormalizationLossError(
                 f"bbox dict missing required keys: {value!r}"
             ) from exc
+        origin = str(value.get("coord_origin", "TOPLEFT")).upper()
+        if origin == "BOTTOMLEFT":
+            t, b = page_height_pt - b, page_height_pt - t
+        return (l, min(t, b), r, max(t, b))
 
     if isinstance(value, (list, tuple)):
         if len(value) != 4:
@@ -89,9 +93,64 @@ def _coerce_bbox(
             raise NormalizationLossError(
                 f"bbox contains non-numeric values: {value!r}"
             ) from exc
-        return (x0, y0, x1, y1)
+        return (x0, min(y0, y1), x1, max(y0, y1))
 
     raise NormalizationLossError(f"unsupported bbox shape: {value!r}")
+
+
+def _bbox_from_prov(
+    item: dict[str, Any],
+    *,
+    page_height_pt: float,
+) -> tuple[BoundingBox | None, list[str]]:
+    """Read the bbox of every provenance span on an item.
+
+    Real Docling 2.x exports keep coordinates in ``prov[].bbox``, not on the
+    item itself. Returns ``(first_bbox, locators)``: the first resolvable
+    bbox anchors the block/cell, and every span — including pages beyond the
+    first — is encoded in ``locators`` as ``page=N;bbox=l,t,r,b`` so
+    multi-page/multi-box evidence survives normalisation.
+    """
+
+    locators: list[str] = []
+    first_bbox: BoundingBox | None = None
+
+    spans: list[dict[str, Any]] = []
+    direct = item.get("bbox")
+    if direct is not None:
+        # Legacy/flat payloads carry the box on the item itself.
+        try:
+            first_bbox = _coerce_bbox(direct, page_height_pt=page_height_pt)
+        except NormalizationLossError:
+            first_bbox = None
+
+    prov_raw = item.get("prov")
+    if isinstance(prov_raw, list):
+        spans = [p for p in prov_raw if isinstance(p, dict)]
+
+    for span in spans:
+        page_no = span.get("page_no")
+        try:
+            page_no_int = int(page_no) if page_no is not None else None
+        except (TypeError, ValueError):
+            page_no_int = None
+        bbox = None
+        if span.get("bbox") is not None:
+            try:
+                bbox = _coerce_bbox(span["bbox"], page_height_pt=page_height_pt)
+            except NormalizationLossError:
+                bbox = None
+        if first_bbox is None and bbox is not None:
+            first_bbox = bbox
+        if bbox is not None:
+            locators.append(
+                f"page={page_no_int if page_no_int is not None else '?'}"
+                f";bbox={bbox[0]:.2f},{bbox[1]:.2f},{bbox[2]:.2f},{bbox[3]:.2f}"
+            )
+        elif page_no_int is not None:
+            locators.append(f"page={page_no_int}")
+
+    return first_bbox, locators
 
 
 def _coerce_kind(value: Any) -> BlockKind:
@@ -159,16 +218,35 @@ def normalize_page(
         raw_text = item.get("text") or item.get("content") or ""
         if not raw_text:
             continue
+        # Coordinates: item-level bbox first, then every prov span.
         try:
             bbox = _coerce_bbox(item.get("bbox"), page_height_pt=height_pt)
         except NormalizationLossError:
             bbox = None
+        prov_bbox, locators = _bbox_from_prov(item, page_height_pt=height_pt)
+        if bbox is None:
+            bbox = prov_bbox
         blocks.append(
             TextBlock(
                 block_id=_safe_block_id(parser_run_id, item.get("self_ref") or item.get("id"), idx),
                 kind=_coerce_kind(item.get("label") or item.get("content_layer")),
                 bbox=bbox,
                 text_raw=str(raw_text),
+                provenance=[
+                    Provenance(
+                        source_type="docling",
+                        artifact_ref=f"runs/{parser_run_id}/docling.json",
+                        provider_locator=locator,
+                    )
+                    for locator in locators
+                ]
+                or [
+                    Provenance(
+                        source_type="docling",
+                        artifact_ref=f"runs/{parser_run_id}/docling.json",
+                        provider_locator=f"page={page_number}",
+                    )
+                ],
             )
         )
 
@@ -218,26 +296,38 @@ def _coerce_tables(
         cells_raw = table_dict.get("cells") or []
         if not isinstance(cells_raw, list):
             cells_raw = []
+        if not cells_raw:
+            # Docling 2.x keeps cells under data.table_cells with different
+            # row/col key names; accept that shape here too so a projected
+            # table never silently disappears.
+            data = table_dict.get("data")
+            if isinstance(data, dict) and isinstance(data.get("table_cells"), list):
+                cells_raw = data["table_cells"]
+            elif isinstance(data, list):
+                cells_raw = data
         cells: list[TableCell] = []
         for c_idx, cell_dict in enumerate(cells_raw):
             if not isinstance(cell_dict, dict):
                 continue
-            row_index = int(cell_dict.get("row_index", 0))
-            column_index = int(cell_dict.get("column_index", 0))
-            rowspan = int(cell_dict.get("rowspan", 1))
-            colspan = int(cell_dict.get("colspan", 1))
+            row_index = int(cell_dict.get("row_index", cell_dict.get("start_row_offset_idx", 0)) or 0)
+            column_index = int(cell_dict.get("column_index", cell_dict.get("start_col_offset_idx", 0)) or 0)
+            rowspan = max(int(cell_dict.get("rowspan", cell_dict.get("row_span", 1)) or 1), 1)
+            colspan = max(int(cell_dict.get("colspan", cell_dict.get("col_span", 1)) or 1), 1)
             text = str(cell_dict.get("text") or cell_dict.get("content") or "")
             try:
                 bbox = _coerce_bbox(cell_dict.get("bbox"), page_height_pt=height_pt)
             except NormalizationLossError:
                 bbox = None
+            if bbox is None:
+                prov_bbox, _locators = _bbox_from_prov(cell_dict, page_height_pt=height_pt)
+                bbox = prov_bbox
             cells.append(
                 TableCell(
                     cell_id=f"{page_number}:t{idx}:c{c_idx}",
                     row_index=row_index,
                     column_index=column_index,
-                    rowspan=max(rowspan, 1),
-                    colspan=max(colspan, 1),
+                    rowspan=rowspan,
+                    colspan=colspan,
                     text_raw=text,
                     bbox=bbox,
                 )
@@ -250,6 +340,9 @@ def _coerce_tables(
             table_bbox = _coerce_bbox(table_dict.get("bbox"), page_height_pt=height_pt)
         except NormalizationLossError:
             table_bbox = None
+        if table_bbox is None:
+            prov_bbox, _locators = _bbox_from_prov(table_dict, page_height_pt=height_pt)
+            table_bbox = prov_bbox
         headers = [
             cell.cell_id
             for cell in cells
@@ -303,11 +396,24 @@ def normalize_docling_document(
         )
 
     if isinstance(pages_raw, list):
-        normalised_pages = [
-            normalize_page(p, page_number=i + 1, parser_run_id=parser_run_id)
-            for i, p in enumerate(pages_raw)
-            if isinstance(p, dict)
-        ]
+        normalised_pages = []
+        for i, p in enumerate(pages_raw):
+            if not isinstance(p, dict):
+                continue
+            # Honour the payload's own page number when present; array order
+            # is only a fallback. Sparse page sets (e.g. [6]) must keep the
+            # original source page number.
+            page_number = i + 1
+            raw_page_no = p.get("page")
+            if raw_page_no is not None:
+                try:
+                    page_number = int(raw_page_no)
+                except (TypeError, ValueError):
+                    pass
+            normalised_pages.append(
+                normalize_page(p, page_number=page_number, parser_run_id=parser_run_id)
+            )
+        normalised_pages.sort(key=lambda page: page.page_number)
     elif isinstance(pages_raw, dict):
         # Docling 2.x: per-page size under pages[i].size, and top-level
         # ``texts`` / ``tables`` share a ``prov`` array with ``page_no``.
@@ -381,11 +487,6 @@ def _expand_top_level_pages(
 
     from bio_pdf.contracts import Provenance, TextBlock, Table  # local to avoid cycles
 
-    provenance = Provenance(
-        source_type="docling",
-        artifact_ref=f"runs/{parser_run_id}/docling.json",
-    )
-
     for text in payload.get("texts", []) or []:
         if not isinstance(text, dict):
             continue
@@ -393,17 +494,28 @@ def _expand_top_level_pages(
         target = pages_dict.get(str(page_no))
         if target is None:
             continue
-        try:
-            bbox = _coerce_bbox(text.get("bbox"), page_height_pt=target["height"])
-        except NormalizationLossError:
-            bbox = None
+        bbox, locators = _bbox_from_prov(text, page_height_pt=target["height"])
+        provenance = [
+            Provenance(
+                source_type="docling",
+                artifact_ref=f"runs/{parser_run_id}/docling.json",
+                provider_locator=locator,
+            )
+            for locator in locators
+        ] or [
+            Provenance(
+                source_type="docling",
+                artifact_ref=f"runs/{parser_run_id}/docling.json",
+                provider_locator=f"page={page_no}",
+            )
+        ]
         target["blocks"].append(
             TextBlock(
                 block_id=_safe_block_id(parser_run_id, text.get("self_ref") or text.get("id"), len(target["blocks"])),
                 kind=_coerce_kind(text.get("label") or text.get("content_layer")),
                 bbox=bbox,
                 text_raw=str(text.get("text") or ""),
-                provenance=[provenance],
+                provenance=provenance,
             )
         )
 
@@ -426,7 +538,7 @@ def _expand_top_level_pages(
         if not cells_raw and isinstance(table.get("data"), list):
             cells_raw = table["data"]
         cells: list[TableCell] = []
-        for c_idx, cell in enumerate(cells_raw or []):
+        for c_idx, cell in enumerate(cells_raw):
             if not isinstance(cell, dict):
                 continue
             row = int(cell.get("start_row_offset_idx", cell.get("row_index", 0)) or 0)
@@ -434,10 +546,8 @@ def _expand_top_level_pages(
             rowspan = max(int(cell.get("row_span", cell.get("rowspan", 1)) or 1), 1)
             colspan = max(int(cell.get("col_span", cell.get("colspan", 1)) or 1), 1)
             text = str(cell.get("text", "") or "")
-            try:
-                bbox = _coerce_bbox(cell.get("bbox"), page_height_pt=target["height"])
-            except NormalizationLossError:
-                bbox = None
+            # Cell coordinates live in the cell's own prov spans.
+            cell_bbox, _cell_locators = _bbox_from_prov(cell, page_height_pt=target["height"])
             cells.append(
                 TableCell(
                     cell_id=f"{prov_page}:t:{c_idx}",
@@ -446,15 +556,12 @@ def _expand_top_level_pages(
                     rowspan=rowspan,
                     colspan=colspan,
                     text_raw=text,
-                    bbox=bbox,
+                    bbox=cell_bbox,
                 )
             )
         if not cells:
             continue
-        try:
-            table_bbox = _coerce_bbox(table.get("bbox"), page_height_pt=target["height"])
-        except NormalizationLossError:
-            table_bbox = None
+        table_bbox, _table_locators = _bbox_from_prov(table, page_height_pt=target["height"])
         table_obj = Table(
             table_id=f"{prov_page}:t:{len(tables_out)}",
             page_number=prov_page,
@@ -468,7 +575,6 @@ def _expand_top_level_pages(
             bbox=table_bbox,
         )
         tables_out.append(table_obj)
-        target["blocks"]  # ensure key exists; tables attached after loop
 
     out: list[NormalizedPage] = []
     for key in sorted(pages_dict.keys(), key=lambda k: int(k)):

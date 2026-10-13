@@ -17,12 +17,17 @@ from bio_pdf.parsers.base import ParseRequest
 from bio_pdf.parsers.mineru_adapter import MinerUAdapter
 
 
-def _build_request(tmp_path: Path) -> ParseRequest:
+def _build_request(
+    tmp_path: Path,
+    *,
+    page_numbers: tuple[int, ...] = (1, 2, 3),
+    document_id: str = "sha256:doc",
+) -> ParseRequest:
     return ParseRequest(
         job_id="job-1",
-        document_id="sha256:doc",
+        document_id=document_id,
         source_path=tmp_path / "input.pdf",
-        page_numbers=(1, 2, 3),
+        page_numbers=page_numbers,
         profile="layout_native",
         options_ref="options.json",
         output_dir=tmp_path / "artifacts",
@@ -191,8 +196,9 @@ def test_result_fallback_to_markdown(tmp_path: Path) -> None:
     adapter = _adapter(_handler(result_payload={"markdown": "# heading\n\nbody"}))
     artifacts = adapter.parse(_build_request(tmp_path), source_url="https://example.com/x.pdf")
     normalized = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
+    assert normalized["schema_version"]
     assert len(normalized["pages"]) == 1
-    assert any("# heading" in b["text"] for b in normalized["pages"][0]["texts"])
+    assert any("# heading" in b["text_raw"] for b in normalized["pages"][0]["blocks"])
 
 
 def test_result_content_list_is_projected(tmp_path: Path) -> None:
@@ -215,5 +221,63 @@ def test_result_content_list_is_projected(tmp_path: Path) -> None:
     artifacts = adapter.parse(_build_request(tmp_path), source_url="https://example.com/x.pdf")
     normalized = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
     assert len(normalized["pages"]) == 2
-    assert any("MKTG" in b["text"] for b in normalized["pages"][0]["texts"])
-    assert any("AAAA" in b["text"] for b in normalized["pages"][1]["texts"])
+    assert any("MKTG" in b["text_raw"] for b in normalized["pages"][0]["blocks"])
+    assert any("AAAA" in b["text_raw"] for b in normalized["pages"][1]["blocks"])
+
+
+def test_result_table_body_html_is_projected(tmp_path: Path) -> None:
+    payload = {
+        "content_list": [
+            {
+                "page_idx": 0,
+                "type": "table",
+                "table_body": (
+                    "<table><tr><th>Peptide</th><th colspan=\"2\">MIC (ug/mL)</th></tr>"
+                    "<tr><th></th><th>E. coli</th><th>S. aureus</th></tr>"
+                    "<tr><td>A</td><td>8</td><td>16</td></tr></table>"
+                ),
+            },
+            {"page_idx": 0, "type": "text", "text": "Table 1 results."},
+        ]
+    }
+    adapter = _adapter(_handler(result_payload=payload))
+    artifacts = adapter.parse(_build_request(tmp_path), source_url="https://example.com/x.pdf")
+    normalized = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
+    page = normalized["pages"][0]
+    assert len(page["tables"]) == 1
+    table = page["tables"][0]
+    texts = [c["text_raw"] for c in table["cells"]]
+    assert "8" in texts and "16" in texts and "E. coli" in texts
+    # Merged-header spans survive projection.
+    mic_cell = next(c for c in table["cells"] if c["text_raw"] == "MIC (ug/mL)")
+    assert mic_cell["colspan"] == 2
+
+
+def test_result_page_filter_keeps_requested_pages(tmp_path: Path) -> None:
+    payload = {
+        "content_list": [
+            {"page_idx": 0, "type": "text", "text": "page one"},
+            {"page_idx": 1, "type": "text", "text": "page two"},
+            {"page_idx": 2, "type": "text", "text": "page three"},
+        ]
+    }
+    adapter = _adapter(_handler(result_payload=payload))
+    request = _build_request(tmp_path, page_numbers=(2,))
+    artifacts = adapter.parse(request, source_url="https://example.com/x.pdf")
+    normalized = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
+    assert [p["page_number"] for p in normalized["pages"]] == [2]
+    manifest = json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["page_coverage"]["produced"] == [2]
+
+
+def test_local_file_identity_mismatch_rejected(tmp_path: Path) -> None:
+    import hashlib
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake bytes for identity check")
+    other_sha = hashlib.sha256(b"a different document entirely").hexdigest()
+
+    adapter = _adapter(_handler(result_payload={"markdown": "x"}))
+    request = _build_request(tmp_path, document_id=f"sha256:{other_sha}")
+    with pytest.raises(EngineProtocolUnsupportedError):
+        adapter.parse(request, source_url="https://example.com/x.pdf", local_file=pdf)

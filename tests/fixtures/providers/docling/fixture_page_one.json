@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "version": "1.0.0",
+  "name": "fixture-page-1",
+  "pages": [
+    {
+      "page": 1,
+      "size": {"width": 612.0, "height": 792.0},
+      "width": 612.0,
+      "height": 792.0,
+      "texts": [
+        {
+          "self_ref": "p1/t1",
+          "label": "section_header",
+          "text": "SEQ ID listings",
+          "bbox": {"l": 50.0, "t": 50.0, "r": 200.0, "b": 80.0},
+          "content_layer": "body"
+        },
+        {
+          "self_ref": "p1/t2",
+          "label": "sequence_listing",
+          "text": "<210> 1\n<211> 5\n<212> PRT\n<400> 1\nMet Lys Thr Xaa Ala",
+          "bbox": {"l": 50.0, "t": 100.0, "r": 400.0, "b": 200.0},
+          "content_layer": "body"
+        }
+      ],
+      "tables": []
+    }
+  ]
+}

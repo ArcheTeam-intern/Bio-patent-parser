@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from bio_pdf.contracts import SequenceRecord, ValidationResult
+from bio_pdf.contracts import CheckResult, SequenceRecord, ValidationResult
 from bio_pdf.extract.sequences.amino_acids import ALLOWED_ALPHABETS
 
 CHECK_LENGTH = "SEQ_DECLARED_LENGTH_MATCH"
@@ -19,8 +19,12 @@ CHECK_COMPLETENESS = "SEQ_COMPLETENESS"
 CHECK_REFERENCE = "SEQ_REFERENCE_MATCH"
 
 
-def _check(check_id: str, outcome: str, details: str) -> dict[str, str]:
-    return {"check_id": check_id, "outcome": outcome, "details": details}
+def _check(check_id: str, outcome: str, details: str) -> CheckResult:
+    return CheckResult(
+        check_id=check_id,
+        outcome=outcome,  # type: ignore[arg-type]
+        details={"message": details},
+    )
 
 
 def _allowed_alphabet(molecule_type: str) -> frozenset[str] | None:
@@ -37,7 +41,7 @@ def validate_sequence(
     reports the structured ``validation_state`` and review reasons.
     """
 
-    checks: list[dict[str, str]] = []
+    checks: list[CheckResult] = []
     reasons: list[str] = []
 
     # Declared vs observed length.

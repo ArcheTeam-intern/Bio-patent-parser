@@ -43,6 +43,9 @@ def generate_report(
     lines.append("## Measurements\n")
     lines.append(f"- total gold: {measurement_metrics.get('total_gold', 0)}")
     lines.append(f"- tuple correct: {measurement_metrics.get('correct', 0)}")
+    lines.append(
+        f"- wrong value/unit (key matched): {measurement_metrics.get('wrong_value', 0)}"
+    )
     lines.append(f"- missed: {measurement_metrics.get('missed', 0)}")
     lines.append(f"- false positives: {measurement_metrics.get('false_positives', 0)}")
     lines.append(

@@ -45,11 +45,11 @@ models/
 *.bin
 *.safetensors
 
-# Upstream repository (separately managed)
-docling/
+# Upstream repository (separately managed, root only — never match src/**)
+/docling/
 
-# Original PDF corpus (do not commit)
-pdf/
+# Original PDF corpus (do not commit, root only — src/bio_pdf/pdf/ is source code)
+/pdf/
 
 # Secrets / environment
 .env

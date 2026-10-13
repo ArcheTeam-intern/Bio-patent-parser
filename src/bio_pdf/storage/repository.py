@@ -100,6 +100,11 @@ CREATE TABLE IF NOT EXISTS review_decisions (
     base_revision    INTEGER NOT NULL,
     created_at       TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS job_configs (
+    job_id        TEXT PRIMARY KEY REFERENCES jobs(job_id),
+    config_json   TEXT NOT NULL DEFAULT '{}'
+);
 """
 
 
@@ -403,6 +408,25 @@ class Repository:
             media_type=row["media_type"],
             producer_stage_run_id=row["producer_stage_run_id"] or "",
         )
+
+    # ---- job config ------------------------------------------------------
+
+    def set_job_config(self, job_id: str, config: dict[str, Any]) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO job_configs (job_id, config_json) VALUES (?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET config_json = excluded.config_json
+            """,
+            (job_id, _json_dumps(config)),
+        )
+
+    def get_job_config(self, job_id: str) -> dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT config_json FROM job_configs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return {}
+        return _json_loads(row["config_json"], default={})
 
     # ---- review --------------------------------------------------------
 

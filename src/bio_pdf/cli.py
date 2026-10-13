@@ -180,5 +180,65 @@ def parse_pdf(
     )
 
 
+@app.command("run")
+def run_job(
+    input: Path = typer.Option(..., "--input", help="Path to a single PDF file."),
+    engine: str = typer.Option("native", "--engine", help="Layout engine (native or docling)."),
+    pages: str = typer.Option("all", "--pages", help="Page selection, e.g. '1-3,7'."),
+    data_dir: Path = typer.Option(
+        Path("data/demo"), "--data-dir", help="Application data directory (SQLite + artifacts)."
+    ),
+    resume: bool = typer.Option(False, "--resume", help="Resume an existing job with cache verification."),
+) -> None:
+    """Run the complete domain workflow: inspect → parse → extract → validate → export.
+
+    This is the production entry point (design D0): it produces sequence and
+    activity records, a review queue and the export artifacts — not just a
+    parse dump.
+    """
+
+    from bio_pdf.application.job_service import JobPaths, JobService
+    from bio_pdf.errors import WorkflowError
+    from bio_pdf.ingest.inspector import parse_page_selection
+
+    if not input.is_file():
+        typer.echo(json.dumps({"error": "INPUT_NOT_PDF", "message": f"not a file: {input}"}, ensure_ascii=False))
+        raise typer.Exit(code=2)
+
+    service = JobService(JobPaths.under(data_dir))
+    try:
+        try:
+            from bio_pdf.ingest.inspector import inspect_pdf as _inspect
+
+            page_count = _inspect(input).page_count
+            page_numbers = parse_page_selection(pages, page_count=page_count)
+        except WorkflowError as exc:
+            typer.echo(json.dumps({"error": exc.code, "message": exc.message}, ensure_ascii=False))
+            raise typer.Exit(code=2) from exc
+
+        job, _page_count = service.create_job(
+            input,
+            engine=engine,
+            page_numbers=page_numbers,
+        )
+        typer.echo(json.dumps({"job_id": job.job_id, "status": job.status, "pages": list(page_numbers)}, ensure_ascii=False))
+
+        result = service.run_job(job.job_id, resume=resume)
+        payload = {
+            "job_id": result.job_id,
+            "status": result.status,
+            "stages_run": result.stages_run,
+            "stages_skipped": result.stages_skipped,
+            "review_count": result.review_count,
+            "failed_stage": result.failed_stage,
+            "export": str((service.paths.artifact_root / "jobs" / job.job_id / "export" / "result.json")),
+        }
+        typer.echo(json.dumps(payload, ensure_ascii=False))
+        if result.status == "failed":
+            raise typer.Exit(code=3)
+    finally:
+        service.close()
+
+
 if __name__ == "__main__":
     app()
