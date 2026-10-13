@@ -1,0 +1,66 @@
+{
+  "audited_at": "2026-10-13",
+  "scope": "signature_and_hash_only",
+  "entries": [
+    {
+      "path": "pdf/paper_TAT-RasGAP_broad_antimicrobial_2017.pdf",
+      "bytes": 2894915,
+      "sha256": "d927d1c3d8f80fe396d1090190bac25e944ade61b74683fffcab382cc596da35",
+      "has_pdf_signature": true
+    },
+    {
+      "path": "pdf/patent_CN114144196B_engineered_vaccinia_zh.pdf",
+      "bytes": 2692869,
+      "sha256": "a118d9f1cedbfae08535690608ca3be1b073dcab25581fd391f5518d10e32a27",
+      "has_pdf_signature": true
+    },
+    {
+      "path": "pdf/patent_EP3027649A1_TNFa_IL17_bispecific_antibodies.pdf",
+      "bytes": 323495,
+      "sha256": "c428aa2fd3cb83c7eeebe16c23b061f0d8d0c0254328a80877bb2071ced1a40a",
+      "has_pdf_signature": false
+    },
+    {
+      "path": "pdf/patent_EP3423477A1_antimicrobial_peptides.pdf",
+      "bytes": 220498,
+      "sha256": "e601a5b5be276f4e18995913b3c867ec5587d107367bacce831df76b2bd23690",
+      "has_pdf_signature": false
+    },
+    {
+      "path": "pdf/patent_US20240026005A1_anti_PD-L2_antibodies.pdf",
+      "bytes": 12533901,
+      "sha256": "f95e721e20dd09af9bf86e8d2976c99b52d0e54d630716ce8b66d9982b901c56",
+      "has_pdf_signature": true
+    },
+    {
+      "path": "pdf/patent_US5459060A_HIV_gp41_antibodies.pdf",
+      "bytes": 3236198,
+      "sha256": "5a9ae1b2130588117337b6b941e60b3c5b9627a00debb87afdc3797f541a52d4",
+      "has_pdf_signature": true
+    },
+    {
+      "path": "pdf/patent_WO2017060493A1_polypeptides.pdf",
+      "bytes": 9430063,
+      "sha256": "ecfa25ab4aa186b71b97c38559f91437797791b75a0d4f0c1e6249e0a32283f0",
+      "has_pdf_signature": true
+    },
+    {
+      "path": "pdf/patent_WO2020156367A1_rice_RAY1_zh.pdf",
+      "bytes": 1613678,
+      "sha256": "e25a58817192b93301cd91a8ad1ebf2162fe147b6cc1f2e0a699e00363f9b3e0",
+      "has_pdf_signature": true
+    },
+    {
+      "path": "pdf/patent_WO2021207200A2_engineered_transaminase.pdf",
+      "bytes": 6186285,
+      "sha256": "bc24de2be8df819689b06d67e89757206b33e537f9264c2f37abd7da0fad907b",
+      "has_pdf_signature": true
+    },
+    {
+      "path": "pdf/probe.pdf",
+      "bytes": 758771,
+      "sha256": "d1c942894c493b6cc09cbf763fa15445086779194f0bd3e62af7d3678856e056",
+      "has_pdf_signature": false
+    }
+  ]
+}
