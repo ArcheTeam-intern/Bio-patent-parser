@@ -125,7 +125,26 @@
 #### 当前限制与下一阶段
 
 - Live Docling 解析仍待用户部署 docling-serve 或安装 SDK 后跑真实样本。
-- M1C（Task 11：人工标注 + 评测脚本 + baseline）是下一阶段，需要约 30 页人工确认样本。
+
+### Biological PDF parser implementation (M1C) ✅
+
+#### Task 11: 人工标注、评测脚本、第一期交付 ✅
+
+- `evaluation/annotation.py`：Annotation 模型（sequence/measurement/unreadable 三类，human_verified + status 分离，draft 排除正式准确率）。
+- `evaluation/metrics.py`：safe_ratio（0/0 → None 不是 100%）、字符错误率（Levenshtein）。
+- `evaluation/matching.py`：序列按 (document_id, seq_id_no) 匹配（一个 gold 不被重复计 TP，SEQ ID 相同内容不符不算 exact）；测量按 (entity,target,metric) tuple 匹配（数字正确但实体串行 → miss）。
+- `evaluation/report.py`：Markdown 报告（分母、覆盖、待审核率，不声称统计证明）。
+- `annotations/v1/manifest.json` + `annotation_guidelines.md`：dev/holdout 划分（≥1/3 留出），标注规则与诚实原则。
+- 20 个测试通过（metrics 黄金回归、annotation schema、matching 反例）。
+
+#### M1C 交付状态
+
+- 评测**框架**已完成并可离线运行；**实际基准分数**需要人工标注 gold（manifest 当前 `annotations: []`，`status: pending_human_annotation`）。
+- 第一期报告中的真实解析命令/制品/人工确认标记：受限于 Docling 环境未就绪 + 无人工标注，尚未产出真实 baseline。已诚实记录 coverage gap（无真实扫描页已验证，不能把渲染文字 PDF 当扫描）。
+
+#### 全量测试汇总（M1A + M1B + M1C）
+
+- **250 passed, 3 skipped**（3 个为需要 BIO_PDF_LIVE_TESTS=1 的 Docling live 测试）。
 
 ### 调研与设计阶段（昨日）
 

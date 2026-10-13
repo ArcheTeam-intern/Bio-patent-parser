@@ -1,0 +1,48 @@
+{
+  "schema_version": "v1",
+  "created_at": "2026-10-13",
+  "status": "pending_human_annotation",
+  "scope": "first_pass_baseline",
+  "documents": [
+    {
+      "path": "pdf/paper_TAT-RasGAP_broad_antimicrobial_2017.pdf",
+      "sha256": "d927d1c3d8f80fe396d1090190bac25e944ade61b74683fffcab382cc596da35",
+      "page_count": 12,
+      "candidate_pages": [1, 2, 3],
+      "split": "dev"
+    },
+    {
+      "path": "pdf/patent_US20240026005A1_anti_PD-L2_antibodies.pdf",
+      "sha256": "f95e721e20dd09af9bf86e8d2976c99b52d0e54d630716ce8b66d9982b901c56",
+      "page_count": 142,
+      "candidate_pages": [1, 2, 3],
+      "split": "holdout"
+    },
+    {
+      "path": "pdf/patent_WO2021207200A2_engineered_transaminase.pdf",
+      "sha256": "bc24de2be8df819689b06d67e89757206b33e537f9264c2f37abd7da0fad907b",
+      "page_count": 99,
+      "candidate_pages": [1, 2, 3],
+      "split": "dev"
+    },
+    {
+      "path": "pdf/patent_CN114144196B_engineered_vaccinia_zh.pdf",
+      "sha256": "a118d9f1cedbfae08535690608ca3be1b073dcab25581fd391f5518d10e32a27",
+      "page_count": 57,
+      "candidate_pages": [1, 2, 3],
+      "split": "holdout"
+    }
+  ],
+  "split": {
+    "dev": [
+      "pdf/paper_TAT-RasGAP_broad_antimicrobial_2017.pdf",
+      "pdf/patent_WO2021207200A2_engineered_transaminase.pdf"
+    ],
+    "holdout": [
+      "pdf/patent_US20240026005A1_anti_PD-L2_antibodies.pdf",
+      "pdf/patent_CN114144196B_engineered_vaccinia_zh.pdf"
+    ]
+  },
+  "annotations": [],
+  "notes": "annotations must be filled by a human reviewer; drafts are excluded from the official metrics denominator. coverage_gap: no true scanned/mixed pages have been verified yet — do not treat rendered-text pages as real scans."
+}
