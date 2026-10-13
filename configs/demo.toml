@@ -1,0 +1,31 @@
+# Demo configuration profile. The actual values are placeholders until
+# later milestones wire ingestion, parsing and domain rules into the
+# workflow runner.
+
+[project]
+name = "bio-pdf-demo"
+schema_version = "v1"
+
+[parser]
+# Default engine used by the workflow runner. The native adapter is always
+# available; downstream engines require their own extras to be installed.
+default_engine = "native"
+
+[native]
+# Pages rendered as evidence crops. 200 is a conservative default for
+# browser-friendly inspection.
+render_dpi = 200
+
+[quality]
+# Quality classifier thresholds are tuned for the bio PDF corpus. They are
+# documented in the implementation plan (Task 4) and revisited once we have
+# real benchmarks.
+text_suspect_garbled_ratio = 0.4
+scan_suspect_image_coverage = 0.9
+blank_max_chars = 5
+blank_min_image_coverage = 0.0
+
+[storage]
+# SQLite database lives under data/ by default; override here for tests.
+database_path = "data/bio_pdf.sqlite"
+artifacts_dir = "data/artifacts"

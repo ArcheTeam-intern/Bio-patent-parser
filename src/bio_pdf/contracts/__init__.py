@@ -1,0 +1,105 @@
+"""Contract (Pydantic) models and JSON Schema export.
+
+The contracts package is the language-neutral surface for the workflow. Every
+downstream module — adapters, domain rules, exporters, the API — operates on
+these models. The JSON Schema export is the stable handoff for Go/TS
+implementations (Task 17).
+"""
+
+from __future__ import annotations
+
+from bio_pdf.contracts.common import (
+    BoundingBox,
+    EvidenceSpan,
+    PageNumber,
+    SCHEMA_VERSION,
+    validate_bbox,
+)
+from bio_pdf.contracts.document import (
+    BlockKind,
+    DocumentInspection,
+    EvidenceImage,
+    NormalizedDocument,
+    NormalizedPage,
+    PageGeometry,
+    PageQuality,
+    Provenance,
+    QualityConfig,
+    RouteDecision,
+    Table,
+    TableCell,
+    TextBlock,
+)
+from bio_pdf.contracts.records import (
+    AcceptanceState,
+    ActivityValue,
+    CheckResult,
+    EvidenceRef,
+    Measurement,
+    SequenceRecord,
+    SequenceReference,
+    SequenceRelation,
+    ValidationState,
+)
+from bio_pdf.contracts.job import (
+    AcceptanceDecision,
+    ArtifactRef,
+    AttemptStatus,
+    Job,
+    JobStatus,
+    ReviewDecision,
+    ReviewItem,
+    Stage,
+    StageOutcome,
+    StageStatus,
+    ValidationResult,
+)
+from bio_pdf.contracts.export_schema import (
+    export_models,
+    write_bundle,
+    write_schemas,
+)
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "PageNumber",
+    "BoundingBox",
+    "EvidenceSpan",
+    "validate_bbox",
+    "DocumentInspection",
+    "NormalizedDocument",
+    "NormalizedPage",
+    "PageGeometry",
+    "PageQuality",
+    "QualityConfig",
+    "RouteDecision",
+    "TextBlock",
+    "BlockKind",
+    "Table",
+    "TableCell",
+    "Provenance",
+    "EvidenceImage",
+    "SequenceRecord",
+    "Measurement",
+    "ActivityValue",
+    "SequenceReference",
+    "SequenceRelation",
+    "EvidenceRef",
+    "ValidationState",
+    "AcceptanceState",
+    "CheckResult",
+    "Job",
+    "Stage",
+    "JobStatus",
+    "StageStatus",
+    "AttemptStatus",
+    "AcceptanceDecision",
+    "ReviewDecision",
+    "ArtifactRef",
+    "StageOutcome",
+    "ValidationResult",
+    "ReviewItem",
+    "export_models",
+    "write_bundle",
+    "write_schemas",
+]

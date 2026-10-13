@@ -1,0 +1,73 @@
+{
+  "schema_version": "v1",
+  "samples": {
+    "sequence_with_unknown": {
+      "sequence_id": "seq-7",
+      "document_id": "sha256:fixture",
+      "seq_id_no": "7",
+      "molecule_type": "protein",
+      "representation": "one_letter",
+      "declared_length": 5,
+      "observed_length": 5,
+      "raw_sequence": "Met Lys Thr Xaa Gly",
+      "normalized_sequence": "MKTXG",
+      "is_complete": true,
+      "evidence_ids": ["ev-1"],
+      "checks": [
+        {
+          "check_id": "SEQ_DECLARED_LENGTH_MATCH",
+          "outcome": "pass",
+          "evidence_ids": ["ev-1"]
+        }
+      ]
+    },
+    "activity_plus_minus_range": {
+      "measurement_id": "meas-1",
+      "document_id": "sha256:fixture",
+      "metric": "IC50",
+      "value": {
+        "kind": "plus_minus",
+        "number": "1.2",
+        "uncertainty": "0.1",
+        "raw": "1.2 ± 0.1"
+      },
+      "unit_raw": "nM",
+      "unit_normalized": "nM",
+      "evidence_ids": ["ev-2"]
+    },
+    "activity_comparator": {
+      "measurement_id": "meas-2",
+      "document_id": "sha256:fixture",
+      "metric": "MIC",
+      "value": {
+        "kind": "scalar",
+        "operator": ">",
+        "number": "128",
+        "raw": ">128"
+      },
+      "unit_raw": "ug/mL",
+      "unit_normalized": "ug/mL",
+      "evidence_ids": ["ev-3"]
+    },
+    "activity_categorical_unknown": {
+      "measurement_id": "meas-3",
+      "document_id": "sha256:fixture",
+      "metric": "MIC",
+      "value": {
+        "kind": "categorical",
+        "qualifier": "ND",
+        "raw": "ND"
+      },
+      "evidence_ids": ["ev-4"]
+    },
+    "span_without_page": {
+      "evidence_id": "ev-txt",
+      "document_id": "sha256:fixture"
+    },
+    "span_without_bbox": {
+      "evidence_id": "ev-page",
+      "document_id": "sha256:fixture",
+      "page_number": 3
+    }
+  }
+}
