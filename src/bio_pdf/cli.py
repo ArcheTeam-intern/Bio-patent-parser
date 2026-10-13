@@ -104,5 +104,81 @@ def inventory(
         typer.echo(payload)
 
 
+@app.command("parse")
+def parse_pdf(
+    input: Path = typer.Option(..., "--input", help="Path to a single PDF file."),
+    pages: str = typer.Option("all", "--pages", help="Page selection, e.g. '1-3,7'."),
+    engine: str = typer.Option("native", "--engine", help="Parser engine (native or docling)."),
+    output_dir: Optional[Path] = typer.Option(
+        None, "--out", help="Directory for normalized/raw/manifest artifacts."
+    ),
+) -> None:
+    """Parse a single PDF with the given engine and write normalized artifacts."""
+
+    from bio_pdf.errors import EngineUnavailableError, WorkflowError
+    from bio_pdf.ingest.inspector import inspect_pdf, parse_page_selection
+    from bio_pdf.parsers.base import ParseRequest
+    from bio_pdf.parsers.native_adapter import NativeAdapter
+
+    try:
+        inspection = inspect_pdf(input)
+    except WorkflowError as exc:
+        typer.echo(json.dumps({"error": exc.code, "message": exc.message}, ensure_ascii=False))
+        raise typer.Exit(code=2) from exc
+
+    try:
+        page_numbers = parse_page_selection(pages, page_count=inspection.page_count)
+    except WorkflowError as exc:
+        typer.echo(json.dumps({"error": exc.code, "message": exc.message}, ensure_ascii=False))
+        raise typer.Exit(code=2) from exc
+
+    out = output_dir or (input.parent / "out")
+    out.mkdir(parents=True, exist_ok=True)
+
+    if engine == "native":
+        adapter = NativeAdapter()
+    elif engine == "docling":
+        from bio_pdf.parsers.docling_adapter import DoclingAdapter
+
+        adapter = DoclingAdapter()
+    elif engine == "docling_serve":
+        from bio_pdf.parsers.docling_serve_adapter import DoclingServeAdapter
+
+        adapter = DoclingServeAdapter()
+    else:
+        typer.echo(json.dumps({"error": "ENGINE_UNAVAILABLE", "engine": engine}, ensure_ascii=False))
+        raise typer.Exit(code=2)
+
+    request = ParseRequest(
+        job_id=f"cli-{inspection.sha256[:12]}",
+        document_id=inspection.document_id,
+        source_path=input,
+        page_numbers=page_numbers,
+        profile="native" if engine == "native" else "layout_native",
+        options_ref="configs/demo.toml",
+        output_dir=out,
+    )
+
+    try:
+        artifacts = adapter.parse(request)
+    except WorkflowError as exc:
+        typer.echo(json.dumps({"error": exc.code, "message": exc.message}, ensure_ascii=False))
+        raise typer.Exit(code=3) from exc
+
+    typer.echo(
+        json.dumps(
+            {
+                "document_id": inspection.document_id,
+                "engine": engine,
+                "pages": list(page_numbers),
+                "normalized": str(artifacts.normalized_path),
+                "manifest": str(artifacts.manifest_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 if __name__ == "__main__":
     app()

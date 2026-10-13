@@ -66,6 +66,19 @@ RelationPredicate = Literal[
 
 CheckOutcome = Literal["pass", "fail", "not_applicable", "unknown"]
 
+EntityKind = Literal[
+    "peptide",
+    "protein",
+    "antibody",
+    "antibody_chain",
+    "variant",
+    "compound",
+    "control",
+    "unknown",
+]
+
+ChainName = Literal["VH", "VL", "heavy", "light", "CDR1", "CDR2", "CDR3", "other"]
+
 
 # ---------------------------------------------------------------------------
 # Check + Reference helpers
@@ -165,6 +178,37 @@ class SequenceRelation(_StrictModel):
     object_id: NonEmptyStr
     evidence_ids: list[NonEmptyStr] = Field(min_length=1)
     validation_state: ValidationState = "unchecked"
+
+
+class Entity(_StrictModel):
+    """A named entity (peptide, antibody, compound, …) in a document.
+
+    ``chain_map`` carries explicit chain → seq_id_no assignments for
+    antibody entities (e.g. ``{"VH": "1", "VL": "2"}``). This is the only
+    signal :func:`link_explicit_relations` uses to pair chains — it never
+    infers a pairing from name similarity.
+    """
+
+    entity_id: NonEmptyStr
+    document_id: NonEmptyStr
+    name_raw: NonEmptyStr
+    kind: EntityKind = "unknown"
+    aliases: list[NonEmptyStr] = Field(default_factory=list)
+    chain_map: dict[str, str] = Field(default_factory=dict)
+    evidence_ids: list[NonEmptyStr] = Field(default_factory=list)
+
+
+class RelationResult(_StrictModel):
+    """The result of relation linking.
+
+    ``relations`` holds confirmed candidates; ``unresolved_references``
+    keeps the references whose target sequence was not found (never
+    fabricated); ``review_reasons`` explains what needs human attention.
+    """
+
+    relations: list[SequenceRelation] = Field(default_factory=list)
+    unresolved_references: list[SequenceReference] = Field(default_factory=list)
+    review_reasons: list[NonEmptyStr] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

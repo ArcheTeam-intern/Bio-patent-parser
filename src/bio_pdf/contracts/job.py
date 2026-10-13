@@ -108,7 +108,7 @@ class ValidationResult(_StrictModel):
     review UI can present actionable guidance.
     """
 
-    checks: list[dict[str, str]] = Field(default_factory=dict)
+    checks: list[dict[str, str]] = Field(default_factory=list)
     validation_state: Literal[
         "unchecked",
         "checks_passed",

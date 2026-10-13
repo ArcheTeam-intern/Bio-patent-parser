@@ -1,0 +1,24 @@
+{
+  "entities": [
+    {
+      "entity_id": "ab-A",
+      "document_id": "sha256:fixture",
+      "name_raw": "Antibody A",
+      "kind": "antibody",
+      "chain_map": {"VH": "1", "VL": "2"}
+    },
+    {
+      "entity_id": "ab-B",
+      "document_id": "sha256:fixture",
+      "name_raw": "Antibody B",
+      "kind": "antibody",
+      "chain_map": {"VH": "3", "VL": "4"}
+    }
+  ],
+  "sequences": [
+    {"sequence_id": "sha256:fixture:seq:1", "seq_id_no": "1", "molecule_type": "protein", "normalized_sequence": "QVQLVES", "raw_sequence": "QVQLVES"},
+    {"sequence_id": "sha256:fixture:seq:2", "seq_id_no": "2", "molecule_type": "protein", "normalized_sequence": "DIQMTQSP", "raw_sequence": "DIQMTQSP"},
+    {"sequence_id": "sha256:fixture:seq:3", "seq_id_no": "3", "molecule_type": "protein", "normalized_sequence": "EVQLVES", "raw_sequence": "EVQLVES"},
+    {"sequence_id": "sha256:fixture:seq:4", "seq_id_no": "4", "molecule_type": "protein", "normalized_sequence": "DIVMTQSP", "raw_sequence": "DIVMTQSP"}
+  ]
+}

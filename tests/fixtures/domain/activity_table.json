@@ -1,0 +1,29 @@
+{
+  "schema_version": "v1",
+  "table_id": "activity-table-1",
+  "page_number": 1,
+  "row_count": 3,
+  "column_count": 3,
+  "header_cell_ids": ["h0", "h1", "h2"],
+  "cells": [
+    {"cell_id": "h0", "row_index": 0, "column_index": 0, "text_raw": "Peptide"},
+    {"cell_id": "h1", "row_index": 0, "column_index": 1, "text_raw": "MIC (µg/mL), E. coli"},
+    {"cell_id": "h2", "row_index": 0, "column_index": 2, "text_raw": "MIC (µg/mL), S. aureus"},
+    {"cell_id": "a0", "row_index": 1, "column_index": 0, "text_raw": "A"},
+    {"cell_id": "a1", "row_index": 1, "column_index": 1, "text_raw": ">128"},
+    {"cell_id": "a2", "row_index": 1, "column_index": 2, "text_raw": "2"},
+    {"cell_id": "b0", "row_index": 2, "column_index": 0, "text_raw": "B"},
+    {"cell_id": "b1", "row_index": 2, "column_index": 1, "text_raw": "4"},
+    {"cell_id": "b2", "row_index": 2, "column_index": 2, "text_raw": "ND"}
+  ],
+  "evidences": {
+    "a1": "ev-a1",
+    "a2": "ev-a2",
+    "b1": "ev-b1",
+    "b2": "ev-b2",
+    "a0": "ev-a0",
+    "b0": "ev-b0",
+    "h1": "ev-h1",
+    "h2": "ev-h2"
+  }
+}
