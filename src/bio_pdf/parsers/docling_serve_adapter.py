@@ -290,17 +290,44 @@ class DoclingServeAdapter:
     def _extract_document_payload(
         self, payload: Any, task_id: str
     ) -> dict[str, Any]:
-        """Extract the document dict from the result envelope.
+        """Unwrap the docling-serve result envelope to the Docling document.
 
-        Accepts both a bare Docling document (has ``pages``) and a
-        ``{"document": {...}}`` wrapper. Anything else is a protocol error.
+        The result endpoint can nest several layers:
+
+        - ``{"document": {...}, "status": ..., ...}`` (sync response);
+        - ``ConvertDocumentResponse`` with the Docling JSON under
+          ``json_content`` (dict or a JSON string);
+        - a bare Docling document (has ``pages``).
+
+        We unwrap repeatedly until we reach a dict with ``pages``, or give up
+        with :class:`EngineProtocolUnsupportedError`.
         """
 
-        if isinstance(payload, dict):
+        for _ in range(6):
+            if not isinstance(payload, dict):
+                break
             if "pages" in payload:
                 return payload
+            if "json_content" in payload:
+                jc = payload["json_content"]
+                if isinstance(jc, str):
+                    import json as _json
+
+                    try:
+                        payload = _json.loads(jc)
+                    except _json.JSONDecodeError as exc:
+                        raise EngineProtocolUnsupportedError(
+                            "docling-serve json_content was not valid JSON",
+                            details={"task_id": task_id},
+                        ) from exc
+                else:
+                    payload = jc
+                continue
             if isinstance(payload.get("document"), dict):
-                return payload["document"]
+                payload = payload["document"]
+                continue
+            break
+
         raise EngineProtocolUnsupportedError(
             "docling-serve result has an unrecognised shape",
             details={"task_id": task_id, "keys": list(payload) if isinstance(payload, dict) else type(payload).__name__},
