@@ -8,6 +8,7 @@ only matches non-API page paths — an unknown ``/api`` route stays a JSON
 
 from __future__ import annotations
 
+import mimetypes
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +23,11 @@ from bio_pdf.api.routes import documents, jobs, results, reviews
 from bio_pdf.api.settings import ApiSettings
 from bio_pdf.application.job_service import JobPaths, JobService
 from bio_pdf.errors import WorkflowError
+
+# Windows registry mimetypes often serve .mjs as octet-stream, which makes
+# the browser reject PDF.js's module worker. Register it explicitly.
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("text/javascript", ".js")
 
 
 @asynccontextmanager

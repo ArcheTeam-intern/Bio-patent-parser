@@ -45,6 +45,27 @@ _MOLECULE_TYPE: dict[str, MoleculeType] = {
 
 _POSITION_NUMBER_RE = re.compile(r"^\d+\s*$")
 
+#: Lines that cannot be residue lines: prose sentences carry sentence
+#: punctuation. A ST.25 residue line only ever contains residue tokens and
+#: bare position numbers, so any other symbol ends the current residue block.
+_NON_RESIDUE_RE = re.compile(r"[.,:;()\[\]<>\"'±%–—\-/\\|=+*?!&#$@^~`{}]")
+
+
+def _looks_like_residue_line(line: str) -> bool:
+    """Heuristic: prose lines terminate the residue block.
+
+    A residue line may contain residue tokens and position numbers only.
+    Any sentence punctuation (``.``, ``:``, ``-`` …) or a word longer than
+    eight letters marks prose (ST.25 residue tokens are ≤3 letters, DNA
+    runs are chunked ≤60 chars).
+    """
+
+    if _NON_RESIDUE_RE.search(line):
+        return False
+    if any(len(t) > 8 for t in line.split()):
+        return False
+    return True
+
 
 @dataclass
 class _SequenceBuilder:
@@ -79,7 +100,13 @@ class _St25StateMachine:
         if not match:
             # Non-tag line: could be a continuation of the residue block.
             if self.current is not None and self.current.in_residues:
-                self.current.residue_lines.append(line)
+                if not line.strip() or _looks_like_residue_line(line):
+                    self.current.residue_lines.append(line)
+                else:
+                    # Prose after the listing ends the residue block; the
+                    # state machine stays open until the next <210> but no
+                    # longer swallows body text as residues.
+                    self.current.in_residues = False
             return
 
         tag, rest = match.group(1), match.group(2).strip()
