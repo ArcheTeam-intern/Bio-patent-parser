@@ -105,6 +105,14 @@ CREATE TABLE IF NOT EXISTS job_configs (
     job_id        TEXT PRIMARY KEY REFERENCES jobs(job_id),
     config_json   TEXT NOT NULL DEFAULT '{}'
 );
+
+CREATE TABLE IF NOT EXISTS worker_leases (
+    job_id        TEXT PRIMARY KEY REFERENCES jobs(job_id),
+    worker_id     TEXT NOT NULL,
+    lease_until   TEXT NOT NULL,
+    heartbeat_at  TEXT,
+    generation    INTEGER NOT NULL DEFAULT 1
+);
 """
 
 
@@ -117,9 +125,11 @@ def _connect(database: Path | str) -> sqlite3.Connection:
 
     Foreign keys are enabled per-connection. ``busy_timeout`` makes us wait
     instead of raising immediately when another writer holds the lock.
+    ``check_same_thread=False`` lets the API's threadpool share the one
+    process-local connection; WAL + busy_timeout serialise the writers.
     """
 
-    conn = sqlite3.connect(database, isolation_level=None, timeout=30.0)
+    conn = sqlite3.connect(database, isolation_level=None, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
@@ -407,6 +417,97 @@ class Repository:
             relative_path=row["relative_path"],
             media_type=row["media_type"],
             producer_stage_run_id=row["producer_stage_run_id"] or "",
+        )
+
+    # ---- worker leases ----------------------------------------------------
+
+    def claim_next_queued_job(
+        self, *, worker_id: str, lease_seconds: float = 600.0
+    ) -> Job | None:
+        """Atomically claim the oldest queued job with a fresh lease.
+
+        The claim (SELECT → INSERT lease → UPDATE status) runs inside one
+        transaction; SQLite serialises writers so two workers can never
+        claim the same job. Expired leases from crashed workers are
+        reclaimable: a queued job always wins, then a running job whose
+        lease has lapsed is re-claimed with a bumped generation.
+        """
+
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            now = _utcnow_iso()
+            row = conn.execute(
+                """
+                SELECT j.job_id FROM jobs j
+                LEFT JOIN worker_leases w ON w.job_id = j.job_id
+                WHERE j.status = 'queued'
+                   OR (j.status = 'running' AND (w.lease_until IS NULL OR w.lease_until < ?))
+                ORDER BY j.created_at
+                LIMIT 1
+                """,
+                (now,),
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK")
+                return None
+            job_id = row["job_id"]
+
+            generation = 1
+            prev = conn.execute(
+                "SELECT generation FROM worker_leases WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if prev is not None:
+                generation = int(prev["generation"]) + 1
+
+            from datetime import datetime, timedelta, timezone
+
+            lease_until = (
+                datetime.now(tz=timezone.utc) + timedelta(seconds=lease_seconds)
+            ).isoformat()
+            conn.execute(
+                """
+                INSERT INTO worker_leases (job_id, worker_id, lease_until, heartbeat_at, generation)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    worker_id = excluded.worker_id,
+                    lease_until = excluded.lease_until,
+                    heartbeat_at = excluded.heartbeat_at,
+                    generation = excluded.generation
+                """,
+                (job_id, worker_id, lease_until, now, generation),
+            )
+            conn.execute(
+                "UPDATE jobs SET status = 'running', current_stage = NULL, updated_at = ? WHERE job_id = ?",
+                (now, job_id),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        job = self.get_job(job_id)
+        assert job is not None
+        return job
+
+    def heartbeat(self, job_id: str, *, worker_id: str, lease_seconds: float = 600.0) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        lease_until = (
+            datetime.now(tz=timezone.utc) + timedelta(seconds=lease_seconds)
+        ).isoformat()
+        self._conn.execute(
+            """
+            UPDATE worker_leases
+            SET heartbeat_at = ?, lease_until = ?
+            WHERE job_id = ? AND worker_id = ?
+            """,
+            (_utcnow_iso(), lease_until, job_id, worker_id),
+        )
+
+    def release_lease(self, job_id: str, *, worker_id: str) -> None:
+        self._conn.execute(
+            "DELETE FROM worker_leases WHERE job_id = ? AND worker_id = ?",
+            (job_id, worker_id),
         )
 
     # ---- job config ------------------------------------------------------

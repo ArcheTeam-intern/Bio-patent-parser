@@ -1,0 +1,168 @@
+"""API integration tests: upload → job → worker → results → reviews.
+
+Runs against a real temp data dir and the in-process worker path (no HTTP
+server) using FastAPI's TestClient.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from bio_pdf.api.app import create_app
+from bio_pdf.api.settings import ApiSettings
+
+
+def _sample_pdf(path: Path) -> Path:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    c = canvas.Canvas(str(path), pagesize=A4)
+    t = c.beginText(50, 800)
+    for line in [
+        "<210> 1",
+        "<211> 4",
+        "<212> PRT",
+        "<213> Artificial",
+        "<400> 1",
+        "Ala Gly Leu Lys",
+        "",
+        "Example 1: The IC50 was 1-10 nM.",
+    ]:
+        t.textLine(line)
+    c.drawText(t)
+    c.save()
+    return path
+
+
+@pytest.fixture()
+def client(tmp_path: Path):
+    settings = ApiSettings(
+        data_dir=tmp_path / "data",
+        samples_dir=tmp_path / "samples",
+        max_upload_bytes=10 * 1024 * 1024,
+    )
+    app = create_app(settings)
+    with TestClient(app) as c:
+        yield c, tmp_path
+
+
+def test_capabilities(client) -> None:
+    c, _ = client
+    res = c.get("/api/v1/capabilities")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["api_version"] == "v1"
+    names = {e["name"] for e in body["engines"]}
+    assert "native" in names and "docling_sdk" in names
+
+
+def test_upload_and_create_job_then_worker_completes(client) -> None:
+    c, tmp_path = client
+    pdf = _sample_pdf(tmp_path / "paper.pdf")
+
+    res = c.post(
+        "/api/v1/documents",
+        files={"file": ("paper.pdf", pdf.read_bytes(), "application/pdf")},
+    )
+    assert res.status_code == 201, res.text
+    doc = res.json()
+    assert doc["document_id"].startswith("sha256:")
+    assert doc["page_count"] == 1
+
+    res = c.post(
+        "/api/v1/jobs",
+        json={"document_id": doc["document_id"], "parser": "native"},
+    )
+    assert res.status_code == 202, res.text
+    job = res.json()
+    job_id = job["job_id"]
+    assert job["status"] == "queued"
+
+    # Run the worker synchronously until the queue drains.
+    from bio_pdf.application.job_service import JobPaths, JobService
+    from bio_pdf.workflow.queue_worker import run_worker
+
+    run_worker(tmp_path / "data", once=True)
+
+    res = c.get(f"/api/v1/jobs/{job_id}")
+    assert res.status_code == 200
+    job = res.json()
+    assert job["status"] in {"succeeded", "succeeded_with_review"}, job
+    stage_names = {s["stage_name"] for s in job["stages"] if s["status"] == "succeeded"}
+    assert {"ingest", "native_parse", "normalize", "extract", "validate", "export"} <= stage_names
+
+    # Records reflect the domain results.
+    res = c.get(f"/api/v1/jobs/{job_id}/records")
+    assert res.status_code == 200
+    records = res.json()
+    assert len(records["sequences"]) >= 1
+    assert any(
+        m["value"]["kind"] == "range" and m["value"]["lower"] == "1"
+        for m in records["measurements"]
+    ), records["measurements"]
+
+    # Page projection serves normalized blocks.
+    res = c.get(f"/api/v1/jobs/{job_id}/pages/1")
+    assert res.status_code == 200
+    assert res.json()["page_number"] == 1
+
+    # Artifacts list includes the export and its content is downloadable.
+    res = c.get(f"/api/v1/jobs/{job_id}/artifacts")
+    rels = {a["relative_path"] for a in res.json()["artifacts"]}
+    assert "jobs/{}/export/result.json".format(job_id) in rels
+
+
+def test_upload_rejects_html_disguised_as_pdf(client) -> None:
+    c, tmp_path = client
+    fake = tmp_path / "fake.pdf"
+    fake.write_text("<!DOCTYPE html><html></html>", encoding="utf-8")
+    res = c.post(
+        "/api/v1/documents",
+        files={"file": ("fake.pdf", fake.read_bytes(), "application/pdf")},
+    )
+    assert res.status_code == 415
+    assert res.json()["error"]["code"] == "INPUT_NOT_PDF"
+
+
+def test_document_source_supports_range_and_etag(client) -> None:
+    c, tmp_path = client
+    pdf = _sample_pdf(tmp_path / "paper.pdf")
+    res = c.post(
+        "/api/v1/documents",
+        files={"file": ("paper.pdf", pdf.read_bytes(), "application/pdf")},
+    )
+    document_id = res.json()["document_id"]
+
+    res = c.get(f"/api/v1/documents/{document_id}/source")
+    assert res.status_code == 200
+    etag = res.headers["etag"]
+    assert res.headers["accept-ranges"] == "bytes"
+
+    res = c.get(
+        f"/api/v1/documents/{document_id}/source",
+        headers={"Range": "bytes=0-3", "If-None-Match": etag.replace('"', "") + "x"},
+    )
+    assert res.status_code == 206
+    assert res.content == b"%PDF"
+
+    res = c.get(f"/api/v1/documents/{document_id}/source", headers={"If-None-Match": etag})
+    assert res.status_code == 304
+
+
+def test_unknown_api_route_returns_json_404(client) -> None:
+    c, _ = client
+    res = c.get("/api/v1/does-not-exist")
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_job_unknown_document_404(client) -> None:
+    c, _ = client
+    res = c.post(
+        "/api/v1/jobs",
+        json={"document_id": "sha256:" + "0" * 64, "parser": "native"},
+    )
+    assert res.status_code == 404

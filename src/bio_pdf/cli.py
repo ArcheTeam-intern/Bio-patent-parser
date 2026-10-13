@@ -240,5 +240,29 @@ def run_job(
         service.close()
 
 
+@app.command("serve")
+def serve_api(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8420, "--port"),
+    data_dir: Path = typer.Option(Path("data/demo"), "--data-dir"),
+    web_dist: Optional[Path] = typer.Option(
+        None, "--web-dist", help="Directory of the built frontend (web/dist)."
+    ),
+) -> None:
+    """Run the HTTP API (and optional static frontend) server."""
+
+    import uvicorn
+
+    from bio_pdf.api.app import create_app
+    from bio_pdf.api.settings import ApiSettings
+
+    settings = ApiSettings(
+        data_dir=data_dir,
+        web_dist_dir=web_dist,
+        cors_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    )
+    uvicorn.run(create_app(settings), host=host, port=port)
+
+
 if __name__ == "__main__":
     app()

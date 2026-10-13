@@ -33,6 +33,11 @@ dev = [
     "reportlab>=4,<5",
     "ruff>=0.5,<1",
 ]
+api = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "python-multipart>=0.0.9,<1",
+]
 docling = [
     # Pin the integration range; we confirm exact versions during Task 5.
     "docling>=2.13,<3",
