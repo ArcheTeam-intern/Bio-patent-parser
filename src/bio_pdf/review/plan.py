@@ -69,10 +69,14 @@ def build_review_plan(
         if budget > 0 and len(items) >= budget:
             break
         record_id = record.get("record_id") or record.get("sequence_id") or record.get("measurement_id")
+        job_id = str(record.get("job_id", ""))
+        # review_ids are globally unique: per-job sequence numbers collide
+        # across jobs and would silently merge queue rows.
+        scope = job_id or "unscoped"
         items.append(
             ReviewItem(
-                review_id=f"review-{idx + 1}",
-                job_id=str(record.get("job_id", "")),
+                review_id=f"review-{scope}-{idx + 1}",
+                job_id=job_id,
                 record_id=str(record_id),
                 record_revision=int(record.get("record_revision", 1) or 1),
                 reason_codes=list(record.get("reason_codes", []) or []),

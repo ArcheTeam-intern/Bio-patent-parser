@@ -135,6 +135,20 @@ CREATE TABLE IF NOT EXISTS record_heads (
     updated_at          TEXT NOT NULL,
     PRIMARY KEY (job_id, record_id)
 );
+
+CREATE TABLE IF NOT EXISTS exports (
+    export_id       TEXT PRIMARY KEY,
+    job_id          TEXT NOT NULL REFERENCES jobs(job_id),
+    format          TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'queued',
+    result_revision INTEGER NOT NULL DEFAULT 0,
+    accepted_only   INTEGER NOT NULL DEFAULT 0,
+    artifact_rel    TEXT,
+    record_count    INTEGER NOT NULL DEFAULT 0,
+    error           TEXT,
+    created_at      TEXT NOT NULL,
+    completed_at    TEXT
+);
 """
 
 
@@ -532,6 +546,63 @@ class Repository:
             (job_id, worker_id),
         )
 
+    # ---- exports ----------------------------------------------------------
+
+    def create_export(
+        self,
+        *,
+        export_id: str,
+        job_id: str,
+        format: str,
+        result_revision: int,
+        accepted_only: bool,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO exports (export_id, job_id, format, status, result_revision,
+                                 accepted_only, created_at)
+            VALUES (?, ?, ?, 'queued', ?, ?, ?)
+            """,
+            (export_id, job_id, format, result_revision, int(accepted_only), _utcnow_iso()),
+        )
+
+    def update_export(
+        self,
+        export_id: str,
+        *,
+        status: str,
+        artifact_rel: str | None = None,
+        record_count: int | None = None,
+        error: str | None = None,
+    ) -> None:
+        # Only overwrite the columns the caller actually provides, so a
+        # failure transition doesn't clobber completed fields with NULLs.
+        sets = ["status = ?"]
+        params: list[Any] = [status]
+        if artifact_rel is not None:
+            sets.append("artifact_rel = ?")
+            params.append(artifact_rel)
+        if record_count is not None:
+            sets.append("record_count = ?")
+            params.append(record_count)
+        if error is not None:
+            sets.append("error = ?")
+            params.append(error)
+        if status in ("completed", "failed"):
+            sets.append("completed_at = ?")
+            params.append(_utcnow_iso())
+        params.append(export_id)
+        self._conn.execute(
+            f"UPDATE exports SET {', '.join(sets)} WHERE export_id = ?",
+            params,
+        )
+
+    def get_export(self, export_id: str) -> Any:
+        row = self._conn.execute(
+            "SELECT * FROM exports WHERE export_id = ?", (export_id,)
+        ).fetchone()
+        return row
+
     # ---- record versions --------------------------------------------------
 
     def get_record_head(self, job_id: str, record_id: str) -> sqlite3.Row | None:
@@ -644,6 +715,9 @@ class Repository:
                                        proposed_actions_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(review_id) DO UPDATE SET
+                job_id = excluded.job_id,
+                record_id = excluded.record_id,
+                record_revision = excluded.record_revision,
                 reason_codes_json = excluded.reason_codes_json,
                 status = excluded.status,
                 evidence_ids_json = excluded.evidence_ids_json,

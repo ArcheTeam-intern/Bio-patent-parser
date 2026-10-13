@@ -9,6 +9,7 @@ import { PdfViewer } from "../pdf/PdfViewer";
 import { SequenceDetail } from "../sequences/SequenceList";
 import { MeasurementDetail, CheckList } from "../activities/ActivityList";
 import { ReviewPanel } from "../reviews/ReviewPanel";
+import { ExportDialog } from "./ExportDialog";
 
 type Tab = "sequences" | "activities" | "tables" | "text" | "run";
 
@@ -42,6 +43,7 @@ export function WorkbenchPage() {
   }, [records.data, recordId]);
 
   const [target, setTarget] = useState<EvidenceTarget | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const selectRecord = (id: string, page: number | null, bbox: [number, number, number, number] | null) => {
     const next = new URLSearchParams(params);
@@ -65,12 +67,17 @@ export function WorkbenchPage() {
               <span className="status review">{job.data.open_reviews} 条待审核</span>
             )}
           </div>
-          <span className="dim">
-            尚无人工准确率基线；本页展示真实解析结果与审核状态。
-          </span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span className="dim">
+              尚无人工准确率基线；本页展示真实解析结果与审核状态。
+            </span>
+            <button onClick={() => setExportOpen(true)}>导出</button>
+          </div>
         </div>
         {job.data && <StageStrip stages={job.data.stages} />}
       </div>
+
+      <ExportDialog jobId={jobId} open={exportOpen} onClose={() => setExportOpen(false)} />
 
       <div className="workbench">
         <section className="panel">

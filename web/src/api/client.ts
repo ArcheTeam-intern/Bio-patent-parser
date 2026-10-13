@@ -283,3 +283,33 @@ export function submitDecision(
     body: JSON.stringify(body),
   });
 }
+
+export interface ExportInfo {
+  api_version: string;
+  export_id: string;
+  job_id: string;
+  format: string;
+  status: string;
+  result_revision: number;
+  record_count: number;
+  error: string | null;
+}
+
+export function createExport(
+  jobId: string,
+  body: { format: "json" | "csv" | "fasta"; accepted_only?: boolean },
+): Promise<{ export_id: string; status: string }> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/exports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function getExport(exportId: string): Promise<ExportInfo> {
+  return request(`/exports/${encodeURIComponent(exportId)}`);
+}
+
+export function exportDownloadUrl(exportId: string): string {
+  return `${API_PREFIX}/exports/${encodeURIComponent(exportId)}/download`;
+}

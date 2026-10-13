@@ -219,3 +219,55 @@ def test_review_decision_flow_with_409(client) -> None:
         s for s in records["sequences"] if s["acceptance_state"] == "accepted"
     ] + [m for m in records["measurements"] if m["acceptance_state"] == "accepted"]
     assert len(accepted) >= 1
+
+
+def test_export_flow_json_and_fasta_empty_fails(client) -> None:
+    c, tmp_path = client
+    pdf = _sample_pdf(tmp_path / "paper.pdf")
+    doc = c.post(
+        "/api/v1/documents",
+        files={"file": ("paper.pdf", pdf.read_bytes(), "application/pdf")},
+    ).json()
+    job = c.post("/api/v1/jobs", json={"document_id": doc["document_id"], "parser": "native"}).json()
+
+    from bio_pdf.workflow.queue_worker import run_worker
+
+    run_worker(tmp_path / "data", once=True)
+
+    # JSON export completes and downloads.
+    res = c.post(
+        f"/api/v1/jobs/{job['job_id']}/exports",
+        json={"format": "json"},
+    )
+    assert res.status_code == 202, res.text
+    export_id = res.json()["export_id"]
+
+    import time
+
+    for _ in range(50):
+        status = c.get(f"/api/v1/exports/{export_id}").json()["status"]
+        if status in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+    assert status == "completed", c.get(f"/api/v1/exports/{export_id}").json()
+    dl = c.get(f"/api/v1/exports/{export_id}/download")
+    assert dl.status_code == 200
+    body = dl.json()
+    assert body["result_revision"] == 0
+    assert len(body["sequences"]) >= 1
+
+    # FASTA with nothing accepted fails honestly (no empty file).
+    res = c.post(
+        f"/api/v1/jobs/{job['job_id']}/exports",
+        json={"format": "fasta"},
+    )
+    fasta_id = res.json()["export_id"]
+    for _ in range(50):
+        payload = c.get(f"/api/v1/exports/{fasta_id}").json()
+        if payload["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+    assert payload["status"] == "failed"
+    assert "refusing" in (payload["error"] or "")
+    dl = c.get(f"/api/v1/exports/{fasta_id}/download")
+    assert dl.status_code == 409
