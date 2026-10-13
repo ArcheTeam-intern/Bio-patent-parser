@@ -278,6 +278,13 @@ def normalize_docling_document(
 ) -> NormalizedDocument:
     """Normalise a Docling JSON payload into a :class:`NormalizedDocument`.
 
+    Supports two real Docling shapes:
+
+    - ``pages`` is a list of ``{"page": N, "width": w, "height": h, "texts": [...]}``
+      (Docling < 2.x exports).
+    - ``pages`` is a dict keyed by page number, with top-level ``texts`` /
+      ``tables`` / ``groups`` lists (Docling >= 2.0 export).
+
     Args:
         payload: Parsed JSON dict (e.g. from ``json.loads``).
         parser_run_id: The parser run id to embed in the result.
@@ -289,22 +296,32 @@ def normalize_docling_document(
     """
 
     pages_raw = payload.get("pages") or payload.get("page_map")
-    if not isinstance(pages_raw, list) or not pages_raw:
+    if pages_raw is None:
         raise NormalizationLossError(
-            "docling payload has no 'pages' list",
+            "docling payload has no 'pages' field",
             details={"keys": list(payload.keys())},
         )
 
-    normalised_pages: list[NormalizedPage] = []
-    for page_number, page_dict in enumerate(pages_raw, start=1):
-        if not isinstance(page_dict, dict):
-            continue
-        normalised_pages.append(
-            normalize_page(
-                page_dict,
-                page_number=page_number,
-                parser_run_id=parser_run_id,
-            )
+    if isinstance(pages_raw, list):
+        normalised_pages = [
+            normalize_page(p, page_number=i + 1, parser_run_id=parser_run_id)
+            for i, p in enumerate(pages_raw)
+            if isinstance(p, dict)
+        ]
+    elif isinstance(pages_raw, dict):
+        # Docling 2.x: per-page size under pages[i].size, and top-level
+        # ``texts`` / ``tables`` share a ``prov`` array with ``page_no``.
+        normalised_pages = _expand_top_level_pages(payload, parser_run_id=parser_run_id)
+    else:
+        raise NormalizationLossError(
+            "docling 'pages' must be a list or dict",
+            details={"type": type(pages_raw).__name__},
+        )
+
+    if not normalised_pages:
+        raise NormalizationLossError(
+            "docling payload has no usable pages",
+            details={"page_count_raw": len(pages_raw) if hasattr(pages_raw, '__len__') else 'n/a'},
         )
 
     return NormalizedDocument(
@@ -314,6 +331,161 @@ def normalize_docling_document(
         pages=normalised_pages,
         errors=[],
     )
+
+
+def _expand_top_level_pages(
+    payload: dict[str, Any],
+    *,
+    parser_run_id: str,
+) -> list[NormalizedPage]:
+    """Build per-page :class:`NormalizedPage` for Docling 2.x exports.
+
+    The 2.x format keeps texts/tables at the top level, each with a
+    ``prov`` array containing ``page_no``. We regroup by page and use the
+    per-page ``size`` (width/height) from ``pages[page_no].size``.
+    """
+
+    pages_dict: dict[str, dict[str, Any]] = {}
+    for page_no_key, page_dict in payload["pages"].items():
+        if not isinstance(page_dict, dict):
+            continue
+        size = page_dict.get("size") or {}
+        try:
+            width = float(size.get("width") or 0)
+            height = float(size.get("height") or 0)
+        except (TypeError, ValueError):
+            width, height = 0.0, 0.0
+        if width <= 0 or height <= 0:
+            width, height = 612.0, 792.0
+        try:
+            page_no = int(page_no_key)
+        except (TypeError, ValueError):
+            page_no = len(pages_dict) + 1
+        pages_dict[str(page_no)] = {
+            "page_number": page_no,
+            "width": width,
+            "height": height,
+            "blocks": [],
+        }
+
+    def _page_no_from_prov(item: dict[str, Any]) -> int:
+        for prov in item.get("prov", []) or []:
+            page_no = prov.get("page_no")
+            if page_no is None:
+                continue
+            try:
+                return int(page_no)
+            except (TypeError, ValueError):
+                continue
+        return 1
+
+    from bio_pdf.contracts import Provenance, TextBlock, Table  # local to avoid cycles
+
+    provenance = Provenance(
+        source_type="docling",
+        artifact_ref=f"runs/{parser_run_id}/docling.json",
+    )
+
+    for text in payload.get("texts", []) or []:
+        if not isinstance(text, dict):
+            continue
+        page_no = _page_no_from_prov(text)
+        target = pages_dict.get(str(page_no))
+        if target is None:
+            continue
+        try:
+            bbox = _coerce_bbox(text.get("bbox"), page_height_pt=target["height"])
+        except NormalizationLossError:
+            bbox = None
+        target["blocks"].append(
+            TextBlock(
+                block_id=_safe_block_id(parser_run_id, text.get("self_ref") or text.get("id"), len(target["blocks"])),
+                kind=_coerce_kind(text.get("label") or text.get("content_layer")),
+                bbox=bbox,
+                text_raw=str(text.get("text") or ""),
+                provenance=[provenance],
+            )
+        )
+
+    tables_out: list[Table] = []
+    for table in payload.get("tables", []) or []:
+        if not isinstance(table, dict):
+            continue
+        prov_page = 1
+        for prov in table.get("prov", []) or []:
+            try:
+                prov_page = int(prov.get("page_no", 1))
+            except (TypeError, ValueError):
+                prov_page = 1
+            break
+        target = pages_dict.get(str(prov_page))
+        if target is None:
+            continue
+        cells_raw = table.get("data", {}).get("table_cells", []) if isinstance(table.get("data"), dict) else []
+        # Some Docling 2.x exports put the rows directly under data; tolerate.
+        if not cells_raw and isinstance(table.get("data"), list):
+            cells_raw = table["data"]
+        cells: list[TableCell] = []
+        for c_idx, cell in enumerate(cells_raw or []):
+            if not isinstance(cell, dict):
+                continue
+            row = int(cell.get("start_row_offset_idx", cell.get("row_index", 0)) or 0)
+            col = int(cell.get("start_col_offset_idx", cell.get("column_index", 0)) or 0)
+            rowspan = max(int(cell.get("row_span", cell.get("rowspan", 1)) or 1), 1)
+            colspan = max(int(cell.get("col_span", cell.get("colspan", 1)) or 1), 1)
+            text = str(cell.get("text", "") or "")
+            try:
+                bbox = _coerce_bbox(cell.get("bbox"), page_height_pt=target["height"])
+            except NormalizationLossError:
+                bbox = None
+            cells.append(
+                TableCell(
+                    cell_id=f"{prov_page}:t:{c_idx}",
+                    row_index=row,
+                    column_index=col,
+                    rowspan=rowspan,
+                    colspan=colspan,
+                    text_raw=text,
+                    bbox=bbox,
+                )
+            )
+        if not cells:
+            continue
+        try:
+            table_bbox = _coerce_bbox(table.get("bbox"), page_height_pt=target["height"])
+        except NormalizationLossError:
+            table_bbox = None
+        table_obj = Table(
+            table_id=f"{prov_page}:t:{len(tables_out)}",
+            page_number=prov_page,
+            row_count=max(c.row_index + c.rowspan for c in cells),
+            column_count=max(c.column_index + c.colspan for c in cells),
+            cells=cells,
+            header_cell_ids=[
+                c.cell_id for c in cells if c.row_index == 0
+            ],
+            caption=str(table.get("caption") or "") or None,
+            bbox=table_bbox,
+        )
+        tables_out.append(table_obj)
+        target["blocks"]  # ensure key exists; tables attached after loop
+
+    out: list[NormalizedPage] = []
+    for key in sorted(pages_dict.keys(), key=lambda k: int(k)):
+        meta = pages_dict[key]
+        # Attach any tables that belong to this page.
+        page_tables = [t for t in tables_out if t.page_number == meta["page_number"]]
+        out.append(
+            NormalizedPage(
+                page_number=meta["page_number"],
+                width_pt=meta["width"],
+                height_pt=meta["height"],
+                route="layout_native",
+                blocks=meta["blocks"],
+                tables=page_tables,
+            )
+        )
+    return out
 
 
 def normalise_docling_file(

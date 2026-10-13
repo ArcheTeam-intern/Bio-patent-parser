@@ -19,6 +19,11 @@ from bio_pdf.parsers.docling_serve_adapter import (
     DEFAULT_BASE_URL,
     DoclingServeAdapter,
 )
+from bio_pdf.parsers.mineru_adapter import (
+    DEFAULT_BASE_URL as MINERU_DEFAULT_BASE_URL,
+    DEFAULT_MODEL_VERSION as MINERU_DEFAULT_MODEL_VERSION,
+    MinerUAdapter,
+)
 
 __all__ = [
     "ParseArtifacts",
@@ -26,7 +31,10 @@ __all__ = [
     "ParserAdapter",
     "NativeAdapter",
     "DoclingServeAdapter",
+    "MinerUAdapter",
     "DEFAULT_BASE_URL",
+    "MINERU_DEFAULT_BASE_URL",
+    "MINERU_DEFAULT_MODEL_VERSION",
     "normalize_docling_document",
     "NormalizationLossError",
 ]
