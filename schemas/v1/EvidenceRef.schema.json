@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "description": "A reference to an :class:`EvidenceSpan` from a record.\n\nRecords may share evidence (e.g. a measurement and its row header).",
+  "properties": {
+    "detail": {
+      "minLength": 1,
+      "title": "Detail",
+      "type": "string"
+    },
+    "evidence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evidence Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "detail",
+    "evidence_ids"
+  ],
+  "title": "EvidenceRef",
+  "type": "object"
+}

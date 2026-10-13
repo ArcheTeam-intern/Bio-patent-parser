@@ -1,0 +1,105 @@
+{
+  "additionalProperties": false,
+  "description": "One persisted stage execution.\n\n``cache_key`` lets the runner skip re-running a stage whose inputs and\nrules have not changed. ``attempt`` counts from 1.",
+  "properties": {
+    "artifact_manifest_ref": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Manifest Ref"
+    },
+    "attempt": {
+      "minimum": 1,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "cache_key": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cache Key"
+    },
+    "ended_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ended At"
+    },
+    "error_json": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Error Json",
+      "type": "object"
+    },
+    "job_id": {
+      "minLength": 1,
+      "title": "Job Id",
+      "type": "string"
+    },
+    "stage_name": {
+      "minLength": 1,
+      "title": "Stage Name",
+      "type": "string"
+    },
+    "stage_run_id": {
+      "minLength": 1,
+      "title": "Stage Run Id",
+      "type": "string"
+    },
+    "started_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Started At"
+    },
+    "status": {
+      "default": "pending",
+      "enum": [
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "skipped"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stage_run_id",
+    "job_id",
+    "stage_name",
+    "attempt"
+  ],
+  "title": "Stage",
+  "type": "object"
+}

@@ -1,0 +1,69 @@
+{
+  "additionalProperties": false,
+  "description": "An explicit relation between two records or entities.\n\n``predicate`` controls the semantic; cross-language consumers must\naccept the exact set in :data:`RelationPredicate`.",
+  "properties": {
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "evidence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "object_id": {
+      "minLength": 1,
+      "title": "Object Id",
+      "type": "string"
+    },
+    "predicate": {
+      "enum": [
+        "has_sequence",
+        "heavy_chain",
+        "light_chain",
+        "has_cdr",
+        "variant_of",
+        "assayed_entity"
+      ],
+      "title": "Predicate",
+      "type": "string"
+    },
+    "relation_id": {
+      "minLength": 1,
+      "title": "Relation Id",
+      "type": "string"
+    },
+    "subject_id": {
+      "minLength": 1,
+      "title": "Subject Id",
+      "type": "string"
+    },
+    "validation_state": {
+      "default": "unchecked",
+      "enum": [
+        "unchecked",
+        "checks_passed",
+        "conflict",
+        "verified_reference",
+        "verified_human"
+      ],
+      "title": "Validation State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "relation_id",
+    "document_id",
+    "subject_id",
+    "predicate",
+    "object_id",
+    "evidence_ids"
+  ],
+  "title": "SequenceRelation",
+  "type": "object"
+}

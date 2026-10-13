@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "description": "One source-of-truth link back to an upstream artifact.",
+  "properties": {
+    "artifact_ref": {
+      "minLength": 1,
+      "title": "Artifact Ref",
+      "type": "string"
+    },
+    "provider_locator": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider Locator"
+    },
+    "source_type": {
+      "minLength": 1,
+      "title": "Source Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source_type",
+    "artifact_ref"
+  ],
+  "title": "Provenance",
+  "type": "object"
+}

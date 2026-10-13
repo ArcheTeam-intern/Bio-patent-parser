@@ -1,0 +1,52 @@
+{
+  "additionalProperties": false,
+  "description": "A SEQ ID mention that has not been resolved to a sequence.\n\nResolved references keep the same shape but set ``resolved_sequence_id``\nto the linked :class:`SequenceRecord`.",
+  "properties": {
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "evidence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "mention_raw": {
+      "minLength": 1,
+      "title": "Mention Raw",
+      "type": "string"
+    },
+    "resolved_sequence_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolved Sequence Id"
+    },
+    "seq_id_no": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Seq Id No",
+      "type": "string"
+    }
+  },
+  "required": [
+    "document_id",
+    "seq_id_no",
+    "mention_raw",
+    "evidence_ids"
+  ],
+  "title": "SequenceReference",
+  "type": "object"
+}

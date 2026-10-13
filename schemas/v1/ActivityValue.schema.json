@@ -1,0 +1,110 @@
+{
+  "additionalProperties": false,
+  "description": "The structured representation of an activity value.\n\n``kind`` discriminates how ``number``/``lower``/``upper``/``uncertainty``\nare interpreted. ``raw`` always retains the original string from the\nsource so reviewers can audit the parse.",
+  "properties": {
+    "kind": {
+      "enum": [
+        "scalar",
+        "range",
+        "plus_minus",
+        "categorical",
+        "unparsed"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "lower": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lower"
+    },
+    "number": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Decimal string for scalar/operator.",
+      "title": "Number"
+    },
+    "operator": {
+      "anyOf": [
+        {
+          "enum": [
+            "<",
+            "<=",
+            ">",
+            ">=",
+            "=",
+            "~"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operator"
+    },
+    "qualifier": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Qualifier"
+    },
+    "raw": {
+      "minLength": 1,
+      "title": "Raw",
+      "type": "string"
+    },
+    "uncertainty": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uncertainty"
+    },
+    "upper": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Upper"
+    }
+  },
+  "required": [
+    "kind",
+    "raw"
+  ],
+  "title": "ActivityValue",
+  "type": "object"
+}

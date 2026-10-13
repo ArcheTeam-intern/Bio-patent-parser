@@ -30,9 +30,23 @@ Heavy parser integrations (Docling, MinerU, LLM providers) are separate
 optional extras:
 
 ```bash
-uv sync --extra docling   # installs the real Docling adapter
+uv sync --extra docling   # installs the real Docling SDK + HTTP client
 uv sync --extra mineru    # installs the HTTP adapter for MinerU V1
 uv sync --extra llm       # installs the HTTP LLM provider
+```
+
+Docling can run either **locally** (SDK + child process) or **remotely**
+through a self-hosted [`docling-serve`](https://github.com/iss-lab/docling-serve)
+HTTP service, so the business machine does not need the SDK or models:
+
+```bash
+# Local Docling SDK (heavy: models download on first run)
+uv sync --extra docling
+
+# Remote: run docling-serve somewhere, then point the adapter at it.
+# The HTTP adapter only needs httpx (already in the docling extra):
+#   from bio_pdf.parsers.docling_serve_adapter import DoclingServeAdapter
+#   DoclingServeAdapter(base_url="http://host:5001", api_key="...")
 ```
 
 ## Layout

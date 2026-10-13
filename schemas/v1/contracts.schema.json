@@ -1,0 +1,3058 @@
+{
+  "models": {
+    "AcceptanceDecision": {
+      "additionalProperties": false,
+      "description": "The decision produced by the acceptance policy.\n\n``policy_version`` ties the decision to the exact policy text that\nproduced it so we can reproduce historic decisions after policy\nupgrades.",
+      "properties": {
+        "acceptance_state": {
+          "default": "candidate",
+          "enum": [
+            "candidate",
+            "needs_review",
+            "accepted",
+            "rejected"
+          ],
+          "title": "Acceptance State",
+          "type": "string"
+        },
+        "policy_version": {
+          "default": "v0",
+          "minLength": 1,
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "verification_method": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verification Method"
+        }
+      },
+      "title": "AcceptanceDecision",
+      "type": "object"
+    },
+    "ActivityValue": {
+      "additionalProperties": false,
+      "description": "The structured representation of an activity value.\n\n``kind`` discriminates how ``number``/``lower``/``upper``/``uncertainty``\nare interpreted. ``raw`` always retains the original string from the\nsource so reviewers can audit the parse.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "scalar",
+            "range",
+            "plus_minus",
+            "categorical",
+            "unparsed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "lower": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lower"
+        },
+        "number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Decimal string for scalar/operator.",
+          "title": "Number"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "enum": [
+                "<",
+                "<=",
+                ">",
+                ">=",
+                "=",
+                "~"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operator"
+        },
+        "qualifier": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qualifier"
+        },
+        "raw": {
+          "minLength": 1,
+          "title": "Raw",
+          "type": "string"
+        },
+        "uncertainty": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uncertainty"
+        },
+        "upper": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Upper"
+        }
+      },
+      "required": [
+        "kind",
+        "raw"
+      ],
+      "title": "ActivityValue",
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "description": "A reference to an immutable artifact on disk.\n\n``relative_path`` is anchored at the configured ``artifact_root`` and\nmust not contain ``..`` segments or absolute paths. The same path with\na different ``sha256`` is reported as :data:`ARTIFACT_CONFLICT`.",
+      "properties": {
+        "artifact_id": {
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "media_type": {
+          "minLength": 1,
+          "title": "Media Type",
+          "type": "string"
+        },
+        "producer_stage_run_id": {
+          "minLength": 1,
+          "title": "Producer Stage Run Id",
+          "type": "string"
+        },
+        "relative_path": {
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "sha256": {
+          "minLength": 1,
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "relative_path",
+        "media_type",
+        "producer_stage_run_id"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "CheckResult": {
+      "additionalProperties": false,
+      "description": "A single structured check on a record.\n\nThe ``check_id`` mirrors the IDs in design §6.6. ``outcome`` is the\ndiscrete result and ``evidence_ids`` points to the evidence that\ntriggered the decision. We deliberately keep ``details`` as a free-form\nstring dict so future checks can attach operator-specific notes without\nschema churn.",
+      "properties": {
+        "check_id": {
+          "minLength": 1,
+          "title": "Check Id",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Details",
+          "type": "object"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "outcome": {
+          "enum": [
+            "pass",
+            "fail",
+            "not_applicable",
+            "unknown"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_id",
+        "outcome"
+      ],
+      "title": "CheckResult",
+      "type": "object"
+    },
+    "DocumentInspection": {
+      "$defs": {
+        "PageGeometry": {
+          "additionalProperties": false,
+          "description": "Page dimensions in PDF points after rotation/CropBox has been applied.\n\nThe width/height are expressed in the user-facing (visible) coordinate\nsystem. Downstream geometry maths MUST rely on these values, never on\nthe raw MediaBox.",
+          "properties": {
+            "height_pt": {
+              "exclusiveMinimum": 0,
+              "title": "Height Pt",
+              "type": "number"
+            },
+            "page_number": {
+              "minimum": 1,
+              "title": "Page Number",
+              "type": "integer"
+            },
+            "rotation_deg": {
+              "default": 0,
+              "maximum": 359,
+              "minimum": 0,
+              "title": "Rotation Deg",
+              "type": "integer"
+            },
+            "width_pt": {
+              "exclusiveMinimum": 0,
+              "title": "Width Pt",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page_number",
+            "width_pt",
+            "height_pt"
+          ],
+          "title": "PageGeometry",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The result of the ingestion inspector.\n\nCarries the SHA-256 of the original bytes (used as ``document_id``),\nthe page geometry list and encryption flags. Parsers must never see\nraw bytes they have not first verified.",
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "is_encrypted": {
+          "default": false,
+          "title": "Is Encrypted",
+          "type": "boolean"
+        },
+        "page_count": {
+          "minimum": 0,
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/PageGeometry"
+          },
+          "title": "Pages",
+          "type": "array"
+        },
+        "sha256": {
+          "minLength": 1,
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "sha256",
+        "bytes",
+        "page_count"
+      ],
+      "title": "DocumentInspection",
+      "type": "object"
+    },
+    "EvidenceBundle": {
+      "$defs": {
+        "EvidenceSpan": {
+          "additionalProperties": false,
+          "description": "A location reference for an extracted value or statement.\n\nThe ``bbox`` field is optional because some upstream sources (e.g. an\nOCR-only PDF, or a continuation cell without its own coordinates) only\nknow the page. The contract distinguishes ``bbox is None`` from\n``bbox is not None but page is None``.",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "char_end": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Char End"
+            },
+            "char_start": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Char Start"
+            },
+            "document_id": {
+              "minLength": 1,
+              "title": "Document Id",
+              "type": "string"
+            },
+            "evidence_id": {
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "page_number": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page Number"
+            },
+            "raw_text": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Raw Text"
+            }
+          },
+          "required": [
+            "evidence_id",
+            "document_id"
+          ],
+          "title": "EvidenceSpan",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A collection of :class:`EvidenceSpan` records.\n\nCentralises the per-document evidence index so domain rules and\nvalidators can pull all spans for a job without re-reading artifact\nfiles.",
+      "properties": {
+        "spans": {
+          "items": {
+            "$ref": "#/$defs/EvidenceSpan"
+          },
+          "title": "Spans",
+          "type": "array"
+        }
+      },
+      "title": "EvidenceBundle",
+      "type": "object"
+    },
+    "EvidenceImage": {
+      "additionalProperties": false,
+      "description": "A rendered PNG tied back to the page coordinates it was clipped from.\n\n``transform_to_page`` describes the affine used to go from image pixels\nback to PDF points; it is stored separately from ``bbox`` because the\nrendered image may have been clipped, scaled or de-skewed.",
+      "properties": {
+        "artifact_ref": {
+          "minLength": 1,
+          "title": "Artifact Ref",
+          "type": "string"
+        },
+        "bbox": {
+          "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Bbox",
+          "type": "array"
+        },
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "dpi": {
+          "minimum": 72,
+          "title": "Dpi",
+          "type": "integer"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "pixel_height": {
+          "minimum": 1,
+          "title": "Pixel Height",
+          "type": "integer"
+        },
+        "pixel_width": {
+          "minimum": 1,
+          "title": "Pixel Width",
+          "type": "integer"
+        },
+        "transform_to_page": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 6,
+          "minItems": 6,
+          "title": "Transform To Page",
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifact_ref",
+        "document_id",
+        "page_number",
+        "bbox",
+        "dpi",
+        "pixel_width",
+        "pixel_height",
+        "transform_to_page"
+      ],
+      "title": "EvidenceImage",
+      "type": "object"
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "description": "A reference to an :class:`EvidenceSpan` from a record.\n\nRecords may share evidence (e.g. a measurement and its row header).",
+      "properties": {
+        "detail": {
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "detail",
+        "evidence_ids"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "EvidenceSpan": {
+      "additionalProperties": false,
+      "description": "A location reference for an extracted value or statement.\n\nThe ``bbox`` field is optional because some upstream sources (e.g. an\nOCR-only PDF, or a continuation cell without its own coordinates) only\nknow the page. The contract distinguishes ``bbox is None`` from\n``bbox is not None but page is None``.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "char_end": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Char End"
+        },
+        "char_start": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Char Start"
+        },
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "evidence_id": {
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "page_number": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Number"
+        },
+        "raw_text": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Text"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "document_id"
+      ],
+      "title": "EvidenceSpan",
+      "type": "object"
+    },
+    "Job": {
+      "additionalProperties": false,
+      "description": "A parse/extract job.\n\nThe same ``document_id`` may have many ``Job`` rows over its history\n(different configs, retries). ``result_revision`` increments whenever\nthe runner produces a new export revision.",
+      "properties": {
+        "config_hash": {
+          "minLength": 1,
+          "title": "Config Hash",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "current_stage": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Stage"
+        },
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "job_id": {
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "result_revision": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Result Revision",
+          "type": "integer"
+        },
+        "status": {
+          "default": "queued",
+          "enum": [
+            "queued",
+            "running",
+            "succeeded",
+            "succeeded_with_review",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "document_id",
+        "config_hash"
+      ],
+      "title": "Job",
+      "type": "object"
+    },
+    "Measurement": {
+      "$defs": {
+        "ActivityValue": {
+          "additionalProperties": false,
+          "description": "The structured representation of an activity value.\n\n``kind`` discriminates how ``number``/``lower``/``upper``/``uncertainty``\nare interpreted. ``raw`` always retains the original string from the\nsource so reviewers can audit the parse.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "scalar",
+                "range",
+                "plus_minus",
+                "categorical",
+                "unparsed"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "lower": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Lower"
+            },
+            "number": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Decimal string for scalar/operator.",
+              "title": "Number"
+            },
+            "operator": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "<",
+                    "<=",
+                    ">",
+                    ">=",
+                    "=",
+                    "~"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Operator"
+            },
+            "qualifier": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Qualifier"
+            },
+            "raw": {
+              "minLength": 1,
+              "title": "Raw",
+              "type": "string"
+            },
+            "uncertainty": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Uncertainty"
+            },
+            "upper": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Upper"
+            }
+          },
+          "required": [
+            "kind",
+            "raw"
+          ],
+          "title": "ActivityValue",
+          "type": "object"
+        },
+        "CheckResult": {
+          "additionalProperties": false,
+          "description": "A single structured check on a record.\n\nThe ``check_id`` mirrors the IDs in design §6.6. ``outcome`` is the\ndiscrete result and ``evidence_ids`` points to the evidence that\ntriggered the decision. We deliberately keep ``details`` as a free-form\nstring dict so future checks can attach operator-specific notes without\nschema churn.",
+          "properties": {
+            "check_id": {
+              "minLength": 1,
+              "title": "Check Id",
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "title": "Details",
+              "type": "object"
+            },
+            "evidence_ids": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "outcome": {
+              "enum": [
+                "pass",
+                "fail",
+                "not_applicable",
+                "unknown"
+              ],
+              "title": "Outcome",
+              "type": "string"
+            }
+          },
+          "required": [
+            "check_id",
+            "outcome"
+          ],
+          "title": "CheckResult",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A measurement linking an entity to a value with evidence.\n\nField-level evidence is required for ``value``/``unit``/``entity``/\n``target`` so that reviewers can audit which cell or paragraph\ncontributed each component.",
+      "properties": {
+        "acceptance_state": {
+          "default": "candidate",
+          "enum": [
+            "candidate",
+            "needs_review",
+            "accepted",
+            "rejected"
+          ],
+          "title": "Acceptance State",
+          "type": "string"
+        },
+        "assay_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assay Id"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "conditions": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "entity_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entity Id"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "evidence_kind": {
+          "default": "undetermined",
+          "enum": [
+            "measured",
+            "claim_threshold",
+            "general_statement",
+            "cited_result",
+            "undetermined"
+          ],
+          "title": "Evidence Kind",
+          "type": "string"
+        },
+        "field_evidence": {
+          "additionalProperties": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Field Evidence",
+          "type": "object"
+        },
+        "measurement_id": {
+          "minLength": 1,
+          "title": "Measurement Id",
+          "type": "string"
+        },
+        "metric": {
+          "minLength": 1,
+          "title": "Metric",
+          "type": "string"
+        },
+        "sequence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Sequence Ids",
+          "type": "array"
+        },
+        "target_raw": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Raw"
+        },
+        "unit_normalized": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit Normalized"
+        },
+        "unit_raw": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit Raw"
+        },
+        "validation_state": {
+          "default": "unchecked",
+          "enum": [
+            "unchecked",
+            "checks_passed",
+            "conflict",
+            "verified_reference",
+            "verified_human"
+          ],
+          "title": "Validation State",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/ActivityValue"
+        }
+      },
+      "required": [
+        "measurement_id",
+        "document_id",
+        "metric",
+        "value",
+        "evidence_ids"
+      ],
+      "title": "Measurement",
+      "type": "object"
+    },
+    "NormalizedDocument": {
+      "$defs": {
+        "NormalizedPage": {
+          "additionalProperties": false,
+          "description": "A page in a :class:`NormalizedDocument`.",
+          "properties": {
+            "blocks": {
+              "items": {
+                "$ref": "#/$defs/TextBlock"
+              },
+              "title": "Blocks",
+              "type": "array"
+            },
+            "height_pt": {
+              "exclusiveMinimum": 0,
+              "title": "Height Pt",
+              "type": "number"
+            },
+            "page_number": {
+              "minimum": 1,
+              "title": "Page Number",
+              "type": "integer"
+            },
+            "printed_page_label": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Printed Page Label"
+            },
+            "route": {
+              "default": "unknown",
+              "enum": [
+                "native",
+                "layout_native",
+                "layout_ocr",
+                "scan_suspect",
+                "text_suspect",
+                "mixed",
+                "blank",
+                "unknown"
+              ],
+              "title": "Route",
+              "type": "string"
+            },
+            "tables": {
+              "items": {
+                "$ref": "#/$defs/Table"
+              },
+              "title": "Tables",
+              "type": "array"
+            },
+            "width_pt": {
+              "exclusiveMinimum": 0,
+              "title": "Width Pt",
+              "type": "number"
+            }
+          },
+          "required": [
+            "page_number",
+            "width_pt",
+            "height_pt"
+          ],
+          "title": "NormalizedPage",
+          "type": "object"
+        },
+        "Provenance": {
+          "additionalProperties": false,
+          "description": "One source-of-truth link back to an upstream artifact.",
+          "properties": {
+            "artifact_ref": {
+              "minLength": 1,
+              "title": "Artifact Ref",
+              "type": "string"
+            },
+            "provider_locator": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Provider Locator"
+            },
+            "source_type": {
+              "minLength": 1,
+              "title": "Source Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_type",
+            "artifact_ref"
+          ],
+          "title": "Provenance",
+          "type": "object"
+        },
+        "Table": {
+          "additionalProperties": false,
+          "description": "A normalised table.\n\n``header_cell_ids`` keeps the linkage to the cells acting as the\ncolumn/row headers so evidence can travel with each measurement.",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "caption": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Caption"
+            },
+            "cells": {
+              "items": {
+                "$ref": "#/$defs/TableCell"
+              },
+              "title": "Cells",
+              "type": "array"
+            },
+            "column_count": {
+              "minimum": 0,
+              "title": "Column Count",
+              "type": "integer"
+            },
+            "continuation_group": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Continuation Group"
+            },
+            "header_cell_ids": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Header Cell Ids",
+              "type": "array"
+            },
+            "page_number": {
+              "minimum": 1,
+              "title": "Page Number",
+              "type": "integer"
+            },
+            "row_count": {
+              "minimum": 0,
+              "title": "Row Count",
+              "type": "integer"
+            },
+            "table_id": {
+              "minLength": 1,
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "table_id",
+            "page_number",
+            "row_count",
+            "column_count",
+            "cells"
+          ],
+          "title": "Table",
+          "type": "object"
+        },
+        "TableCell": {
+          "additionalProperties": false,
+          "description": "A cell inside a normalised table.\n\n``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``\nfollow the HTML convention (both default to 1).",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "cell_id": {
+              "minLength": 1,
+              "title": "Cell Id",
+              "type": "string"
+            },
+            "colspan": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Colspan",
+              "type": "integer"
+            },
+            "column_index": {
+              "minimum": 0,
+              "title": "Column Index",
+              "type": "integer"
+            },
+            "row_index": {
+              "minimum": 0,
+              "title": "Row Index",
+              "type": "integer"
+            },
+            "rowspan": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Rowspan",
+              "type": "integer"
+            },
+            "text_raw": {
+              "minLength": 1,
+              "title": "Text Raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cell_id",
+            "row_index",
+            "column_index",
+            "text_raw"
+          ],
+          "title": "TableCell",
+          "type": "object"
+        },
+        "TextBlock": {
+          "additionalProperties": false,
+          "description": "A single block on a normalised page.\n\nBlocks are the atom the domain rules consume. ``bbox`` may be ``None``\nif the upstream source could not produce coordinates (e.g. an OCR page\nthat returned text only). ``kind`` separates sequence listings from\nregular prose so downstream extractors can dispatch cheaply.",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "block_id": {
+              "minLength": 1,
+              "title": "Block Id",
+              "type": "string"
+            },
+            "kind": {
+              "default": "text",
+              "enum": [
+                "text",
+                "title",
+                "list",
+                "table",
+                "picture",
+                "formula",
+                "sequence_listing",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "provenance": {
+              "items": {
+                "$ref": "#/$defs/Provenance"
+              },
+              "title": "Provenance",
+              "type": "array"
+            },
+            "table_id": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Table Id"
+            },
+            "text_raw": {
+              "minLength": 1,
+              "title": "Text Raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "block_id",
+            "text_raw"
+          ],
+          "title": "TextBlock",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The unified parser output.\n\nProduced by every adapter (native, Docling, MinerU). Domain code never\nsees the SDK-specific objects directly.",
+      "properties": {
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "errors": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/NormalizedPage"
+          },
+          "title": "Pages",
+          "type": "array"
+        },
+        "parser_run_id": {
+          "minLength": 1,
+          "title": "Parser Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "minLength": 1,
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "document_id",
+        "parser_run_id",
+        "pages"
+      ],
+      "title": "NormalizedDocument",
+      "type": "object"
+    },
+    "NormalizedPage": {
+      "$defs": {
+        "Provenance": {
+          "additionalProperties": false,
+          "description": "One source-of-truth link back to an upstream artifact.",
+          "properties": {
+            "artifact_ref": {
+              "minLength": 1,
+              "title": "Artifact Ref",
+              "type": "string"
+            },
+            "provider_locator": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Provider Locator"
+            },
+            "source_type": {
+              "minLength": 1,
+              "title": "Source Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_type",
+            "artifact_ref"
+          ],
+          "title": "Provenance",
+          "type": "object"
+        },
+        "Table": {
+          "additionalProperties": false,
+          "description": "A normalised table.\n\n``header_cell_ids`` keeps the linkage to the cells acting as the\ncolumn/row headers so evidence can travel with each measurement.",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "caption": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Caption"
+            },
+            "cells": {
+              "items": {
+                "$ref": "#/$defs/TableCell"
+              },
+              "title": "Cells",
+              "type": "array"
+            },
+            "column_count": {
+              "minimum": 0,
+              "title": "Column Count",
+              "type": "integer"
+            },
+            "continuation_group": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Continuation Group"
+            },
+            "header_cell_ids": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Header Cell Ids",
+              "type": "array"
+            },
+            "page_number": {
+              "minimum": 1,
+              "title": "Page Number",
+              "type": "integer"
+            },
+            "row_count": {
+              "minimum": 0,
+              "title": "Row Count",
+              "type": "integer"
+            },
+            "table_id": {
+              "minLength": 1,
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "table_id",
+            "page_number",
+            "row_count",
+            "column_count",
+            "cells"
+          ],
+          "title": "Table",
+          "type": "object"
+        },
+        "TableCell": {
+          "additionalProperties": false,
+          "description": "A cell inside a normalised table.\n\n``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``\nfollow the HTML convention (both default to 1).",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "cell_id": {
+              "minLength": 1,
+              "title": "Cell Id",
+              "type": "string"
+            },
+            "colspan": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Colspan",
+              "type": "integer"
+            },
+            "column_index": {
+              "minimum": 0,
+              "title": "Column Index",
+              "type": "integer"
+            },
+            "row_index": {
+              "minimum": 0,
+              "title": "Row Index",
+              "type": "integer"
+            },
+            "rowspan": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Rowspan",
+              "type": "integer"
+            },
+            "text_raw": {
+              "minLength": 1,
+              "title": "Text Raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cell_id",
+            "row_index",
+            "column_index",
+            "text_raw"
+          ],
+          "title": "TableCell",
+          "type": "object"
+        },
+        "TextBlock": {
+          "additionalProperties": false,
+          "description": "A single block on a normalised page.\n\nBlocks are the atom the domain rules consume. ``bbox`` may be ``None``\nif the upstream source could not produce coordinates (e.g. an OCR page\nthat returned text only). ``kind`` separates sequence listings from\nregular prose so downstream extractors can dispatch cheaply.",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "block_id": {
+              "minLength": 1,
+              "title": "Block Id",
+              "type": "string"
+            },
+            "kind": {
+              "default": "text",
+              "enum": [
+                "text",
+                "title",
+                "list",
+                "table",
+                "picture",
+                "formula",
+                "sequence_listing",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "provenance": {
+              "items": {
+                "$ref": "#/$defs/Provenance"
+              },
+              "title": "Provenance",
+              "type": "array"
+            },
+            "table_id": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Table Id"
+            },
+            "text_raw": {
+              "minLength": 1,
+              "title": "Text Raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "block_id",
+            "text_raw"
+          ],
+          "title": "TextBlock",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A page in a :class:`NormalizedDocument`.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/TextBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "height_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Height Pt",
+          "type": "number"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "printed_page_label": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Printed Page Label"
+        },
+        "route": {
+          "default": "unknown",
+          "enum": [
+            "native",
+            "layout_native",
+            "layout_ocr",
+            "scan_suspect",
+            "text_suspect",
+            "mixed",
+            "blank",
+            "unknown"
+          ],
+          "title": "Route",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "$ref": "#/$defs/Table"
+          },
+          "title": "Tables",
+          "type": "array"
+        },
+        "width_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Width Pt",
+          "type": "number"
+        }
+      },
+      "required": [
+        "page_number",
+        "width_pt",
+        "height_pt"
+      ],
+      "title": "NormalizedPage",
+      "type": "object"
+    },
+    "PageGeometry": {
+      "additionalProperties": false,
+      "description": "Page dimensions in PDF points after rotation/CropBox has been applied.\n\nThe width/height are expressed in the user-facing (visible) coordinate\nsystem. Downstream geometry maths MUST rely on these values, never on\nthe raw MediaBox.",
+      "properties": {
+        "height_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Height Pt",
+          "type": "number"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "rotation_deg": {
+          "default": 0,
+          "maximum": 359,
+          "minimum": 0,
+          "title": "Rotation Deg",
+          "type": "integer"
+        },
+        "width_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Width Pt",
+          "type": "number"
+        }
+      },
+      "required": [
+        "page_number",
+        "width_pt",
+        "height_pt"
+      ],
+      "title": "PageGeometry",
+      "type": "object"
+    },
+    "PageQuality": {
+      "additionalProperties": false,
+      "description": "Per-page quality signals.\n\n``image_coverage`` is the union of image area over the visible page\narea; the design forbids naïve sum-based coverage that can exceed 1.0.",
+      "properties": {
+        "hidden_text_flag": {
+          "default": false,
+          "title": "Hidden Text Flag",
+          "type": "boolean"
+        },
+        "image_coverage": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Image Coverage",
+          "type": "number"
+        },
+        "nonspace_chars": {
+          "minimum": 0,
+          "title": "Nonspace Chars",
+          "type": "integer"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "printable_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Printable Ratio",
+          "type": "number"
+        },
+        "repeated_char_ratio": {
+          "default": 0.0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Repeated Char Ratio",
+          "type": "number"
+        },
+        "replacement_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Replacement Ratio",
+          "type": "number"
+        },
+        "warnings": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_number",
+        "nonspace_chars",
+        "printable_ratio",
+        "replacement_ratio",
+        "image_coverage"
+      ],
+      "title": "PageQuality",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "One source-of-truth link back to an upstream artifact.",
+      "properties": {
+        "artifact_ref": {
+          "minLength": 1,
+          "title": "Artifact Ref",
+          "type": "string"
+        },
+        "provider_locator": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Locator"
+        },
+        "source_type": {
+          "minLength": 1,
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "artifact_ref"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "QualityConfig": {
+      "additionalProperties": false,
+      "description": "Thresholds used by the page-quality classifier.\n\nThe defaults mirror ``configs/demo.toml`` and are deliberately\nconservative. Tune after we have real-sample coverage.",
+      "properties": {
+        "blank_max_chars": {
+          "default": 5,
+          "minimum": 0,
+          "title": "Blank Max Chars",
+          "type": "integer"
+        },
+        "low_text_char_count": {
+          "default": 20,
+          "minimum": 0,
+          "title": "Low Text Char Count",
+          "type": "integer"
+        },
+        "replacement_ratio": {
+          "default": 0.02,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Replacement Ratio",
+          "type": "number"
+        },
+        "scan_image_coverage": {
+          "default": 0.2,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Scan Image Coverage",
+          "type": "number"
+        },
+        "text_suspect_garbled_ratio": {
+          "default": 0.4,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Text Suspect Garbled Ratio",
+          "type": "number"
+        }
+      },
+      "title": "QualityConfig",
+      "type": "object"
+    },
+    "ReviewDecision": {
+      "additionalProperties": false,
+      "description": "A human-issued decision appended to a review item.\n\n``patch_json`` is the field-level correction when ``action='correct'``.\n``base_revision`` ensures decisions cannot be silently applied to a\nrecord that has since changed.",
+      "properties": {
+        "action": {
+          "enum": [
+            "confirm",
+            "correct",
+            "reject"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "base_revision": {
+          "minimum": 1,
+          "title": "Base Revision",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "decision_id": {
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "patch_json": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Patch Json",
+          "type": "object"
+        },
+        "review_id": {
+          "minLength": 1,
+          "title": "Review Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "review_id",
+        "actor",
+        "action",
+        "base_revision"
+      ],
+      "title": "ReviewDecision",
+      "type": "object"
+    },
+    "RouteDecision": {
+      "additionalProperties": false,
+      "description": "The routing decision for a page.\n\n``reasons`` carries the human-readable rationale (referencing the\nsignal values) and ``rule_version`` pins the classifier so reviewers\nknow which version of the rule produced the decision.",
+      "properties": {
+        "reasons": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "route": {
+          "enum": [
+            "native",
+            "layout_native",
+            "layout_ocr",
+            "scan_suspect",
+            "text_suspect",
+            "mixed",
+            "blank",
+            "unknown"
+          ],
+          "title": "Route",
+          "type": "string"
+        },
+        "rule_version": {
+          "default": "v0",
+          "minLength": 1,
+          "title": "Rule Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "route"
+      ],
+      "title": "RouteDecision",
+      "type": "object"
+    },
+    "SequenceRecord": {
+      "$defs": {
+        "CheckResult": {
+          "additionalProperties": false,
+          "description": "A single structured check on a record.\n\nThe ``check_id`` mirrors the IDs in design §6.6. ``outcome`` is the\ndiscrete result and ``evidence_ids`` points to the evidence that\ntriggered the decision. We deliberately keep ``details`` as a free-form\nstring dict so future checks can attach operator-specific notes without\nschema churn.",
+          "properties": {
+            "check_id": {
+              "minLength": 1,
+              "title": "Check Id",
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "title": "Details",
+              "type": "object"
+            },
+            "evidence_ids": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "outcome": {
+              "enum": [
+                "pass",
+                "fail",
+                "not_applicable",
+                "unknown"
+              ],
+              "title": "Outcome",
+              "type": "string"
+            }
+          },
+          "required": [
+            "check_id",
+            "outcome"
+          ],
+          "title": "CheckResult",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A sequence candidate extracted from a page.\n\nThe record carries both the original raw form (e.g. ST.25 three-letter\nblocks) and the normalized one-letter form. ``declared_length`` and\n``observed_length`` are stored independently so incomplete trailing\nsegments remain honest.",
+      "properties": {
+        "acceptance_state": {
+          "default": "candidate",
+          "enum": [
+            "candidate",
+            "needs_review",
+            "accepted",
+            "rejected"
+          ],
+          "title": "Acceptance State",
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "declared_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Declared Length"
+        },
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "feature_notes": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Feature Notes",
+          "type": "array"
+        },
+        "is_complete": {
+          "default": false,
+          "title": "Is Complete",
+          "type": "boolean"
+        },
+        "is_explicit_sequence": {
+          "default": true,
+          "title": "Is Explicit Sequence",
+          "type": "boolean"
+        },
+        "molecule_type": {
+          "enum": [
+            "DNA",
+            "RNA",
+            "protein",
+            "unknown"
+          ],
+          "title": "Molecule Type",
+          "type": "string"
+        },
+        "normalized_sequence": {
+          "minLength": 1,
+          "title": "Normalized Sequence",
+          "type": "string"
+        },
+        "observed_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed Length"
+        },
+        "organism_raw": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Organism Raw"
+        },
+        "raw_sequence": {
+          "minLength": 1,
+          "title": "Raw Sequence",
+          "type": "string"
+        },
+        "representation": {
+          "enum": [
+            "one_letter",
+            "three_letter",
+            "modified",
+            "unresolved"
+          ],
+          "title": "Representation",
+          "type": "string"
+        },
+        "residues": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Residues",
+          "type": "array"
+        },
+        "seq_id_no": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seq Id No"
+        },
+        "sequence_id": {
+          "minLength": 1,
+          "title": "Sequence Id",
+          "type": "string"
+        },
+        "validation_state": {
+          "default": "unchecked",
+          "enum": [
+            "unchecked",
+            "checks_passed",
+            "conflict",
+            "verified_reference",
+            "verified_human"
+          ],
+          "title": "Validation State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence_id",
+        "document_id",
+        "molecule_type",
+        "representation",
+        "raw_sequence",
+        "normalized_sequence",
+        "evidence_ids"
+      ],
+      "title": "SequenceRecord",
+      "type": "object"
+    },
+    "SequenceReference": {
+      "additionalProperties": false,
+      "description": "A SEQ ID mention that has not been resolved to a sequence.\n\nResolved references keep the same shape but set ``resolved_sequence_id``\nto the linked :class:`SequenceRecord`.",
+      "properties": {
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "mention_raw": {
+          "minLength": 1,
+          "title": "Mention Raw",
+          "type": "string"
+        },
+        "resolved_sequence_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Sequence Id"
+        },
+        "seq_id_no": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Seq Id No",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "seq_id_no",
+        "mention_raw",
+        "evidence_ids"
+      ],
+      "title": "SequenceReference",
+      "type": "object"
+    },
+    "SequenceRelation": {
+      "additionalProperties": false,
+      "description": "An explicit relation between two records or entities.\n\n``predicate`` controls the semantic; cross-language consumers must\naccept the exact set in :data:`RelationPredicate`.",
+      "properties": {
+        "document_id": {
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "object_id": {
+          "minLength": 1,
+          "title": "Object Id",
+          "type": "string"
+        },
+        "predicate": {
+          "enum": [
+            "has_sequence",
+            "heavy_chain",
+            "light_chain",
+            "has_cdr",
+            "variant_of",
+            "assayed_entity"
+          ],
+          "title": "Predicate",
+          "type": "string"
+        },
+        "relation_id": {
+          "minLength": 1,
+          "title": "Relation Id",
+          "type": "string"
+        },
+        "subject_id": {
+          "minLength": 1,
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "validation_state": {
+          "default": "unchecked",
+          "enum": [
+            "unchecked",
+            "checks_passed",
+            "conflict",
+            "verified_reference",
+            "verified_human"
+          ],
+          "title": "Validation State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation_id",
+        "document_id",
+        "subject_id",
+        "predicate",
+        "object_id",
+        "evidence_ids"
+      ],
+      "title": "SequenceRelation",
+      "type": "object"
+    },
+    "Stage": {
+      "additionalProperties": false,
+      "description": "One persisted stage execution.\n\n``cache_key`` lets the runner skip re-running a stage whose inputs and\nrules have not changed. ``attempt`` counts from 1.",
+      "properties": {
+        "artifact_manifest_ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Manifest Ref"
+        },
+        "attempt": {
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "cache_key": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Key"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "error_json": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Error Json",
+          "type": "object"
+        },
+        "job_id": {
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "stage_name": {
+          "minLength": 1,
+          "title": "Stage Name",
+          "type": "string"
+        },
+        "stage_run_id": {
+          "minLength": 1,
+          "title": "Stage Run Id",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage_run_id",
+        "job_id",
+        "stage_name",
+        "attempt"
+      ],
+      "title": "Stage",
+      "type": "object"
+    },
+    "StageOutcome": {
+      "$defs": {
+        "ArtifactRef": {
+          "additionalProperties": false,
+          "description": "A reference to an immutable artifact on disk.\n\n``relative_path`` is anchored at the configured ``artifact_root`` and\nmust not contain ``..`` segments or absolute paths. The same path with\na different ``sha256`` is reported as :data:`ARTIFACT_CONFLICT`.",
+          "properties": {
+            "artifact_id": {
+              "minLength": 1,
+              "title": "Artifact Id",
+              "type": "string"
+            },
+            "media_type": {
+              "minLength": 1,
+              "title": "Media Type",
+              "type": "string"
+            },
+            "producer_stage_run_id": {
+              "minLength": 1,
+              "title": "Producer Stage Run Id",
+              "type": "string"
+            },
+            "relative_path": {
+              "minLength": 1,
+              "title": "Relative Path",
+              "type": "string"
+            },
+            "sha256": {
+              "minLength": 1,
+              "title": "Sha256",
+              "type": "string"
+            }
+          },
+          "required": [
+            "artifact_id",
+            "sha256",
+            "relative_path",
+            "media_type",
+            "producer_stage_run_id"
+          ],
+          "title": "ArtifactRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The return value of a stage handler.\n\n``review_required`` is a *count* of records the runner should add to\nthe review queue, not a guarantee.",
+      "properties": {
+        "artifact_refs": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "title": "Artifact Refs",
+          "type": "array"
+        },
+        "review_required": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Review Required",
+          "type": "integer"
+        },
+        "warnings": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "title": "StageOutcome",
+      "type": "object"
+    },
+    "Table": {
+      "$defs": {
+        "TableCell": {
+          "additionalProperties": false,
+          "description": "A cell inside a normalised table.\n\n``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``\nfollow the HTML convention (both default to 1).",
+          "properties": {
+            "bbox": {
+              "anyOf": [
+                {
+                  "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bbox"
+            },
+            "cell_id": {
+              "minLength": 1,
+              "title": "Cell Id",
+              "type": "string"
+            },
+            "colspan": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Colspan",
+              "type": "integer"
+            },
+            "column_index": {
+              "minimum": 0,
+              "title": "Column Index",
+              "type": "integer"
+            },
+            "row_index": {
+              "minimum": 0,
+              "title": "Row Index",
+              "type": "integer"
+            },
+            "rowspan": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Rowspan",
+              "type": "integer"
+            },
+            "text_raw": {
+              "minLength": 1,
+              "title": "Text Raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cell_id",
+            "row_index",
+            "column_index",
+            "text_raw"
+          ],
+          "title": "TableCell",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A normalised table.\n\n``header_cell_ids`` keeps the linkage to the cells acting as the\ncolumn/row headers so evidence can travel with each measurement.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        },
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/TableCell"
+          },
+          "title": "Cells",
+          "type": "array"
+        },
+        "column_count": {
+          "minimum": 0,
+          "title": "Column Count",
+          "type": "integer"
+        },
+        "continuation_group": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Continuation Group"
+        },
+        "header_cell_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Header Cell Ids",
+          "type": "array"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "row_count": {
+          "minimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "table_id": {
+          "minLength": 1,
+          "title": "Table Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table_id",
+        "page_number",
+        "row_count",
+        "column_count",
+        "cells"
+      ],
+      "title": "Table",
+      "type": "object"
+    },
+    "TableCell": {
+      "additionalProperties": false,
+      "description": "A cell inside a normalised table.\n\n``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``\nfollow the HTML convention (both default to 1).",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "cell_id": {
+          "minLength": 1,
+          "title": "Cell Id",
+          "type": "string"
+        },
+        "colspan": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Colspan",
+          "type": "integer"
+        },
+        "column_index": {
+          "minimum": 0,
+          "title": "Column Index",
+          "type": "integer"
+        },
+        "row_index": {
+          "minimum": 0,
+          "title": "Row Index",
+          "type": "integer"
+        },
+        "rowspan": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Rowspan",
+          "type": "integer"
+        },
+        "text_raw": {
+          "minLength": 1,
+          "title": "Text Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cell_id",
+        "row_index",
+        "column_index",
+        "text_raw"
+      ],
+      "title": "TableCell",
+      "type": "object"
+    },
+    "TextBlock": {
+      "$defs": {
+        "Provenance": {
+          "additionalProperties": false,
+          "description": "One source-of-truth link back to an upstream artifact.",
+          "properties": {
+            "artifact_ref": {
+              "minLength": 1,
+              "title": "Artifact Ref",
+              "type": "string"
+            },
+            "provider_locator": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Provider Locator"
+            },
+            "source_type": {
+              "minLength": 1,
+              "title": "Source Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_type",
+            "artifact_ref"
+          ],
+          "title": "Provenance",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A single block on a normalised page.\n\nBlocks are the atom the domain rules consume. ``bbox`` may be ``None``\nif the upstream source could not produce coordinates (e.g. an OCR page\nthat returned text only). ``kind`` separates sequence listings from\nregular prose so downstream extractors can dispatch cheaply.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "block_id": {
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "kind": {
+          "default": "text",
+          "enum": [
+            "text",
+            "title",
+            "list",
+            "table",
+            "picture",
+            "formula",
+            "sequence_listing",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "provenance": {
+          "items": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "title": "Provenance",
+          "type": "array"
+        },
+        "table_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Table Id"
+        },
+        "text_raw": {
+          "minLength": 1,
+          "title": "Text Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "block_id",
+        "text_raw"
+      ],
+      "title": "TextBlock",
+      "type": "object"
+    },
+    "ValidationResult": {
+      "additionalProperties": false,
+      "description": "The aggregate of a record's checks.\n\n``review_reasons`` capture rationale beyond the structured checks so the\nreview UI can present actionable guidance.",
+      "properties": {
+        "checks": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "review_reasons": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Review Reasons",
+          "type": "array"
+        },
+        "validation_state": {
+          "default": "unchecked",
+          "enum": [
+            "unchecked",
+            "checks_passed",
+            "conflict",
+            "verified_reference",
+            "verified_human"
+          ],
+          "title": "Validation State",
+          "type": "string"
+        }
+      },
+      "title": "ValidationResult",
+      "type": "object"
+    }
+  },
+  "schema_version": "v1"
+}

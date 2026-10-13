@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "One source-of-truth link back to an upstream artifact.",
+      "properties": {
+        "artifact_ref": {
+          "minLength": 1,
+          "title": "Artifact Ref",
+          "type": "string"
+        },
+        "provider_locator": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Locator"
+        },
+        "source_type": {
+          "minLength": 1,
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "artifact_ref"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A single block on a normalised page.\n\nBlocks are the atom the domain rules consume. ``bbox`` may be ``None``\nif the upstream source could not produce coordinates (e.g. an OCR page\nthat returned text only). ``kind`` separates sequence listings from\nregular prose so downstream extractors can dispatch cheaply.",
+  "properties": {
+    "bbox": {
+      "anyOf": [
+        {
+          "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bbox"
+    },
+    "block_id": {
+      "minLength": 1,
+      "title": "Block Id",
+      "type": "string"
+    },
+    "kind": {
+      "default": "text",
+      "enum": [
+        "text",
+        "title",
+        "list",
+        "table",
+        "picture",
+        "formula",
+        "sequence_listing",
+        "unknown"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "provenance": {
+      "items": {
+        "$ref": "#/$defs/Provenance"
+      },
+      "title": "Provenance",
+      "type": "array"
+    },
+    "table_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Table Id"
+    },
+    "text_raw": {
+      "minLength": 1,
+      "title": "Text Raw",
+      "type": "string"
+    }
+  },
+  "required": [
+    "block_id",
+    "text_raw"
+  ],
+  "title": "TextBlock",
+  "type": "object"
+}

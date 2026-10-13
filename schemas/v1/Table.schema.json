@@ -1,0 +1,182 @@
+{
+  "$defs": {
+    "TableCell": {
+      "additionalProperties": false,
+      "description": "A cell inside a normalised table.\n\n``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``\nfollow the HTML convention (both default to 1).",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "cell_id": {
+          "minLength": 1,
+          "title": "Cell Id",
+          "type": "string"
+        },
+        "colspan": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Colspan",
+          "type": "integer"
+        },
+        "column_index": {
+          "minimum": 0,
+          "title": "Column Index",
+          "type": "integer"
+        },
+        "row_index": {
+          "minimum": 0,
+          "title": "Row Index",
+          "type": "integer"
+        },
+        "rowspan": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Rowspan",
+          "type": "integer"
+        },
+        "text_raw": {
+          "minLength": 1,
+          "title": "Text Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cell_id",
+        "row_index",
+        "column_index",
+        "text_raw"
+      ],
+      "title": "TableCell",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A normalised table.\n\n``header_cell_ids`` keeps the linkage to the cells acting as the\ncolumn/row headers so evidence can travel with each measurement.",
+  "properties": {
+    "bbox": {
+      "anyOf": [
+        {
+          "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bbox"
+    },
+    "caption": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Caption"
+    },
+    "cells": {
+      "items": {
+        "$ref": "#/$defs/TableCell"
+      },
+      "title": "Cells",
+      "type": "array"
+    },
+    "column_count": {
+      "minimum": 0,
+      "title": "Column Count",
+      "type": "integer"
+    },
+    "continuation_group": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Continuation Group"
+    },
+    "header_cell_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Header Cell Ids",
+      "type": "array"
+    },
+    "page_number": {
+      "minimum": 1,
+      "title": "Page Number",
+      "type": "integer"
+    },
+    "row_count": {
+      "minimum": 0,
+      "title": "Row Count",
+      "type": "integer"
+    },
+    "table_id": {
+      "minLength": 1,
+      "title": "Table Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "table_id",
+    "page_number",
+    "row_count",
+    "column_count",
+    "cells"
+  ],
+  "title": "Table",
+  "type": "object"
+}

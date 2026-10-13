@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "PageGeometry": {
+      "additionalProperties": false,
+      "description": "Page dimensions in PDF points after rotation/CropBox has been applied.\n\nThe width/height are expressed in the user-facing (visible) coordinate\nsystem. Downstream geometry maths MUST rely on these values, never on\nthe raw MediaBox.",
+      "properties": {
+        "height_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Height Pt",
+          "type": "number"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "rotation_deg": {
+          "default": 0,
+          "maximum": 359,
+          "minimum": 0,
+          "title": "Rotation Deg",
+          "type": "integer"
+        },
+        "width_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Width Pt",
+          "type": "number"
+        }
+      },
+      "required": [
+        "page_number",
+        "width_pt",
+        "height_pt"
+      ],
+      "title": "PageGeometry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The result of the ingestion inspector.\n\nCarries the SHA-256 of the original bytes (used as ``document_id``),\nthe page geometry list and encryption flags. Parsers must never see\nraw bytes they have not first verified.",
+  "properties": {
+    "bytes": {
+      "minimum": 0,
+      "title": "Bytes",
+      "type": "integer"
+    },
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "is_encrypted": {
+      "default": false,
+      "title": "Is Encrypted",
+      "type": "boolean"
+    },
+    "page_count": {
+      "minimum": 0,
+      "title": "Page Count",
+      "type": "integer"
+    },
+    "pages": {
+      "items": {
+        "$ref": "#/$defs/PageGeometry"
+      },
+      "title": "Pages",
+      "type": "array"
+    },
+    "sha256": {
+      "minLength": 1,
+      "title": "Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "document_id",
+    "sha256",
+    "bytes",
+    "page_count"
+  ],
+  "title": "DocumentInspection",
+  "type": "object"
+}

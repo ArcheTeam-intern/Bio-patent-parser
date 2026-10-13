@@ -1,0 +1,417 @@
+{
+  "$defs": {
+    "NormalizedPage": {
+      "additionalProperties": false,
+      "description": "A page in a :class:`NormalizedDocument`.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/TextBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "height_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Height Pt",
+          "type": "number"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "printed_page_label": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Printed Page Label"
+        },
+        "route": {
+          "default": "unknown",
+          "enum": [
+            "native",
+            "layout_native",
+            "layout_ocr",
+            "scan_suspect",
+            "text_suspect",
+            "mixed",
+            "blank",
+            "unknown"
+          ],
+          "title": "Route",
+          "type": "string"
+        },
+        "tables": {
+          "items": {
+            "$ref": "#/$defs/Table"
+          },
+          "title": "Tables",
+          "type": "array"
+        },
+        "width_pt": {
+          "exclusiveMinimum": 0,
+          "title": "Width Pt",
+          "type": "number"
+        }
+      },
+      "required": [
+        "page_number",
+        "width_pt",
+        "height_pt"
+      ],
+      "title": "NormalizedPage",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "One source-of-truth link back to an upstream artifact.",
+      "properties": {
+        "artifact_ref": {
+          "minLength": 1,
+          "title": "Artifact Ref",
+          "type": "string"
+        },
+        "provider_locator": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Locator"
+        },
+        "source_type": {
+          "minLength": 1,
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "artifact_ref"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "Table": {
+      "additionalProperties": false,
+      "description": "A normalised table.\n\n``header_cell_ids`` keeps the linkage to the cells acting as the\ncolumn/row headers so evidence can travel with each measurement.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        },
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/TableCell"
+          },
+          "title": "Cells",
+          "type": "array"
+        },
+        "column_count": {
+          "minimum": 0,
+          "title": "Column Count",
+          "type": "integer"
+        },
+        "continuation_group": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Continuation Group"
+        },
+        "header_cell_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Header Cell Ids",
+          "type": "array"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "row_count": {
+          "minimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "table_id": {
+          "minLength": 1,
+          "title": "Table Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table_id",
+        "page_number",
+        "row_count",
+        "column_count",
+        "cells"
+      ],
+      "title": "Table",
+      "type": "object"
+    },
+    "TableCell": {
+      "additionalProperties": false,
+      "description": "A cell inside a normalised table.\n\n``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``\nfollow the HTML convention (both default to 1).",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "cell_id": {
+          "minLength": 1,
+          "title": "Cell Id",
+          "type": "string"
+        },
+        "colspan": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Colspan",
+          "type": "integer"
+        },
+        "column_index": {
+          "minimum": 0,
+          "title": "Column Index",
+          "type": "integer"
+        },
+        "row_index": {
+          "minimum": 0,
+          "title": "Row Index",
+          "type": "integer"
+        },
+        "rowspan": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Rowspan",
+          "type": "integer"
+        },
+        "text_raw": {
+          "minLength": 1,
+          "title": "Text Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cell_id",
+        "row_index",
+        "column_index",
+        "text_raw"
+      ],
+      "title": "TableCell",
+      "type": "object"
+    },
+    "TextBlock": {
+      "additionalProperties": false,
+      "description": "A single block on a normalised page.\n\nBlocks are the atom the domain rules consume. ``bbox`` may be ``None``\nif the upstream source could not produce coordinates (e.g. an OCR page\nthat returned text only). ``kind`` separates sequence listings from\nregular prose so downstream extractors can dispatch cheaply.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "block_id": {
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "kind": {
+          "default": "text",
+          "enum": [
+            "text",
+            "title",
+            "list",
+            "table",
+            "picture",
+            "formula",
+            "sequence_listing",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "provenance": {
+          "items": {
+            "$ref": "#/$defs/Provenance"
+          },
+          "title": "Provenance",
+          "type": "array"
+        },
+        "table_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Table Id"
+        },
+        "text_raw": {
+          "minLength": 1,
+          "title": "Text Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "block_id",
+        "text_raw"
+      ],
+      "title": "TextBlock",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The unified parser output.\n\nProduced by every adapter (native, Docling, MinerU). Domain code never\nsees the SDK-specific objects directly.",
+  "properties": {
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "errors": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Errors",
+      "type": "array"
+    },
+    "pages": {
+      "items": {
+        "$ref": "#/$defs/NormalizedPage"
+      },
+      "title": "Pages",
+      "type": "array"
+    },
+    "parser_run_id": {
+      "minLength": 1,
+      "title": "Parser Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "parser_run_id",
+    "pages"
+  ],
+  "title": "NormalizedDocument",
+  "type": "object"
+}

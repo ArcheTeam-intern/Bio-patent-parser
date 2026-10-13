@@ -1,0 +1,75 @@
+{
+  "additionalProperties": false,
+  "description": "A cell inside a normalised table.\n\n``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``\nfollow the HTML convention (both default to 1).",
+  "properties": {
+    "bbox": {
+      "anyOf": [
+        {
+          "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bbox"
+    },
+    "cell_id": {
+      "minLength": 1,
+      "title": "Cell Id",
+      "type": "string"
+    },
+    "colspan": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Colspan",
+      "type": "integer"
+    },
+    "column_index": {
+      "minimum": 0,
+      "title": "Column Index",
+      "type": "integer"
+    },
+    "row_index": {
+      "minimum": 0,
+      "title": "Row Index",
+      "type": "integer"
+    },
+    "rowspan": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Rowspan",
+      "type": "integer"
+    },
+    "text_raw": {
+      "minLength": 1,
+      "title": "Text Raw",
+      "type": "string"
+    }
+  },
+  "required": [
+    "cell_id",
+    "row_index",
+    "column_index",
+    "text_raw"
+  ],
+  "title": "TableCell",
+  "type": "object"
+}

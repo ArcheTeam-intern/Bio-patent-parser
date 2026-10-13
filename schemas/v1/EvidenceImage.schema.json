@@ -1,0 +1,78 @@
+{
+  "additionalProperties": false,
+  "description": "A rendered PNG tied back to the page coordinates it was clipped from.\n\n``transform_to_page`` describes the affine used to go from image pixels\nback to PDF points; it is stored separately from ``bbox`` because the\nrendered image may have been clipped, scaled or de-skewed.",
+  "properties": {
+    "artifact_ref": {
+      "minLength": 1,
+      "title": "Artifact Ref",
+      "type": "string"
+    },
+    "bbox": {
+      "description": "Axis-aligned box in PDF user space (points). Origin is bottom-left; x0 <= x1, y0 <= y1.",
+      "maxItems": 4,
+      "minItems": 4,
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "title": "Bbox",
+      "type": "array"
+    },
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "dpi": {
+      "minimum": 72,
+      "title": "Dpi",
+      "type": "integer"
+    },
+    "page_number": {
+      "minimum": 1,
+      "title": "Page Number",
+      "type": "integer"
+    },
+    "pixel_height": {
+      "minimum": 1,
+      "title": "Pixel Height",
+      "type": "integer"
+    },
+    "pixel_width": {
+      "minimum": 1,
+      "title": "Pixel Width",
+      "type": "integer"
+    },
+    "transform_to_page": {
+      "items": {
+        "type": "number"
+      },
+      "maxItems": 6,
+      "minItems": 6,
+      "title": "Transform To Page",
+      "type": "array"
+    }
+  },
+  "required": [
+    "artifact_ref",
+    "document_id",
+    "page_number",
+    "bbox",
+    "dpi",
+    "pixel_width",
+    "pixel_height",
+    "transform_to_page"
+  ],
+  "title": "EvidenceImage",
+  "type": "object"
+}

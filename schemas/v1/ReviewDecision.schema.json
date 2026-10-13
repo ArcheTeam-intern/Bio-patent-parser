@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "description": "A human-issued decision appended to a review item.\n\n``patch_json`` is the field-level correction when ``action='correct'``.\n``base_revision`` ensures decisions cannot be silently applied to a\nrecord that has since changed.",
+  "properties": {
+    "action": {
+      "enum": [
+        "confirm",
+        "correct",
+        "reject"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "actor": {
+      "minLength": 1,
+      "title": "Actor",
+      "type": "string"
+    },
+    "base_revision": {
+      "minimum": 1,
+      "title": "Base Revision",
+      "type": "integer"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "decision_id": {
+      "minLength": 1,
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "evidence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "patch_json": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Patch Json",
+      "type": "object"
+    },
+    "review_id": {
+      "minLength": 1,
+      "title": "Review Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision_id",
+    "review_id",
+    "actor",
+    "action",
+    "base_revision"
+  ],
+  "title": "ReviewDecision",
+  "type": "object"
+}

@@ -1,0 +1,42 @@
+{
+  "additionalProperties": false,
+  "description": "A single structured check on a record.\n\nThe ``check_id`` mirrors the IDs in design §6.6. ``outcome`` is the\ndiscrete result and ``evidence_ids`` points to the evidence that\ntriggered the decision. We deliberately keep ``details`` as a free-form\nstring dict so future checks can attach operator-specific notes without\nschema churn.",
+  "properties": {
+    "check_id": {
+      "minLength": 1,
+      "title": "Check Id",
+      "type": "string"
+    },
+    "details": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Details",
+      "type": "object"
+    },
+    "evidence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "outcome": {
+      "enum": [
+        "pass",
+        "fail",
+        "not_applicable",
+        "unknown"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    }
+  },
+  "required": [
+    "check_id",
+    "outcome"
+  ],
+  "title": "CheckResult",
+  "type": "object"
+}

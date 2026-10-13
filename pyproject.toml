@@ -36,6 +36,9 @@ dev = [
 docling = [
     # Pin the integration range; we confirm exact versions during Task 5.
     "docling>=2.13,<3",
+    # The docling-serve HTTP adapter needs only httpx (no SDK), but both
+    # live in the same extra so a single install enables local SDK + remote.
+    "httpx>=0.27,<1",
 ]
 mineru = [
     # HTTP adapter only; no pinned SDK in this phase.

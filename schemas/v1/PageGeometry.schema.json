@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "description": "Page dimensions in PDF points after rotation/CropBox has been applied.\n\nThe width/height are expressed in the user-facing (visible) coordinate\nsystem. Downstream geometry maths MUST rely on these values, never on\nthe raw MediaBox.",
+  "properties": {
+    "height_pt": {
+      "exclusiveMinimum": 0,
+      "title": "Height Pt",
+      "type": "number"
+    },
+    "page_number": {
+      "minimum": 1,
+      "title": "Page Number",
+      "type": "integer"
+    },
+    "rotation_deg": {
+      "default": 0,
+      "maximum": 359,
+      "minimum": 0,
+      "title": "Rotation Deg",
+      "type": "integer"
+    },
+    "width_pt": {
+      "exclusiveMinimum": 0,
+      "title": "Width Pt",
+      "type": "number"
+    }
+  },
+  "required": [
+    "page_number",
+    "width_pt",
+    "height_pt"
+  ],
+  "title": "PageGeometry",
+  "type": "object"
+}

@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "description": "A reference to an immutable artifact on disk.\n\n``relative_path`` is anchored at the configured ``artifact_root`` and\nmust not contain ``..`` segments or absolute paths. The same path with\na different ``sha256`` is reported as :data:`ARTIFACT_CONFLICT`.",
+      "properties": {
+        "artifact_id": {
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "media_type": {
+          "minLength": 1,
+          "title": "Media Type",
+          "type": "string"
+        },
+        "producer_stage_run_id": {
+          "minLength": 1,
+          "title": "Producer Stage Run Id",
+          "type": "string"
+        },
+        "relative_path": {
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "sha256": {
+          "minLength": 1,
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "relative_path",
+        "media_type",
+        "producer_stage_run_id"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The return value of a stage handler.\n\n``review_required`` is a *count* of records the runner should add to\nthe review queue, not a guarantee.",
+  "properties": {
+    "artifact_refs": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "title": "Artifact Refs",
+      "type": "array"
+    },
+    "review_required": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Review Required",
+      "type": "integer"
+    },
+    "warnings": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "title": "StageOutcome",
+  "type": "object"
+}

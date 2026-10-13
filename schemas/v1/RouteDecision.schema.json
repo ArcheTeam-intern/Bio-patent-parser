@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "description": "The routing decision for a page.\n\n``reasons`` carries the human-readable rationale (referencing the\nsignal values) and ``rule_version`` pins the classifier so reviewers\nknow which version of the rule produced the decision.",
+  "properties": {
+    "reasons": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Reasons",
+      "type": "array"
+    },
+    "route": {
+      "enum": [
+        "native",
+        "layout_native",
+        "layout_ocr",
+        "scan_suspect",
+        "text_suspect",
+        "mixed",
+        "blank",
+        "unknown"
+      ],
+      "title": "Route",
+      "type": "string"
+    },
+    "rule_version": {
+      "default": "v0",
+      "minLength": 1,
+      "title": "Rule Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "route"
+  ],
+  "title": "RouteDecision",
+  "type": "object"
+}

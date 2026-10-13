@@ -15,12 +15,18 @@ from bio_pdf.parsers.normalize_docling import (
     NormalizationLossError,
     normalize_docling_document,
 )
+from bio_pdf.parsers.docling_serve_adapter import (
+    DEFAULT_BASE_URL,
+    DoclingServeAdapter,
+)
 
 __all__ = [
     "ParseArtifacts",
     "ParseRequest",
     "ParserAdapter",
     "NativeAdapter",
+    "DoclingServeAdapter",
+    "DEFAULT_BASE_URL",
     "normalize_docling_document",
     "NormalizationLossError",
 ]

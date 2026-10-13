@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "description": "Thresholds used by the page-quality classifier.\n\nThe defaults mirror ``configs/demo.toml`` and are deliberately\nconservative. Tune after we have real-sample coverage.",
+  "properties": {
+    "blank_max_chars": {
+      "default": 5,
+      "minimum": 0,
+      "title": "Blank Max Chars",
+      "type": "integer"
+    },
+    "low_text_char_count": {
+      "default": 20,
+      "minimum": 0,
+      "title": "Low Text Char Count",
+      "type": "integer"
+    },
+    "replacement_ratio": {
+      "default": 0.02,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Replacement Ratio",
+      "type": "number"
+    },
+    "scan_image_coverage": {
+      "default": 0.2,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Scan Image Coverage",
+      "type": "number"
+    },
+    "text_suspect_garbled_ratio": {
+      "default": 0.4,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Text Suspect Garbled Ratio",
+      "type": "number"
+    }
+  },
+  "title": "QualityConfig",
+  "type": "object"
+}

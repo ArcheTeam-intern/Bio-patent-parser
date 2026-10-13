@@ -1,0 +1,38 @@
+{
+  "additionalProperties": false,
+  "description": "The aggregate of a record's checks.\n\n``review_reasons`` capture rationale beyond the structured checks so the\nreview UI can present actionable guidance.",
+  "properties": {
+    "checks": {
+      "items": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "review_reasons": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Review Reasons",
+      "type": "array"
+    },
+    "validation_state": {
+      "default": "unchecked",
+      "enum": [
+        "unchecked",
+        "checks_passed",
+        "conflict",
+        "verified_reference",
+        "verified_human"
+      ],
+      "title": "Validation State",
+      "type": "string"
+    }
+  },
+  "title": "ValidationResult",
+  "type": "object"
+}

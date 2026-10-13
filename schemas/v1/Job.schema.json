@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "description": "A parse/extract job.\n\nThe same ``document_id`` may have many ``Job`` rows over its history\n(different configs, retries). ``result_revision`` increments whenever\nthe runner produces a new export revision.",
+  "properties": {
+    "config_hash": {
+      "minLength": 1,
+      "title": "Config Hash",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "current_stage": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Current Stage"
+    },
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "job_id": {
+      "minLength": 1,
+      "title": "Job Id",
+      "type": "string"
+    },
+    "result_revision": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Result Revision",
+      "type": "integer"
+    },
+    "status": {
+      "default": "queued",
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "succeeded_with_review",
+        "failed",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "document_id",
+    "config_hash"
+  ],
+  "title": "Job",
+  "type": "object"
+}

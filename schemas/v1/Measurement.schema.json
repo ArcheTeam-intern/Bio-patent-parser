@@ -1,0 +1,332 @@
+{
+  "$defs": {
+    "ActivityValue": {
+      "additionalProperties": false,
+      "description": "The structured representation of an activity value.\n\n``kind`` discriminates how ``number``/``lower``/``upper``/``uncertainty``\nare interpreted. ``raw`` always retains the original string from the\nsource so reviewers can audit the parse.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "scalar",
+            "range",
+            "plus_minus",
+            "categorical",
+            "unparsed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "lower": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lower"
+        },
+        "number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Decimal string for scalar/operator.",
+          "title": "Number"
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "enum": [
+                "<",
+                "<=",
+                ">",
+                ">=",
+                "=",
+                "~"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operator"
+        },
+        "qualifier": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qualifier"
+        },
+        "raw": {
+          "minLength": 1,
+          "title": "Raw",
+          "type": "string"
+        },
+        "uncertainty": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uncertainty"
+        },
+        "upper": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Upper"
+        }
+      },
+      "required": [
+        "kind",
+        "raw"
+      ],
+      "title": "ActivityValue",
+      "type": "object"
+    },
+    "CheckResult": {
+      "additionalProperties": false,
+      "description": "A single structured check on a record.\n\nThe ``check_id`` mirrors the IDs in design §6.6. ``outcome`` is the\ndiscrete result and ``evidence_ids`` points to the evidence that\ntriggered the decision. We deliberately keep ``details`` as a free-form\nstring dict so future checks can attach operator-specific notes without\nschema churn.",
+      "properties": {
+        "check_id": {
+          "minLength": 1,
+          "title": "Check Id",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Details",
+          "type": "object"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "outcome": {
+          "enum": [
+            "pass",
+            "fail",
+            "not_applicable",
+            "unknown"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_id",
+        "outcome"
+      ],
+      "title": "CheckResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A measurement linking an entity to a value with evidence.\n\nField-level evidence is required for ``value``/``unit``/``entity``/\n``target`` so that reviewers can audit which cell or paragraph\ncontributed each component.",
+  "properties": {
+    "acceptance_state": {
+      "default": "candidate",
+      "enum": [
+        "candidate",
+        "needs_review",
+        "accepted",
+        "rejected"
+      ],
+      "title": "Acceptance State",
+      "type": "string"
+    },
+    "assay_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Assay Id"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/CheckResult"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "conditions": {
+      "items": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "title": "Conditions",
+      "type": "array"
+    },
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "entity_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Entity Id"
+    },
+    "evidence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "evidence_kind": {
+      "default": "undetermined",
+      "enum": [
+        "measured",
+        "claim_threshold",
+        "general_statement",
+        "cited_result",
+        "undetermined"
+      ],
+      "title": "Evidence Kind",
+      "type": "string"
+    },
+    "field_evidence": {
+      "additionalProperties": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Field Evidence",
+      "type": "object"
+    },
+    "measurement_id": {
+      "minLength": 1,
+      "title": "Measurement Id",
+      "type": "string"
+    },
+    "metric": {
+      "minLength": 1,
+      "title": "Metric",
+      "type": "string"
+    },
+    "sequence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Sequence Ids",
+      "type": "array"
+    },
+    "target_raw": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Raw"
+    },
+    "unit_normalized": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unit Normalized"
+    },
+    "unit_raw": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unit Raw"
+    },
+    "validation_state": {
+      "default": "unchecked",
+      "enum": [
+        "unchecked",
+        "checks_passed",
+        "conflict",
+        "verified_reference",
+        "verified_human"
+      ],
+      "title": "Validation State",
+      "type": "string"
+    },
+    "value": {
+      "$ref": "#/$defs/ActivityValue"
+    }
+  },
+  "required": [
+    "measurement_id",
+    "document_id",
+    "metric",
+    "value",
+    "evidence_ids"
+  ],
+  "title": "Measurement",
+  "type": "object"
+}

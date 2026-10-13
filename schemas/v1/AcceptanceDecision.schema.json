@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "description": "The decision produced by the acceptance policy.\n\n``policy_version`` ties the decision to the exact policy text that\nproduced it so we can reproduce historic decisions after policy\nupgrades.",
+  "properties": {
+    "acceptance_state": {
+      "default": "candidate",
+      "enum": [
+        "candidate",
+        "needs_review",
+        "accepted",
+        "rejected"
+      ],
+      "title": "Acceptance State",
+      "type": "string"
+    },
+    "policy_version": {
+      "default": "v0",
+      "minLength": 1,
+      "title": "Policy Version",
+      "type": "string"
+    },
+    "reason_codes": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "verification_method": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Verification Method"
+    }
+  },
+  "title": "AcceptanceDecision",
+  "type": "object"
+}

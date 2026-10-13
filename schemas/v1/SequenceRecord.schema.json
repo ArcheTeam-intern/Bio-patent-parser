@@ -1,0 +1,221 @@
+{
+  "$defs": {
+    "CheckResult": {
+      "additionalProperties": false,
+      "description": "A single structured check on a record.\n\nThe ``check_id`` mirrors the IDs in design §6.6. ``outcome`` is the\ndiscrete result and ``evidence_ids`` points to the evidence that\ntriggered the decision. We deliberately keep ``details`` as a free-form\nstring dict so future checks can attach operator-specific notes without\nschema churn.",
+      "properties": {
+        "check_id": {
+          "minLength": 1,
+          "title": "Check Id",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Details",
+          "type": "object"
+        },
+        "evidence_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "outcome": {
+          "enum": [
+            "pass",
+            "fail",
+            "not_applicable",
+            "unknown"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_id",
+        "outcome"
+      ],
+      "title": "CheckResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A sequence candidate extracted from a page.\n\nThe record carries both the original raw form (e.g. ST.25 three-letter\nblocks) and the normalized one-letter form. ``declared_length`` and\n``observed_length`` are stored independently so incomplete trailing\nsegments remain honest.",
+  "properties": {
+    "acceptance_state": {
+      "default": "candidate",
+      "enum": [
+        "candidate",
+        "needs_review",
+        "accepted",
+        "rejected"
+      ],
+      "title": "Acceptance State",
+      "type": "string"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/CheckResult"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "declared_length": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Declared Length"
+    },
+    "document_id": {
+      "minLength": 1,
+      "title": "Document Id",
+      "type": "string"
+    },
+    "evidence_ids": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "feature_notes": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Feature Notes",
+      "type": "array"
+    },
+    "is_complete": {
+      "default": false,
+      "title": "Is Complete",
+      "type": "boolean"
+    },
+    "is_explicit_sequence": {
+      "default": true,
+      "title": "Is Explicit Sequence",
+      "type": "boolean"
+    },
+    "molecule_type": {
+      "enum": [
+        "DNA",
+        "RNA",
+        "protein",
+        "unknown"
+      ],
+      "title": "Molecule Type",
+      "type": "string"
+    },
+    "normalized_sequence": {
+      "minLength": 1,
+      "title": "Normalized Sequence",
+      "type": "string"
+    },
+    "observed_length": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed Length"
+    },
+    "organism_raw": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Organism Raw"
+    },
+    "raw_sequence": {
+      "minLength": 1,
+      "title": "Raw Sequence",
+      "type": "string"
+    },
+    "representation": {
+      "enum": [
+        "one_letter",
+        "three_letter",
+        "modified",
+        "unresolved"
+      ],
+      "title": "Representation",
+      "type": "string"
+    },
+    "residues": {
+      "items": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "title": "Residues",
+      "type": "array"
+    },
+    "seq_id_no": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seq Id No"
+    },
+    "sequence_id": {
+      "minLength": 1,
+      "title": "Sequence Id",
+      "type": "string"
+    },
+    "validation_state": {
+      "default": "unchecked",
+      "enum": [
+        "unchecked",
+        "checks_passed",
+        "conflict",
+        "verified_reference",
+        "verified_human"
+      ],
+      "title": "Validation State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sequence_id",
+    "document_id",
+    "molecule_type",
+    "representation",
+    "raw_sequence",
+    "normalized_sequence",
+    "evidence_ids"
+  ],
+  "title": "SequenceRecord",
+  "type": "object"
+}

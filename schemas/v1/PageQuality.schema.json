@@ -1,0 +1,63 @@
+{
+  "additionalProperties": false,
+  "description": "Per-page quality signals.\n\n``image_coverage`` is the union of image area over the visible page\narea; the design forbids naïve sum-based coverage that can exceed 1.0.",
+  "properties": {
+    "hidden_text_flag": {
+      "default": false,
+      "title": "Hidden Text Flag",
+      "type": "boolean"
+    },
+    "image_coverage": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Image Coverage",
+      "type": "number"
+    },
+    "nonspace_chars": {
+      "minimum": 0,
+      "title": "Nonspace Chars",
+      "type": "integer"
+    },
+    "page_number": {
+      "minimum": 1,
+      "title": "Page Number",
+      "type": "integer"
+    },
+    "printable_ratio": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Printable Ratio",
+      "type": "number"
+    },
+    "repeated_char_ratio": {
+      "default": 0.0,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Repeated Char Ratio",
+      "type": "number"
+    },
+    "replacement_ratio": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Replacement Ratio",
+      "type": "number"
+    },
+    "warnings": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "page_number",
+    "nonspace_chars",
+    "printable_ratio",
+    "replacement_ratio",
+    "image_coverage"
+  ],
+  "title": "PageQuality",
+  "type": "object"
+}
