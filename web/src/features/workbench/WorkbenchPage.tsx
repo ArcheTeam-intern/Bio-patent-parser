@@ -8,6 +8,7 @@ import { StageStrip } from "./StageStrip";
 import { PdfViewer } from "../pdf/PdfViewer";
 import { SequenceDetail } from "../sequences/SequenceList";
 import { MeasurementDetail, CheckList } from "../activities/ActivityList";
+import { ReviewPanel } from "../reviews/ReviewPanel";
 
 type Tab = "sequences" | "activities" | "tables" | "text" | "run";
 
@@ -126,9 +127,10 @@ export function WorkbenchPage() {
               <>
                 <SequenceDetail record={selected.record} />
                 <CheckList checks={selected.record.checks} reasons={selected.record.review_reasons ?? []} />
-                <ReviewPlaceholder
+                <ReviewPanel
+                  jobId={jobId}
                   recordId={selected.record.sequence_id}
-                  acceptanceState={selected.record.acceptance_state}
+                  currentRecord={selected.record as unknown as Record<string, unknown>}
                 />
               </>
             )}
@@ -143,9 +145,10 @@ export function WorkbenchPage() {
                     setTarget({ page, bbox: null });
                   }}
                 />
-                <ReviewPlaceholder
+                <ReviewPanel
+                  jobId={jobId}
                   recordId={selected.record.measurement_id}
-                  acceptanceState={selected.record.acceptance_state}
+                  currentRecord={selected.record as unknown as Record<string, unknown>}
                 />
               </>
             )}
@@ -270,17 +273,6 @@ function RunDetails({ jobId }: { jobId: string }) {
         运行详情包含：引擎、规则版本、配置哈希、请求/实际页集合、阶段耗时、警告与制品清单。
         制品可在任务面板通过 /artifacts 接口按 ID 下载。
       </div>
-    </div>
-  );
-}
-
-function ReviewPlaceholder({ recordId, acceptanceState }: { recordId: string; acceptanceState: string }) {
-  return (
-    <div style={{ padding: 12, borderTop: "1px solid var(--border-soft)" }}>
-      <div className="dim" style={{ marginBottom: 8 }}>
-        审核：{recordId.slice(-16)} · <StatusLabel value={acceptanceState} kind="record" />
-      </div>
-      <div className="dim">确认 / 修正 / 拒绝操作随审核服务（D3）一并启用，当前为只读视图。</div>
     </div>
   );
 }

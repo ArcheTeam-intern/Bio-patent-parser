@@ -56,6 +56,32 @@ def get_records(
     data = _load_json(_result_base(service, settings, job_id) / "validate" / "validation.json")
     sequences = data.get("sequences", [])
     measurements = data.get("measurements", [])
+
+    # Overlay human-reviewed record heads so the workbench shows the current
+    # version, not a stale baseline.
+    heads = {row["record_id"]: row for row in service.repository.list_record_heads(job_id)}
+    overlaid_seqs = []
+    for seq in sequences:
+        head = heads.get(seq["sequence_id"])
+        if head is not None:
+            version = service.repository.get_record_version(
+                job_id, seq["sequence_id"], int(head["revision"])
+            )
+            if version is not None:
+                seq = json.loads(version["record_json"])
+        overlaid_seqs.append(seq)
+    overlaid_meas = []
+    for meas in measurements:
+        head = heads.get(meas["measurement_id"])
+        if head is not None:
+            version = service.repository.get_record_version(
+                job_id, meas["measurement_id"], int(head["revision"])
+            )
+            if version is not None:
+                meas = json.loads(version["record_json"])
+        overlaid_meas.append(meas)
+    sequences, measurements = overlaid_seqs, overlaid_meas
+
     if kind == "sequence":
         measurements = []
     elif kind == "measurement":
@@ -74,9 +100,10 @@ def get_records(
             or needle in str(m.get("metric", "")).lower()
             or needle in str(m.get("target_raw", "") or "").lower()
         ]
+    job = service.get_job(job_id)
     return RecordsResponse(
         job_id=job_id,
-        revision=0,
+        revision=job.result_revision if job else 0,
         sequences=sequences,
         measurements=measurements,
     )

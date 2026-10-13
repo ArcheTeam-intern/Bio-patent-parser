@@ -166,3 +166,56 @@ def test_job_unknown_document_404(client) -> None:
         json={"document_id": "sha256:" + "0" * 64, "parser": "native"},
     )
     assert res.status_code == 404
+
+
+def test_review_decision_flow_with_409(client) -> None:
+    c, tmp_path = client
+    pdf = _sample_pdf(tmp_path / "paper.pdf")
+    doc = c.post(
+        "/api/v1/documents",
+        files={"file": ("paper.pdf", pdf.read_bytes(), "application/pdf")},
+    ).json()
+    job = c.post("/api/v1/jobs", json={"document_id": doc["document_id"], "parser": "native"}).json()
+
+    from bio_pdf.workflow.queue_worker import run_worker
+
+    run_worker(tmp_path / "data", once=True)
+
+    reviews = c.get(f"/api/v1/reviews?job_id={job['job_id']}").json()
+    assert reviews["total"] >= 1
+    item = reviews["reviews"][0]
+
+    # Confirm works.
+    res = c.post(
+        f"/api/v1/reviews/{item['review_id']}/decisions",
+        json={
+            "action": "confirm",
+            "base_revision": item["record_revision"],
+            "actor": "tester",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["accepted"] is True
+    assert body["record_revision"] == item["record_revision"] + 1
+
+    # Replaying the same stale revision returns 409 with both values.
+    res = c.post(
+        f"/api/v1/reviews/{item['review_id']}/decisions",
+        json={
+            "action": "confirm",
+            "base_revision": item["record_revision"],
+            "actor": "other-window",
+        },
+    )
+    assert res.status_code == 409
+    err = res.json()["error"]
+    assert err["code"] == "REVIEW_REVISION_CONFLICT"
+    assert err["details"]["live_revision"] == item["record_revision"] + 1
+
+    # Records reflect the accepted state.
+    records = c.get(f"/api/v1/jobs/{job['job_id']}/records").json()
+    accepted = [
+        s for s in records["sequences"] if s["acceptance_state"] == "accepted"
+    ] + [m for m in records["measurements"] if m["acceptance_state"] == "accepted"]
+    assert len(accepted) >= 1

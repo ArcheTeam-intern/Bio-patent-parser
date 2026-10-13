@@ -256,3 +256,30 @@ export function resumeJob(jobId: string): Promise<Job> {
 export function artifactContentUrl(jobId: string, artifactId: string): string {
   return `${API_PREFIX}/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
 }
+
+export interface DecisionResponse {
+  api_version: string;
+  review_id: string;
+  action: string;
+  record_revision: number;
+  accepted: boolean | null;
+  validation_state: string | null;
+}
+
+export function submitDecision(
+  reviewId: string,
+  body: {
+    action: "confirm" | "correct" | "reject";
+    base_revision: number;
+    actor: string;
+    reason?: string;
+    patch?: Record<string, unknown>;
+    evidence_ids?: string[];
+  },
+): Promise<DecisionResponse> {
+  return request(`/reviews/${encodeURIComponent(reviewId)}/decisions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}

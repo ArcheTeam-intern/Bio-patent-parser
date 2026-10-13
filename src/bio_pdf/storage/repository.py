@@ -113,6 +113,28 @@ CREATE TABLE IF NOT EXISTS worker_leases (
     heartbeat_at  TEXT,
     generation    INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS record_versions (
+    job_id        TEXT NOT NULL REFERENCES jobs(job_id),
+    record_id     TEXT NOT NULL,
+    revision      INTEGER NOT NULL,
+    kind          TEXT NOT NULL,
+    record_json   TEXT NOT NULL,
+    decision_id   TEXT,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (job_id, record_id, revision)
+);
+
+CREATE TABLE IF NOT EXISTS record_heads (
+    job_id              TEXT NOT NULL REFERENCES jobs(job_id),
+    record_id           TEXT NOT NULL,
+    revision            INTEGER NOT NULL,
+    kind                TEXT NOT NULL,
+    validation_state    TEXT NOT NULL,
+    acceptance_state    TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    PRIMARY KEY (job_id, record_id)
+);
 """
 
 
@@ -509,6 +531,28 @@ class Repository:
             "DELETE FROM worker_leases WHERE job_id = ? AND worker_id = ?",
             (job_id, worker_id),
         )
+
+    # ---- record versions --------------------------------------------------
+
+    def get_record_head(self, job_id: str, record_id: str) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT * FROM record_heads WHERE job_id = ? AND record_id = ?",
+            (job_id, record_id),
+        ).fetchone()
+
+    def get_record_version(
+        self, job_id: str, record_id: str, revision: int
+    ) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT * FROM record_versions WHERE job_id = ? AND record_id = ? AND revision = ?",
+            (job_id, record_id, revision),
+        ).fetchone()
+
+    def list_record_heads(self, job_id: str) -> list[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM record_heads WHERE job_id = ? ORDER BY record_id",
+            (job_id,),
+        ).fetchall()
 
     # ---- job config ------------------------------------------------------
 

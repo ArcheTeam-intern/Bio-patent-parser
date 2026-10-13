@@ -570,7 +570,11 @@ class ValidateStage(_FileStage):
             )
             decision = decide_acceptance(record.model_dump())
             record.acceptance_state = decision.acceptance_state
-            sequences.append(_record_with_reasons(record, result.review_reasons))
+            # Review queue reasons combine rule findings with the acceptance
+            # policy's codes — a checks_passed record still needs human
+            # review while auto-accept is off.
+            reasons = list(result.review_reasons) + list(decision.reason_codes)
+            sequences.append(_record_with_reasons(record, reasons))
 
         measurements: list[dict[str, Any]] = []
         for meas_dict in extract.get("measurements", []):
@@ -586,7 +590,8 @@ class ValidateStage(_FileStage):
             )
             decision = decide_acceptance(record.model_dump())
             record.acceptance_state = decision.acceptance_state
-            measurements.append(_record_with_reasons(record, result.review_reasons))
+            reasons = list(result.review_reasons) + list(decision.reason_codes)
+            measurements.append(_record_with_reasons(record, reasons))
 
         # Review queue items persisted for the UI.
         review_records: list[dict[str, Any]] = []

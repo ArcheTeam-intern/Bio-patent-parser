@@ -1,8 +1,8 @@
-"""Review queue read routes.
+"""Review queue and decision routes (design §8).
 
-Decision submission (confirm/correct/reject with atomic versioning) lands
-with the D3 ReviewService; this router exposes the queue so the frontend
-can build against real data from D1 on.
+Decisions run through :class:`ReviewService` — one atomic transaction with
+base_revision conflict protection. A stale revision returns 409 with both
+values; the client re-checks, never overwrites.
 """
 
 from __future__ import annotations
@@ -11,15 +11,12 @@ import json
 
 from fastapi import APIRouter, HTTPException
 
-from bio_pdf.api.contracts import ReviewItemView, ReviewsResponse
+from bio_pdf.api.contracts import ReviewDecisionRequest, ReviewDecisionResponse, ReviewItemView, ReviewsResponse
 from bio_pdf.api.dependencies import ServiceDep
+from bio_pdf.application.review_service import ReviewService
+from bio_pdf.errors import ReviewRevisionConflictError, WorkflowError
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
-
-_KIND_PREFIXES = (
-    ("sha256:", "seq:", "sequence"),
-    ("sha256:", "prose:", "measurement"),
-)
 
 
 def _record_kind(record_id: str) -> str:
@@ -78,6 +75,47 @@ def list_decisions(service: ServiceDep, review_id: str) -> dict:
         "review_id": review_id,
         "decisions": [d.model_dump(mode="json") for d in decisions],
     }
+
+
+@router.post("/{review_id}/decisions", response_model=ReviewDecisionResponse)
+def submit_decision(
+    service: ServiceDep,
+    review_id: str,
+    request: ReviewDecisionRequest,
+) -> ReviewDecisionResponse:
+    review_service = ReviewService(service.repository, service.paths.artifact_root)
+    try:
+        outcome = review_service.apply_decision(
+            review_id=review_id,
+            action=request.action,
+            base_revision=request.base_revision,
+            actor=request.actor,
+            reason=request.reason,
+            patch=request.patch,
+            evidence_ids=request.evidence_ids,
+        )
+    except ReviewRevisionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "details": exc.details,
+            },
+        ) from exc
+    except WorkflowError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": exc.message, "details": exc.details},
+        ) from exc
+
+    return ReviewDecisionResponse(
+        review_id=outcome.review_id,
+        action=outcome.action,
+        record_revision=outcome.new_revision,
+        accepted=outcome.acceptance_state == "accepted",
+        validation_state=outcome.validation_state,
+    )
 
 
 __all__ = ["router"]
