@@ -31,3 +31,8 @@ docs/superpowers/plans/2026-10-14-bio-pdf-post-m1-remediation.md 执行。
 2026-10-14（post-M1 修复轮，第二轮）：B05(277fc1e 活性按mention)/B06(ec4303b 表格指标+层级表头+
 ParseIssue)/B07(0b41a5a 实体接线+片段可接受+修正一致性)/B08(7b1e3c0 固定快照导出+Range修复)。
 402 tests，vitest 4。报告 reports/post_m1/round2_report.md。第三轮 B09-B12 未开始。
+
+2026-10-14（post-M1 修复轮，第三轮+B12）：B09(b4faef7 ST.25续页+页发现)/B10(762d3c6 评测框架)/
+B11(fbc70ad 区域复解析)/B12(3b2984b 工作台补全+执行矩阵)。422 tests，vitest 4。
+方案 B01-B12 全部执行完毕；environment_blocked 三项（真实扫描OCR、第二通道、人工gold）按方案
+标注未运行并保留接续路径。报告 reports/post_m1/round3_report.md + execution_matrix.md。
