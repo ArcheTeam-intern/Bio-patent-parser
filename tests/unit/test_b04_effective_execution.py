@@ -82,6 +82,8 @@ def test_parser_options_reach_the_docling_converter(monkeypatch) -> None:
 
     from bio_pdf.parsers import docling_adapter
 
+    monkeypatch.setattr("shutil.which", lambda _: "tesseract.exe")
+
     captured: dict = {}
 
     class _FakePipelineOptions:
@@ -143,6 +145,7 @@ def test_parser_options_reach_the_docling_converter(monkeypatch) -> None:
             "tableformer_mode": "accurate",
             "do_table_structure": True,
             "ocr_lang": "chi_sim",
+            "ocr_engine": "tesseract",
             "engine_timeout_seconds": 300.0,
         },
     }

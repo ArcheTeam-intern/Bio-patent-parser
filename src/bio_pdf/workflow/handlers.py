@@ -352,18 +352,17 @@ class NativeParseStage(_FileStage):
 
 class LayoutParseStage(_FileStage):
     name = "layout_parse"
-    implementation = "v4"
+    implementation = "v5-ocr-selection"
 
     def provider_version(self, context: StageContext) -> str:
         engine = str(context.options.get(OPT_ENGINE, "native"))
         if engine not in _LAYOUT_ENGINES:
             return ""
-        try:
-            import docling
+        from bio_pdf.parsers.ocr import ocr_availability, ocr_versions
 
-            return getattr(docling, "__version__", "unknown")
-        except Exception:  # noqa: BLE001 - version probe is best-effort
-            return "unknown"
+        return json.dumps(
+            {"versions": ocr_versions(), "ocr_available": ocr_availability()}, sort_keys=True
+        )
 
     def run(self, context: StageContext) -> StageOutcome:
         engine = str(context.options.get(OPT_ENGINE, "native"))
@@ -476,6 +475,9 @@ class LayoutParseStage(_FileStage):
                     "pages": list(run.pages),
                     "normalized": str(artifacts.normalized_path.name),
                     "raw_response": str(artifacts.raw_response_path.name),
+                    "ocr_runtime": json.loads(
+                        artifacts.manifest_path.read_text(encoding="utf-8")
+                    ).get("extra", {}).get("ocr_runtime"),
                 }
             )
 
@@ -767,7 +769,9 @@ class ExtractStage(_FileStage):
         # offsets — never reconstructed from id strings later.
         from bio_pdf.extract.evidence import (
             MAX_EVIDENCE_EXCERPT,
+            BlockRef,
             EvidenceIndex,
+            span_from_block_match,
             span_from_cell,
             span_page_only,
             span_unlocated,
@@ -897,26 +901,56 @@ class ExtractStage(_FileStage):
                 )
 
         # ---- references and relations --------------------------------------
-        references = []
-        for block in blocks:
-            references.extend(
-                ref
-                for ref in extract_sequence_references(
-                    block["text"], document_id=doc_id
-                )
-            )
-        resolved_ids = {r.seq_id_no for r in sequences if r.seq_id_no is not None}
-        unresolved = [r for r in references if r.seq_id_no not in resolved_ids]
-        for ref in unresolved:
-            evidence.add(
-                span_page_only(
-                    document_id=doc_id,
-                    parser_run_id=parser_run_id,
-                    page_number=1,
+        # Each mention gets its own evidence span with REAL offsets in its
+        # block — "SEQ ID No.1" and "SEQ ID NO: 1" are different mentions
+        # and must not share an id (plan B02/B06).
+        references: list[tuple[Any, int, int, int]] = []  # (ref, block_idx, start, end)
+        for block_idx, block in enumerate(blocks):
+            block_text = str(block.get("text") or "")
+            search_from = 0
+            for ref in extract_sequence_references(block_text, document_id=doc_id):
+                match_at = block_text.find(ref.mention_raw, search_from)
+                if match_at < 0:
+                    match_at = search_from
+                search_from = match_at + len(ref.mention_raw)
+                references.append((ref, block_idx, match_at, match_at + len(ref.mention_raw)))
+        resolved_ids = {r.seq_id_no for r, _b, _s, _e in references}
+        unresolved = [
+            (ref, block_idx, start, end)
+            for ref, block_idx, start, end in references
+            if ref.seq_id_no not in resolved_ids
+        ]
+        for ref, block_idx, start, end in unresolved:
+            block = blocks[block_idx]
+            try:
+                span = span_from_block_match(
+                    BlockRef(
+                        document_id=doc_id,
+                        parser_run_id=parser_run_id,
+                        block_id=str(block.get("block_id") or f"block:{block_idx}"),
+                        page_number=int(block.get("page_number", 1)),
+                        bbox=tuple(block["bbox"]) if block.get("bbox") else None,
+                        source_parser=str(block.get("source_parser") or "unknown"),
+                        source_artifact_id=block.get("source_artifact_id"),
+                    ),
                     text_raw=ref.mention_raw,
-                    source_locator=f"ref:{ref.seq_id_no}",
+                    char_start=start,
+                    char_end=end,
+                    full_text=str(block.get("text") or ""),
                 )
-            )
+                evidence.add(span)
+            except WorkflowError:
+                # Offsets unreproducible (block text changed upstream):
+                # fall back to an unlocated span, never a wrong location.
+                evidence.add(
+                    span_unlocated(
+                        document_id=doc_id,
+                        parser_run_id=parser_run_id,
+                        raw_text=ref.mention_raw,
+                        source_locator=f"ref:{ref.seq_id_no}",
+                        source_parser="unknown",
+                    )
+                )
 
         # B07: explicit entities from prose/table labels; measurements link
         # ONLY on an exact name match (a non-match keeps entity_id None and

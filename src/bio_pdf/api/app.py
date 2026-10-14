@@ -44,6 +44,7 @@ async def _lifespan(app: FastAPI):
 
 def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:
     from bio_pdf.parsers.docling_adapter import docling_is_available
+    from bio_pdf.parsers.ocr import ocr_availability
     from bio_pdf.validation.acceptance import POLICY_VERSION
 
     engines = [
@@ -62,6 +63,8 @@ def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:
             supports_ocr=True,
             supports_page_range=True,
             sends_bytes_offsite=False,
+            ocr_available=any(ocr_availability().values()),
+            ocr_engines=ocr_availability(),
         ),
         EngineCapability(
             name="mineru",

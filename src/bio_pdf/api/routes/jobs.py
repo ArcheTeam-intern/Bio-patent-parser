@@ -16,10 +16,15 @@ from bio_pdf.errors import JobRunningError, WorkflowError
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-#: Stable API parser names → engine choice persisted in job config.
+#: Stable API parser names → engine persisted in the job config (B09 fix:
+#: "docling_sdk" must pass through — the old mapping to the legacy name
+#: "docling" made every UI "结构增强" job fail config validation).
 _PARSERS = {
     "native": "native",
-    "docling_sdk": "docling",
+    "docling_sdk": "docling_sdk",
+    "docling": "docling_sdk",  # legacy alias
+    "docling_serve": "docling_serve",
+    "mineru_http": "mineru_http",
 }
 
 

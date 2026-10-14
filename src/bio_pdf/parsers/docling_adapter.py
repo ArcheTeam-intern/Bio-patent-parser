@@ -153,20 +153,25 @@ def _build_converter_from_request(request_payload: dict[str, Any]) -> Any:
     options.table_structure_options = TableStructureOptions(**table_kwargs)
 
     if do_ocr:
-        # The Tesseract CLI helper is the lightest OCR profile; other engines
-        # can be substituted at install time. We do not silently fall back to
-        # a lower-quality option.
+        from bio_pdf.parsers.ocr import resolve_ocr_options
+
         from docling.datamodel.pipeline_options import (
             OcrMode,
             TesseractCliOcrOptions,
         )
 
-        ocr_lang = str(raw_options.get("ocr_lang") or "eng")
-        options.ocr_options = TesseractCliOcrOptions(
-            mode=OcrMode.FULL_PAGE,
-            lang=[ocr_lang],
-            scale=300 / 72,
-        )
+        runtime = resolve_ocr_options(raw_options)
+        ocr_kwargs = {
+            "mode": OcrMode.FULL_PAGE,
+            "lang": [runtime["effective_language"]],
+            "scale": 300 / 72,
+        }
+        if runtime["selected_engine"] == "rapidocr":
+            from docling.datamodel.pipeline_options import RapidOcrOptions
+
+            options.ocr_options = RapidOcrOptions(backend="onnxruntime", **ocr_kwargs)
+        else:
+            options.ocr_options = TesseractCliOcrOptions(**ocr_kwargs)
 
     return DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
@@ -194,6 +199,18 @@ class DoclingAdapter:
         raw_path = (request.output_dir / "raw_response.json").resolve()
         normalised_path = (request.output_dir / "normalized.json").resolve()
 
+        from bio_pdf.parsers.ocr import resolve_ocr_options
+
+        ocr_runtime = (
+            resolve_ocr_options(dict(request.parser_options or {}))
+            if request.profile == "layout_ocr" else None
+        )
+        effective_parser_options = dict(request.parser_options or {})
+        if ocr_runtime:
+            # Pin the resolved engine before entering the child process.
+            effective_parser_options["ocr_engine"] = ocr_runtime["selected_engine"]
+            effective_parser_options["ocr_lang"] = ocr_runtime["effective_language"]
+
         request_payload = {
             "request": {
                 "job_id": request.job_id,
@@ -205,10 +222,10 @@ class DoclingAdapter:
                 "raw_path": str(raw_path),
                 "normalised_path": str(normalised_path),
                 "timeout_seconds": float(
-                    os.environ.get("BIO_PDF_ENGINE_TIMEOUT_SECONDS") or 900.0
+                    effective_parser_options.get("engine_timeout_seconds") or 900.0
                 ),
                 # B04: configured engine options really reach the converter.
-                "parser_options": dict(getattr(request, "parser_options", {}) or {}),
+                "parser_options": effective_parser_options,
             }
         }
         payload_path = (request.output_dir / "docling_request.json").resolve()
@@ -239,6 +256,8 @@ class DoclingAdapter:
                 f"docling child exceeded {timeout:.0f}s and was terminated",
                 details={"timeout_seconds": timeout},
             ) from exc
+        (request.output_dir / "engine.stdout.log").write_text(completed.stdout or "", encoding="utf-8")
+        (request.output_dir / "engine.stderr.log").write_text(completed.stderr or "", encoding="utf-8")
         if completed.returncode != 0:
             raise WorkflowError(
                 "docling child process failed",
@@ -261,6 +280,7 @@ class DoclingAdapter:
             raw_path=raw_path,
             normalised_path=normalised_path,
             output_dir=request.output_dir,
+            extra={"ocr_runtime": ocr_runtime},
         )
 
         return ParseArtifacts(

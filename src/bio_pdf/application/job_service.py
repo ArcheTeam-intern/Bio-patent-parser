@@ -40,12 +40,20 @@ def effective_workflow_config(persisted: dict[str, Any]) -> WorkflowConfig:
 
     raw = persisted.get("effective_config")
     if isinstance(raw, dict):
+        raw = dict(raw)
+        # Legacy engine alias: stored configs written by the pre-B09 API
+        # carry "docling"; the canonical name is "docling_sdk".
+        if raw.get("parser") == "docling":
+            raw["parser"] = "docling_sdk"
         return WorkflowConfig.model_validate(raw)
     # Legacy v1 shape.
     hint = persisted.get("document_type_hint")
+    engine = str(persisted.get("engine") or "native")
+    if engine == "docling":
+        engine = "docling_sdk"
     return WorkflowConfig.model_validate(
         {
-            "parser": str(persisted.get("engine") or "native"),
+            "parser": engine,
             "pages": persisted.get("pages"),
             "document_type_hint": hint if hint in ("paper", "patent") else "auto",
         }

@@ -41,6 +41,8 @@ class EngineCapability(BaseModel):
     supports_ocr: bool
     supports_page_range: bool
     sends_bytes_offsite: bool
+    ocr_available: bool = False
+    ocr_engines: dict[str, bool] = Field(default_factory=dict)
 
 
 class CapabilitiesResponse(ApiEnvelope):

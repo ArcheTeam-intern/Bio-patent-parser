@@ -21,7 +21,7 @@ from bio_pdf.contracts.common import _StrictModel
 from bio_pdf.errors import WorkflowError
 
 #: Bump when default semantics change so effective_config hashes move.
-CONFIG_VERSION = "2"
+CONFIG_VERSION = "3"
 
 OcrPolicy = Literal["auto", "force", "disabled"]
 DocumentTypeHint = Literal["auto", "paper", "patent"]
@@ -43,6 +43,7 @@ class ParserOptions(_StrictModel):
     tableformer_mode: Literal["fast", "accurate"] | None = None
     do_table_structure: bool = True
     ocr_lang: str = "en"
+    ocr_engine: Literal["auto", "tesseract", "rapidocr"] = "auto"
     engine_timeout_seconds: float = Field(default=900.0, gt=0)
 
 

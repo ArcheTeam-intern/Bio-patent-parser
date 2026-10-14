@@ -45,6 +45,8 @@ def _module_status(names: tuple[str, ...]) -> dict[str, bool]:
 def doctor() -> None:
     """Probe the runtime environment without touching models or remote APIs."""
 
+    from bio_pdf.parsers.ocr import ocr_availability, ocr_versions
+
     result: dict[str, Any] = {
         "python": platform.python_version(),
         "platform": platform.platform(),
@@ -61,6 +63,8 @@ def doctor() -> None:
         # We never implicitly install or load models; downstream stages will
         # report their own readiness when they actually need a model.
         "model_readiness": "not_checked",
+        "ocr_engines": ocr_availability(),
+        "ocr_versions": ocr_versions(),
     }
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
