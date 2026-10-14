@@ -59,6 +59,10 @@ from bio_pdf.workflow.stages import StageContext, StageHandler
 
 #: Option keys read from ``context.options``.
 OPT_ENGINE = "engine"
+
+#: Engine names that provide layout parsing (the canonical config name is
+#: ``docling_sdk``; ``docling`` is the legacy CLI spelling).
+_LAYOUT_ENGINES = {"docling", "docling_sdk"}
 OPT_TARGETS = "targets"
 OPT_DOCUMENT_TYPE = "document_type_hint"
 
@@ -351,7 +355,7 @@ class LayoutParseStage(_FileStage):
 
     def provider_version(self, context: StageContext) -> str:
         engine = str(context.options.get(OPT_ENGINE, "native"))
-        if engine != "docling":
+        if engine not in _LAYOUT_ENGINES:
             return ""
         try:
             import docling
@@ -362,7 +366,7 @@ class LayoutParseStage(_FileStage):
 
     def run(self, context: StageContext) -> StageOutcome:
         engine = str(context.options.get(OPT_ENGINE, "native"))
-        if engine != "docling":
+        if engine not in _LAYOUT_ENGINES:
             # Explicitly nothing to do for a native-only run. The runner
             # records this stage as skipped; it is not a silent failure.
             return StageOutcome(artifact_refs=[], review_required=0)

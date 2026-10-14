@@ -56,19 +56,31 @@ _CAPS_ABBREVIATIONS = {
     "FDA", "EMA", "WHO", "NIH", "USA", "EU", "N/A",
 }
 
-#: Context hints: phrase → molecule-type suggestion (None = don't guess).
-_PROTEIN_HINTS = (
+#: STRONG hints: phrases that explicitly name a sequence. A run in the same
+#: sentence as a strong hint is a candidate.
+_STRONG_PROTEIN_HINTS = (
     "amino acid sequence",
     "amino-acid sequence",
-    "protein",
-    "peptide",
-    "polypeptide",
+    "protein sequence",
+    "peptide sequence",
+    "sequence of the protein",
+    "sequence of the peptide",
+    "sequence residues",
     "residues",
     "cdr",
-    "antibody",
+    "sequence listing",
+    "set forth in seq id",
 )
-_DNA_HINTS = ("dna sequence", "nucleotide sequence", "dna", "oligonucleotide")
-_RNA_HINTS = ("rna sequence", "rna", "mrna")
+_STRONG_DNA_HINTS = ("nucleotide sequence", "dna sequence", "oligonucleotide sequence")
+_STRONG_RNA_HINTS = ("rna sequence", "mrna sequence")
+
+#: WEAK hints: bare molecule nouns. They count only for a run that is in
+#: parentheses immediately after the noun ("protein (RRRQRRKKRG)") — a bare
+#: "protein" anywhere in the sentence produced name false-positives like
+#: RASGAP/FIGURE/BMAP (live-run finding).
+_WEAK_PROTEIN_HINTS = ("protein", "peptide", "polypeptide", "antibody", "moiety")
+_WEAK_DNA_HINTS = ("dna",)
+_WEAK_RNA_HINTS = ("rna", "mrna")
 
 #: Blocks whose role excludes them from sequence scanning entirely.
 _EXCLUDED_ROLES = {"author", "reference", "header", "footer", "title", "caption"}
@@ -98,15 +110,39 @@ def _sentence_window(text: str, start: int, end: int) -> tuple[str, int, int]:
     return text, 0, len(text)
 
 
-def _hint_in_window(window: str) -> str | None:
-    """Detect a sequence hint and suggest the molecule type."""
+def _hint_in_window(window: str, *, strong_only: bool) -> str | None:
+    """Detect a sequence hint in the sentence and suggest the molecule type."""
 
     lowered = window.lower()
-    if any(h in lowered for h in _DNA_HINTS):
+    dna = _STRONG_DNA_HINTS
+    rna = _STRONG_RNA_HINTS
+    protein = _STRONG_PROTEIN_HINTS
+    if not strong_only:
+        dna = dna + _WEAK_DNA_HINTS
+        rna = rna + _WEAK_RNA_HINTS
+        protein = protein + _WEAK_PROTEIN_HINTS
+    if any(h in lowered for h in dna):
         return "DNA"
-    if any(h in lowered for h in _RNA_HINTS):
+    if any(h in lowered for h in rna):
         return "RNA"
-    if any(h in lowered for h in _PROTEIN_HINTS):
+    if any(h in lowered for h in protein):
+        return "protein"
+    return None
+
+
+def _paren_adjacent_hint(text: str, run_start: int) -> str | None:
+    """Weak hint IMMEDIATELY before a parenthesised run ("peptide (XXXX)").
+
+    The hint must end within 30 characters of the opening paren — a bare
+    molecule noun elsewhere in the sentence does not qualify.
+    """
+
+    window = text[max(0, run_start - 34):run_start].lower()
+    if any(h in window for h in _WEAK_DNA_HINTS):
+        return "DNA"
+    if any(h in window for h in _WEAK_RNA_HINTS):
+        return "RNA"
+    if any(h in window for h in _WEAK_PROTEIN_HINTS):
         return "protein"
     return None
 
@@ -152,27 +188,27 @@ def _check_alphabet(sequence: str, molecule_type: str) -> bool:
     return all(c in alphabet or c == "?" for c in sequence)
 
 
-def _candidate_matches(text: str) -> list[tuple[int, int, str]]:
-    """Detect candidate runs: (start, end, raw_run) — hints applied later."""
+def _candidate_matches(text: str) -> list[tuple[int, int, str, bool]]:
+    """Detect candidate runs: (start, end, raw_run, is_parenthesised)."""
 
-    found: list[tuple[int, int, str]] = []
+    found: list[tuple[int, int, str, bool]] = []
     seen: set[tuple[int, int]] = set()
 
-    def add(m_start: int, m_end: int, raw: str) -> None:
+    def add(m_start: int, m_end: int, raw: str, paren: bool) -> None:
         if (m_start, m_end) in seen:
             return
         seen.add((m_start, m_end))
-        found.append((m_start, m_end, raw))
+        found.append((m_start, m_end, raw, paren))
 
     for m in _PAREN_RUN_RE.finditer(text):
-        add(m.start(1), m.end(1), m.group(1))
+        add(m.start(1), m.end(1), m.group(1), True)
     for m in _CAPS_RUN_RE.finditer(text):
         token = m.group(1)
         if any(t in _CAPS_ABBREVIATIONS for t in token.split()):
             continue
-        add(m.start(1), m.end(1), token)
+        add(m.start(1), m.end(1), token, False)
     for m in _LOWER_RUN_RE.finditer(text):
-        add(m.start(1), m.end(1), m.group(1))
+        add(m.start(1), m.end(1), m.group(1), False)
     return sorted(found)
 
 
@@ -211,13 +247,32 @@ def extract_inline_sequences(
                 )
             continue
 
-        for m_start, m_end, run in _candidate_matches(text):
+        for m_start, m_end, run, is_paren in _candidate_matches(text):
             compact = "".join(ch for ch in run if not ch.isspace())
             if len(compact) < 2:
                 continue
+            # Runs dominated by digits/unknowns are notation (IC50, OD600,
+            # W317A...), not residues.
+            non_letter = sum(1 for ch in compact if not ch.isalpha())
+            if non_letter / len(compact) > 0.4:
+                continue
+            # Prose-shaped runs: function words or several long words are a
+            # sentence, not residues ("later identified by sequencing as ...").
+            tokens = [t for t in run.split() if t]
+            lowered_tokens = {t.lower() for t in tokens}
+            if lowered_tokens & _NON_RESIDUE_WORDS:
+                continue
+            if len(tokens) > 1 and any(len(t) > 12 for t in tokens):
+                continue
 
             window, _w_start, _w_end = _sentence_window(text, m_start, m_end)
-            hint = _hint_in_window(window)
+            # Strong hints count anywhere in the sentence; weak hints only for
+            # a parenthesised run IMMEDIATELY after the hint word. A bare
+            # "protein" in the sentence promoted names like "(WT)"/"(IC50)"
+            # (live-run finding).
+            hint = _hint_in_window(window, strong_only=True)
+            if is_paren and hint is None:
+                hint = _paren_adjacent_hint(text, m_start)
 
             # Lowercase runs only qualify under an explicit DNA/RNA hint.
             if run.islower():

@@ -153,6 +153,36 @@ def _bbox_from_prov(
     return first_bbox, locators
 
 
+def _coerce_semantic_role(label: Any, kind: BlockKind) -> str:
+    """Map a Docling label to our SemanticRole (plan T05/T07).
+
+    Roles gate extraction: authors, references, headers/footers and captions
+    are never scanned for sequences. Uncertain labels stay "unknown" —
+    never guessed from name blacklists.
+    """
+
+    text = str(label or "").lower()
+    if "page_header" in text or text in ("header", "running_head"):
+        return "header"
+    if "page_footer" in text or text == "footer":
+        return "footer"
+    if "caption" in text:
+        return "caption"
+    if "reference" in text or "bibliograph" in text or "citation" in text:
+        return "reference"
+    if "author" in text or "affiliation" in text:
+        return "author"
+    if "footnote" in text:
+        return "footnote"
+    if "section_header" in text or "title" in text or kind == "title":
+        return "title"
+    if "sequence" in text and "listing" in text:
+        return "sequence_listing"
+    if text in ("text", "paragraph", "body", "", "None"):
+        return "body"
+    return "unknown"
+
+
 def _coerce_kind(value: Any) -> BlockKind:
     """Map a Docling ``content_layer``/``label`` string to a :data:`BlockKind`."""
 
@@ -226,10 +256,14 @@ def normalize_page(
         prov_bbox, locators = _bbox_from_prov(item, page_height_pt=height_pt)
         if bbox is None:
             bbox = prov_bbox
+        block_kind = _coerce_kind(item.get("label") or item.get("content_layer"))
         blocks.append(
             TextBlock(
                 block_id=_safe_block_id(parser_run_id, item.get("self_ref") or item.get("id"), idx),
-                kind=_coerce_kind(item.get("label") or item.get("content_layer")),
+                kind=block_kind,
+                semantic_role=_coerce_semantic_role(  # type: ignore[arg-type]
+                    item.get("label") or item.get("content_layer"), block_kind
+                ),
                 bbox=bbox,
                 text_raw=str(raw_text),
                 provenance=[
@@ -578,10 +612,14 @@ def _expand_top_level_pages(
                 provider_locator=f"page={page_no}",
             )
         ]
+        block_kind = _coerce_kind(text.get("label") or text.get("content_layer"))
         target["blocks"].append(
             TextBlock(
                 block_id=_safe_block_id(parser_run_id, text.get("self_ref") or text.get("id"), len(target["blocks"])),
-                kind=_coerce_kind(text.get("label") or text.get("content_layer")),
+                kind=block_kind,
+                semantic_role=_coerce_semantic_role(  # type: ignore[arg-type]
+                    text.get("label") or text.get("content_layer"), block_kind
+                ),
                 bbox=bbox,
                 text_raw=str(text.get("text") or ""),
                 provenance=provenance,

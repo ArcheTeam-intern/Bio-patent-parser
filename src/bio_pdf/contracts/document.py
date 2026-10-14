@@ -46,6 +46,7 @@ SemanticRole = Literal[
     "author",
     "header",
     "footer",
+    "footnote",
     "reference",
     "claims",
     "methods",
