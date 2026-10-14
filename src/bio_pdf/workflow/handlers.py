@@ -775,6 +775,25 @@ class ExtractStage(_FileStage):
         evidence = EvidenceIndex()
         diagnostics: list[dict[str, str]] = []
         raw_mentions: list[dict[str, Any]] = []
+        issues: list[dict[str, Any]] = []
+
+        def _issue(scope: str, reason_code: str, source_ids: list[str], detail: str) -> None:
+            import hashlib as _hashlib
+
+            digest = _hashlib.sha256(
+                f"{context.job_id}|{scope}|{reason_code}|{'|'.join(source_ids)}".encode("utf-8")
+            ).hexdigest()[:16]
+            issues.append(
+                {
+                    "issue_id": f"iss-{digest}",
+                    "job_id": context.job_id,
+                    "scope": scope,
+                    "reason_code": reason_code,
+                    "source_ids": source_ids,
+                    "detail": detail,
+                    "state": "open",
+                }
+            )
 
         # ---- sequences ----------------------------------------------------
         sequences: list[SequenceRecord] = []
@@ -813,28 +832,17 @@ class ExtractStage(_FileStage):
                     raw_mentions=raw_mentions,
                 )
             )
-            for table, evidences in _table_rows(document):
-                from bio_pdf.extract.activities.metrics import classify_table_metric
-
-                metric = classify_table_metric(table)
-                if metric is None:
-                    diagnostics.append(
-                        {
-                            "code": "TABLE_UNCLASSIFIED",
-                            "table_id": table.table_id,
-                            "page": str(table.page_number),
-                            "detail": "no recognized metric header; cells not forced to Measurements",
-                        }
-                    )
-                    continue
-                table_measurements = extract_table_measurements(
-                    table,
-                    document_id=doc_id,
-                    evidences=evidences,
-                    evidence_kind="undetermined",
-                    metric=metric,
+            for table, _legacy_evidences in _table_rows(document):
+                from bio_pdf.extract.activities.table_classifier import (
+                    TableKind,
+                    classify_table,
                 )
-                measurements.extend(table_measurements)
+
+                # B06: register REAL cell spans first, then hand the
+                # cell_id → evidence_id map to the extractor — record
+                # field evidence therefore references loadable span ids,
+                # not synthetic ':cell:' strings.
+                cell_evidence: dict[str, str] = {}
                 for cell in table.cells:
                     if not cell.text_raw:
                         continue
@@ -848,6 +856,44 @@ class ExtractStage(_FileStage):
                         bbox=cell.bbox,
                     )
                     evidence.add(span)
+                    cell_evidence[cell.cell_id] = span.evidence_id
+
+                kind = classify_table(table)
+                if kind in (
+                    TableKind.INVENTORY,
+                    TableKind.SCORING,
+                    TableKind.UNCLASSIFIED,
+                    TableKind.SEQUENCE,
+                    TableKind.ASSAY_CONDITIONS,
+                ):
+                    # Structure preserved; no fabricated measurements. The
+                    # decision is recorded per table with its reason.
+                    diagnostics.append(
+                        {
+                            "code": f"TABLE_{kind.value.upper()}",
+                            "table_id": table.table_id,
+                            "page": str(table.page_number),
+                            "detail": "classified without bioactivity extraction",
+                        }
+                    )
+                    _issue(
+                        "table",
+                        f"TABLE_{kind.value.upper()}",
+                        [table.table_id],
+                        f"page {table.page_number}: classified {kind.value}; structure preserved",
+                    )
+                    continue
+
+                for structure_issue in table.structure_issues:
+                    _issue("table", "TABLE_STRUCTURE", [table.table_id], structure_issue)
+                measurements.extend(
+                    extract_table_measurements(
+                        table,
+                        document_id=doc_id,
+                        evidences=cell_evidence,
+                        evidence_kind="undetermined",
+                    )
+                )
 
         # ---- references and relations --------------------------------------
         references = []
@@ -899,6 +945,18 @@ class ExtractStage(_FileStage):
                         )
                     )
 
+        for mention in raw_mentions:
+            m_role = getattr(mention, "role", mention.get("role") if isinstance(mention, dict) else None)
+            m_reasons = getattr(mention, "reason_codes", mention.get("reason_codes") if isinstance(mention, dict) else [])
+            if m_role == "result" and any("metric" in str(r) for r in (m_reasons or [])):
+                m_evidence = getattr(mention, "evidence_ids", mention.get("evidence_ids") if isinstance(mention, dict) else [])
+                _issue(
+                    "mention",
+                    "RESULT_WITHOUT_METRIC",
+                    list(m_evidence or []),
+                    "result-language mention with no resolvable registered metric",
+                )
+
         payload = {
             "schema_version": "1.1.0",
             "document_id": doc_id,
@@ -917,6 +975,7 @@ class ExtractStage(_FileStage):
                 for m in raw_mentions
             ],
             "diagnostics": diagnostics,
+            "issues": issues,
         }
         out_dir = Path(context.stage_dir())
         ref = atomic_write_json(out_dir, "extract.json", payload)
@@ -1031,6 +1090,7 @@ class ValidateStage(_FileStage):
             "measurements": measurements,
             "review_count": len(items),
             "review_plan": [json.loads(item.model_dump_json()) for item in items],
+            "issue_plan": list(extract.get("issues", [])),
             "review_reasons": extract.get("review_reasons", []),
         }
         out_dir = Path(context.stage_dir())

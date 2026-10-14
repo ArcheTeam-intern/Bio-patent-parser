@@ -13,12 +13,20 @@ re-exports what consumers need so there is exactly one definition.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from bio_pdf.contracts.common import EvidenceSpan, _StrictModel
 from bio_pdf.contracts.records import Measurement, SequenceRecord
 
-__all__ = ["RawMention", "ExtractionBatch", "Measurement", "SequenceRecord"]
+__all__ = [
+    "RawMention",
+    "ExtractionBatch",
+    "ParseIssue",
+    "Measurement",
+    "SequenceRecord",
+]
 
 
 class RawMention(_StrictModel):
@@ -44,3 +52,21 @@ class ExtractionBatch(_StrictModel):
     evidence_spans: list[EvidenceSpan] = Field(default_factory=list)
     raw_mentions: list[RawMention] = Field(default_factory=list)
     diagnostics: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ParseIssue(_StrictModel):
+    """A structured, auditable processing problem (plan B06).
+
+    Unlike a diagnostic string, an issue has a scope (table/region/
+    mention/sentence), the source objects it concerns, a stable reason
+    code, and a lifecycle state — a reviewer can open it, request a
+    re-parse or mark it out-of-target, and the decision is auditable.
+    """
+
+    issue_id: str
+    job_id: str
+    scope: Literal["table", "region", "mention", "sentence", "document"]
+    reason_code: str
+    source_ids: list[str] = Field(default_factory=list)
+    detail: str = ""
+    state: Literal["open", "reparse_requested", "dismissed", "resolved"] = "open"

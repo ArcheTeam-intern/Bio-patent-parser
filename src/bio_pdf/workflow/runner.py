@@ -350,6 +350,7 @@ class WorkflowRunner:
         # lease, writes the status, the immutable manifest pointer AND the
         # review items from the validate plan. Fenced → nothing written.
         review_plan = self._load_review_plan(job.job_id, published)
+        issue_plan = self._load_issue_plan(job.job_id, published)
         final_status = self._final_status(job.job_id, review_total, review_plan)
         manifest_payload = self._result_manifest(job, published, final_status)
         job_dir = self.artifact_root / "jobs" / job.job_id
@@ -365,6 +366,7 @@ class WorkflowRunner:
             manifest_rel=manifest_rel,
             manifest_sha=manifest_sha,
             review_items=review_plan,
+            issues=issue_plan,
         )
         if not ok:
             return RunResult(
@@ -618,6 +620,22 @@ class WorkflowRunner:
             except Exception:  # noqa: BLE001 - a malformed plan entry is skipped loudly
                 continue
         return items
+
+    def _load_issue_plan(
+        self, job_id: str, published: dict[str, dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Structured issues from the validate artifact (plan B06)."""
+
+        entry = (published.get("validate") or {}).get("validation.json")
+        if not entry:
+            return []
+        path = self.artifact_root / entry["relative_path"]
+        if not path.is_file():
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [
+            raw for raw in data.get("issue_plan", []) if isinstance(raw, dict)
+        ]
 
     def _write_immutable_manifest(
         self, job_dir: Path, payload: dict[str, Any]

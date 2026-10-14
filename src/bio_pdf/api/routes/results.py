@@ -217,6 +217,29 @@ def _legacy_geometry_precision(span: dict) -> str:
     return "none"
 
 
+@router.get("/issues")
+def list_issues(service: ServiceDep, job_id: str, state: str | None = None) -> dict:
+    """Structured parse issues (plan B06): scope/reason/sources/state."""
+
+    _job_or_404(service, job_id)
+    rows = service.repository.list_issues(job_id, state=state)
+    issues = [
+        {
+            "issue_id": row["issue_id"],
+            "job_id": row["job_id"],
+            "scope": row["scope"],
+            "reason_code": row["reason_code"],
+            "source_ids": json.loads(row["source_json"] or "[]"),
+            "detail": row["detail"],
+            "state": row["state"],
+            "baseline_id": row["baseline_id"],
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+    return {"api_version": "v1", "job_id": job_id, "issues": issues, "total": len(issues)}
+
+
 @router.get("/artifacts", response_model=ArtifactsResponse)
 def list_artifacts(service: ServiceDep, settings: SettingsDep, job_id: str) -> ArtifactsResponse:
     _job_or_404(service, job_id)

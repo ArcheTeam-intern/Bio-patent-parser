@@ -98,8 +98,8 @@ def test_field_evidence_references_source_cells() -> None:
     )
     m = measurements[0]
     assert m.field_evidence["value"] == ["ev-a1"] or "ev-a1" in m.evidence_ids
-    assert m.field_evidence.get("entity_id") is not None
-    assert m.field_evidence.get("unit") is not None
+    assert m.field_evidence.get("entity_raw") is not None  # unified key (B06)
+    assert m.field_evidence.get("unit_raw") is not None  # unified key (B06)
 
 
 def test_metric_is_consistent_across_columns() -> None:

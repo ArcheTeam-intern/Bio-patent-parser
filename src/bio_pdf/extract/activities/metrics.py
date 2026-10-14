@@ -39,6 +39,24 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
             description="Minimum bactericidal concentration",
         ),
         MetricDefinition(
+            name="MIC50",
+            value_kind="numeric",
+            unit_requirement="required",
+            target_requirement="required",
+            entity_requirement="required",
+            allowed_units=["ug/mL", "mg/mL", "uM", "nM", "mM"],
+            description="50% minimum inhibitory concentration (distinct from MIC)",
+        ),
+        MetricDefinition(
+            name="MBC50",
+            value_kind="numeric",
+            unit_requirement="required",
+            target_requirement="required",
+            entity_requirement="required",
+            allowed_units=["ug/mL", "mg/mL", "uM", "nM", "mM"],
+            description="50% minimum bactericidal concentration (distinct from MBC)",
+        ),
+        MetricDefinition(
             name="IC50",
             value_kind="numeric",
             unit_requirement="required",
@@ -148,19 +166,23 @@ _ALIAS_MAP: dict[str, str] = {}
 for _name, _def in METRIC_REGISTRY.items():
     _ALIAS_MAP[_name.lower()] = _name
 for _alias, _canonical in [
-    ("mic50", "MIC"),
-    ("mbc50", "MBC"),
     ("ic₅₀", "IC50"),
     ("ec₅₀", "EC50"),
     ("kd", "KD"),
     ("ki", "Ki"),
     ("kd value", "KD"),
     ("susceptibility", "antimicrobial_susceptibility"),
-    ("s/r/i", "antimicrobial_susceptibility"),
 ]:
     _ALIAS_MAP.setdefault(_alias.lower(), _canonical)
 
 _STRIP_RE = re.compile(r"[^a-z0-9₅°/ ]+")
+
+#: Multi-token/metric-phrase aliases matched by substring on the full text.
+_PHRASE_ALIASES: list[tuple[str, str]] = [
+    ("s/r/i", "antimicrobial_susceptibility"),
+    ("susceptibility testing", "antimicrobial_susceptibility"),
+    ("antibiogram", "antimicrobial_susceptibility"),
+]
 
 
 def lookup_metric(header_text: str) -> tuple[str, str] | None:
@@ -179,10 +201,14 @@ def lookup_metric(header_text: str) -> tuple[str, str] | None:
         canonical = _ALIAS_MAP.get(token)
         if canonical is not None:
             return canonical, text
-    # Two-word aliases like "used in" handled by direct containment.
+    # Phrase aliases ("s/r/i", "susceptibility testing") need substring
+    # matching — the token loop cannot see them.
     lowered = text.lower()
     if lowered in _NON_METRIC_HEADERS:
         return None
+    for phrase, canonical in _PHRASE_ALIASES:
+        if phrase in lowered:
+            return canonical, text
     return None
 
 

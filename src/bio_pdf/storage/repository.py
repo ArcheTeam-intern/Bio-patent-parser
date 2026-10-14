@@ -158,6 +158,18 @@ CREATE TABLE IF NOT EXISTS exports (
     completed_at    TEXT
 );
 
+CREATE TABLE IF NOT EXISTS parse_issues (
+    issue_id     TEXT PRIMARY KEY,
+    job_id       TEXT NOT NULL REFERENCES jobs(job_id),
+    scope        TEXT NOT NULL,
+    reason_code  TEXT NOT NULL,
+    source_json  TEXT NOT NULL DEFAULT '[]',
+    detail       TEXT NOT NULL DEFAULT '',
+    state        TEXT NOT NULL DEFAULT 'open',
+    baseline_id  TEXT,
+    created_at   TEXT NOT NULL
+);
+
 -- Published baseline pointer (plan B03): the DB is the source of truth for
 -- which immutable manifest is current; the FS copy is a display mirror.
 CREATE TABLE IF NOT EXISTS publications (
@@ -694,6 +706,7 @@ class Repository:
         manifest_rel: str,
         manifest_sha: str,
         review_items: list["ReviewItem"],
+        issues: list[Any] | None = None,
     ) -> bool:
         """Atomically publish: status + manifest pointer + review items.
 
@@ -740,6 +753,30 @@ class Repository:
                         _json_dumps(item.proposed_actions),
                     ),
                 )
+            for issue in issues or []:
+                self._conn.execute(
+                    """
+                    INSERT INTO parse_issues (issue_id, job_id, scope, reason_code,
+                                              source_json, detail, state, baseline_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(issue_id) DO UPDATE SET
+                        source_json = excluded.source_json,
+                        detail = excluded.detail,
+                        baseline_id = excluded.baseline_id
+                    WHERE parse_issues.state = 'open'
+                    """,
+                    (
+                        issue.get("issue_id"),
+                        job_id,
+                        issue.get("scope", "document"),
+                        issue.get("reason_code", "UNKNOWN"),
+                        _json_dumps(issue.get("source_ids") or []),
+                        issue.get("detail", ""),
+                        issue.get("state", "open"),
+                        manifest_sha[:16],
+                        now,
+                    ),
+                )
             self._conn.execute(
                 """
                 INSERT INTO publications (job_id, manifest_rel, manifest_sha256, baseline_id, published_at)
@@ -757,6 +794,21 @@ class Repository:
         except Exception:
             self._conn.execute("ROLLBACK")
             raise
+
+    def list_issues(self, job_id: str, *, state: str | None = None) -> list[Any]:
+        if state:
+            return self._conn.execute(
+                "SELECT * FROM parse_issues WHERE job_id = ? AND state = ? ORDER BY created_at",
+                (job_id, state),
+            ).fetchall()
+        return self._conn.execute(
+            "SELECT * FROM parse_issues WHERE job_id = ? ORDER BY created_at", (job_id,)
+        ).fetchall()
+
+    def update_issue_state(self, issue_id: str, *, state: str) -> None:
+        self._conn.execute(
+            "UPDATE parse_issues SET state = ? WHERE issue_id = ?", (state, issue_id)
+        )
 
     def get_publication(self, job_id: str) -> Any:
         return self._conn.execute(
