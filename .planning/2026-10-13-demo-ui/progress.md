@@ -21,3 +21,9 @@ D5 对比页实现"不可比较"提示，完整对比按设计待人工 gold 后
 证据全部字符精度。报告见 reports/2026-10-14_m1_sample_before_after.md 与
 reports/2026-10-14_optimization_execution.md。T09–T17 未执行（原因见执行报告第 3 节：
 专利样本缺失、人工 gold 缺失、前端轮次、依赖链）。
+
+2026-10-14（post-M1 修复轮，第一轮+B05）：按 reports/2026-10-14_post_m1_review.md 与
+docs/superpowers/plans/2026-10-14-bio-pdf-post-m1-remediation.md 执行。
+提交 1407e11(B01 前端证据导航)/6035161(B02 源ID+精度拆分+融合去重)/a34fa32(B03 fencing+发布事务)/
+4ffca0a(B04 逐页执行+配置生效)/277fc1e(B05 按mention判断活性)。384 tests。B06-B12 未开始。
+报告：reports/post_m1/round1_report.md。
