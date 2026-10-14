@@ -102,6 +102,12 @@ def build_parse_plan(
             tasks.append(PageTask(page_number, "blank", ["blank page (checked, not skipped)"], route))
             continue
 
+        if ocr_policy == "force":
+            # Force means force: every non-blank page runs OCR.
+            reasons.append("ocr_policy=force")
+            tasks.append(PageTask(page_number, "layout_ocr", reasons, route))
+            continue
+
         if route in ("scan_suspect", "text_suspect"):
             if ocr_policy == "disabled":
                 reasons.append("SCAN_WITH_OCR_DISABLED")
@@ -123,6 +129,8 @@ def build_parse_plan(
         tasks.append(PageTask(page_number, "native", reasons, route))
 
     if ocr_policy == "force":
+        # Defensive: the routing above already enforces this; a violation
+        # would mean the policy was silently dropped.
         missing = [
             t.page_number for t in tasks if t.kind not in ("layout_ocr", "blank")
         ]
