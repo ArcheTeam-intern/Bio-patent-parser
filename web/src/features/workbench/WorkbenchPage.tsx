@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getJob, getRecords, MeasurementData, SequenceRecordData } from "../../api/client";
-import type { EvidenceTarget } from "../pdf/PdfViewer";
 import { StatusLabel } from "../../components/StatusLabel";
 import { StageStrip } from "./StageStrip";
 import { PdfViewer } from "../pdf/PdfViewer";
@@ -10,6 +9,8 @@ import { SequenceDetail } from "../sequences/SequenceList";
 import { MeasurementDetail, CheckList } from "../activities/ActivityList";
 import { ReviewPanel } from "../reviews/ReviewPanel";
 import { ExportDialog } from "./ExportDialog";
+import { useEvidence } from "../evidence/useEvidence";
+import { EvidenceNavigator } from "../evidence/EvidenceNavigator";
 
 type Tab = "sequences" | "activities" | "tables" | "text" | "run";
 
@@ -42,17 +43,33 @@ export function WorkbenchPage() {
     return null;
   }, [records.data, recordId]);
 
-  const [target, setTarget] = useState<EvidenceTarget | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
 
-  const selectRecord = (id: string, page: number | null, bbox: [number, number, number, number] | null) => {
+  // B01: location comes from the evidence API, never from id parsing.
+  const selectedEvidenceIds = useMemo(() => {
+    if (!selected) return [] as string[];
+    const record = selected.record as { evidence_ids?: string[] };
+    return record.evidence_ids ?? [];
+  }, [selected]);
+  const evidenceState = useEvidence(jobId ?? "", selectedEvidenceIds);
+
+  const selectRecord = (id: string) => {
     const next = new URLSearchParams(params);
     next.set("record", id);
-    if (page !== null) next.set("page", String(page));
-    else next.delete("page");
     setParams(next, { replace: true });
-    setTarget({ page, bbox });
   };
+
+  // URL state restore: a record in the URL is selected; the evidence hook
+  // then resolves the real page/bbox. The PDF page follows the evidence.
+  useEffect(() => {
+    if (recordId && !selected && (records.data !== undefined)) {
+      // Record id no longer exists in the current revision — clear it.
+      const next = new URLSearchParams(params);
+      next.delete("record");
+      setParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordId, selected, records.data]);
 
   if (!jobId) return <div className="banner error">缺少任务 ID</div>;
 
@@ -82,7 +99,9 @@ export function WorkbenchPage() {
       <div className="workbench">
         <section className="panel">
           <div className="panel-header">原始 PDF</div>
-          {job.data && <PdfViewer documentId={job.data.document_id} target={target} />}
+          {job.data && (
+            <PdfViewer documentId={job.data.document_id} target={evidenceState.target} />
+          )}
         </section>
 
         <section className="panel">
@@ -108,7 +127,7 @@ export function WorkbenchPage() {
               <SequenceTab
                 records={records.data?.sequences ?? []}
                 selectedId={recordId}
-                onSelect={(s: SequenceRecordData) => selectRecord(s.sequence_id, pageOf(s.evidence_ids[0]), null)}
+                onSelect={(s: SequenceRecordData) => selectRecord(s.sequence_id)}
                 loading={records.isLoading}
               />
             )}
@@ -116,7 +135,7 @@ export function WorkbenchPage() {
               <ActivityTab
                 records={records.data?.measurements ?? []}
                 selectedId={recordId}
-                onSelect={(m: MeasurementData) => selectRecord(m.measurement_id, pageOf(m.evidence_ids[0]), null)}
+                onSelect={(m: MeasurementData) => selectRecord(m.measurement_id)}
                 loading={records.isLoading}
               />
             )}
@@ -134,6 +153,10 @@ export function WorkbenchPage() {
               <>
                 <SequenceDetail record={selected.record} />
                 <CheckList checks={selected.record.checks} reasons={selected.record.review_reasons ?? []} />
+                <EvidenceNavigator
+                  state={evidenceState}
+                  fieldEvidence={{ value: selected.record.evidence_ids }}
+                />
                 <ReviewPanel
                   jobId={jobId}
                   recordId={selected.record.sequence_id}
@@ -145,12 +168,11 @@ export function WorkbenchPage() {
               <>
                 <MeasurementDetail
                   record={selected.record}
-                  onEvidenceClick={(eid) => {
-                    const page = pageOf(eid);
-                    selectRecord(selected.record.measurement_id, page, null);
-                    // Bbox arrives via the evidence endpoint; for now page-level.
-                    setTarget({ page, bbox: null });
-                  }}
+                  onEvidenceClick={(eid) => evidenceState.select(eid)}
+                />
+                <EvidenceNavigator
+                  state={evidenceState}
+                  fieldEvidence={selected.record.field_evidence}
                 />
                 <ReviewPanel
                   jobId={jobId}
@@ -164,12 +186,6 @@ export function WorkbenchPage() {
       </div>
     </div>
   );
-}
-
-function pageOf(evidenceId: string | undefined): number | null {
-  if (!evidenceId) return null;
-  const m = evidenceId.match(/:p(\d+):/);
-  return m ? Number(m[1]) : null;
 }
 
 function isActive(status: string | undefined): boolean {

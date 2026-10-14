@@ -236,10 +236,6 @@ export function getPage(jobId: string, pageNumber: number): Promise<PageData> {
   return request(`/jobs/${encodeURIComponent(jobId)}/pages/${pageNumber}`);
 }
 
-export function getEvidence(jobId: string, evidenceId: string): Promise<Record<string, unknown>> {
-  return request(`/jobs/${encodeURIComponent(jobId)}/evidence/${encodeURIComponent(evidenceId)}`);
-}
-
 export function getReviews(jobId?: string): Promise<{ reviews: ReviewItem[]; total: number }> {
   const suffix = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
   return request(`/reviews${suffix}`);
@@ -312,4 +308,45 @@ export function getExport(exportId: string): Promise<ExportInfo> {
 
 export function exportDownloadUrl(exportId: string): string {
   return `${API_PREFIX}/exports/${encodeURIComponent(exportId)}/download`;
+}
+
+// ---- evidence (B01: typed, no ID guessing) ------------------------------
+
+export interface EvidenceFragmentData {
+  page_number: number;
+  bbox: number[] | null;
+  block_id: string | null;
+  table_id: string | null;
+  cell_id: string | null;
+  char_start: number | null;
+  char_end: number | null;
+  raw_text: string | null;
+  source_artifact_id: string | null;
+}
+
+export interface EvidenceData {
+  api_version: string;
+  evidence_id: string;
+  document_id: string;
+  job_id?: string;
+  baseline_id: string | null;
+  result_revision?: number;
+  page_number: number | null;
+  bbox: number[] | null;
+  char_start: number | null;
+  char_end: number | null;
+  raw_text: string | null;
+  source_parser: string | null;
+  source_locator: string | null;
+  fragments: EvidenceFragmentData[];
+  /** Text precision: offset | block | none (B02 split). */
+  text_precision: "offset" | "block" | "none";
+  /** Geometry precision: character | cell | line | block | page | none. */
+  geometry_precision: "character" | "cell" | "line" | "block" | "page" | "none";
+  /** Legacy field kept for older payloads. */
+  location_precision?: string;
+}
+
+export function getEvidence(jobId: string, evidenceId: string): Promise<EvidenceData> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/evidence/${encodeURIComponent(evidenceId)}`);
 }

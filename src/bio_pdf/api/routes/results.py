@@ -145,17 +145,76 @@ def get_evidence(
     job_id: str,
     evidence_id: str,
 ) -> dict:
-    """Return one evidence span (page, bbox, raw text) from the extract index."""
+    """Return one evidence span (page, bbox, raw text) from the extract index.
 
-    _job_or_404(service, job_id)
+    The response carries ``baseline_id`` (the published baseline the span
+    was read from) so the frontend can bind navigation to a version and
+    detect staleness (plan B01). ``precisions`` splits what is known: text
+    offset vs geometry — the UI must not claim character-precise highlight
+    from a block bbox.
+    """
+
+    job = _job_or_404(service, job_id)
     data = ResultReader(service.paths.artifact_root).read_json(job_id, "extract")
+    baseline_id = _baseline_id(service, job_id)
     for span in data.get("evidence_spans", []):
         if span.get("evidence_id") == evidence_id:
-            return {"api_version": "v1", **span}
+            return {
+                "api_version": "v1",
+                "job_id": job_id,
+                "baseline_id": baseline_id,
+                "result_revision": job.result_revision,
+                "text_precision": span.get("text_precision")
+                or _legacy_text_precision(span),
+                "geometry_precision": span.get("geometry_precision")
+                or _legacy_geometry_precision(span),
+                **span,
+            }
     raise HTTPException(
         status_code=404,
         detail={"code": "EVIDENCE_MISSING", "message": f"evidence {evidence_id} not found"},
     )
+
+
+def _baseline_id(service, job_id: str) -> str | None:
+    from bio_pdf.storage.result_reader import ResultReader
+
+    manifest = ResultReader(service.paths.artifact_root).read_published_manifest(job_id)
+    if manifest is None:
+        return None
+    return manifest.get("published_at") or None
+
+
+def _legacy_text_precision(span: dict) -> str:
+    """Derive text precision for pre-B02 spans (offset present or not)."""
+
+    if span.get("char_start") is not None or span.get("char_end") is not None:
+        return "offset"
+    return "block" if span.get("raw_text") else "none"
+
+
+def _legacy_geometry_precision(span: dict) -> str:
+    """Derive geometry precision from what actually exists.
+
+    A block-level bbox is NOT a character box — the previous
+    ``location_precision="character"`` claim with a paragraph-sized bbox
+    was the review's "假字符精度" finding.
+    """
+
+    has_bbox = span.get("bbox") is not None
+    fragments = span.get("fragments") or []
+    cell_anchored = bool(
+        fragments and any(f.get("cell_id") for f in fragments)
+    )
+    if cell_anchored:
+        return "cell"
+    if has_bbox:
+        return "block"
+    if span.get("page_number") is not None:
+        return "page"
+    if any(f.get("page_number") for f in fragments):
+        return "page"
+    return "none"
 
 
 @router.get("/artifacts", response_model=ArtifactsResponse)

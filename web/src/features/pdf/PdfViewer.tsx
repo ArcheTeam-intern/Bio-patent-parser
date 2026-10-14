@@ -1,24 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { documentSourceUrl } from "../../api/client";
+import type { EvidenceTarget } from "../evidence/useEvidence";
 
 /**
- * PDF viewer with the evidence overlay.
+ * PDF viewer with the evidence overlay (plan B01).
  *
- * Coordinates: the backend's bboxes are PDF points on the *visible* page
- * with a top-left origin (see bio_pdf.pdf.geometry). PDF.js viewports use
- * the same top-left visible-page space, and at scale 1 one CSS px equals
- * one PDF point. Overlay geometry therefore maps pt → px as
- * px = pt * (viewport_px / viewport_pt) using the *real* viewport the page
- * was rendered with — never a guessed 612×792 default. The source page's
- * own /Rotate is already applied by getViewport, so we must not re-apply
- * it here.
+ * Location geometry comes exclusively from the evidence API payload: the
+ * target's page/bbox (backend points, top-left origin on the visible page).
+ * Overlay geometry maps pt → px through the *rendered* viewport, so zoom
+ * and DPR never offset the box.
+ *
+ * Race handling: a new page render cancels the previous renderTask; the
+ * overlay only appears after the render for the target page has completed,
+ * so a stale bbox is never briefly drawn on a freshly rendered page. The
+ * source page's own /Rotate is applied by getViewport — never re-applied.
  */
-
-export interface EvidenceTarget {
-  /** Source page number (1-based). Null → no location evidence at all. */
-  page: number | null;
-  bbox: [number, number, number, number] | null; // points, top-left origin
-}
 
 interface Props {
   documentId: string;
@@ -26,19 +22,19 @@ interface Props {
 }
 
 interface RenderedGeometry {
-  /** CSS px size of the rendered canvas. */
   pxWidth: number;
   pxHeight: number;
-  /** Page size in PDF points (viewport at scale 1). */
   ptWidth: number;
   ptHeight: number;
+  pageNumber: number;
 }
 
 type PdfDocument = {
   numPages: number;
+  destroy(): Promise<void>;
   getPage(n: number): Promise<{
     getViewport(opts: { scale: number }): { width: number; height: number };
-    render(opts: Record<string, unknown>): { promise: Promise<void> };
+    render(opts: Record<string, unknown>): { promise: Promise<void>; cancel(): void };
   }>;
 };
 
@@ -50,38 +46,46 @@ export function PdfViewer({ documentId, target }: Props) {
   const [pageCount, setPageCount] = useState(0);
   const [geometry, setGeometry] = useState<RenderedGeometry | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(true);
+  const renderTaskRef = useRef<{ cancel(): void } | null>(null);
 
-  const effectivePage = target?.page
-    ? Math.min(Math.max(target.page, 1), Math.max(pageCount, 1))
-    : pageNumber;
-  const showTargetPage = target?.page !== null && target !== null && effectivePage !== pageNumber;
-
+  // Follow the evidence target's page (from the API — never id-parsed).
   useEffect(() => {
-    if (showTargetPage) {
-      setPageNumber(effectivePage);
+    if (target?.page && target.page >= 1) {
+      setPageNumber((current) => (current === target.page ? current : target.page!));
     }
-  }, [showTargetPage, effectivePage]);
+  }, [target?.page]);
 
+  // Load the document; release the previous one.
   useEffect(() => {
     let cancelled = false;
+    let loaded: PdfDocument | null = null;
+    setLoadingPdf(true);
+    setError(null);
+    setPdfDoc(null);
+    setGeometry(null);
     (async () => {
       try {
         const pdfjs = await import("pdfjs-dist");
-        // The query busts a browser cache poisoned by an earlier
-        // wrong-MIME response of the same asset path.
         pdfjs.GlobalWorkerOptions.workerSrc =
           new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString() + "?v=2";
-        const doc = await pdfjs.getDocument({ url: documentSourceUrl(documentId) }).promise;
-        if (!cancelled) {
-          setPdfDoc(doc);
-          setPageCount(doc.numPages);
+        loaded = (await pdfjs.getDocument({ url: documentSourceUrl(documentId) })
+          .promise) as unknown as PdfDocument;
+        if (cancelled) {
+          void loaded.destroy();
+          return;
         }
+        setPdfDoc(loaded);
+        setPageCount(loaded.numPages);
       } catch (e) {
         if (!cancelled) setError(`PDF 加载失败：${String(e)}`);
+      } finally {
+        if (!cancelled) setLoadingPdf(false);
       }
     })();
     return () => {
       cancelled = true;
+      if (loaded) void loaded.destroy().catch(() => undefined);
     };
   }, [documentId]);
 
@@ -89,30 +93,41 @@ export function PdfViewer({ documentId, target }: Props) {
     if (!pdfDoc) return;
     let cancelled = false;
     (async () => {
-      const page = await pdfDoc.getPage(pageNumber);
-      const canvas = canvasRef.current;
-      if (!canvas || cancelled) return;
-      const viewport = page.getViewport({ scale });
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(viewport.width * dpr);
-      canvas.height = Math.floor(viewport.height * dpr);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
-      const renderTask = page.render({
-        canvasContext: ctx,
-        viewport,
-        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
-      });
-      await renderTask.promise;
-      if (!cancelled) {
+      try {
+        const page = await pdfDoc.getPage(pageNumber);
+        const canvas = canvasRef.current;
+        if (!canvas || cancelled) return;
+        const viewport = page.getViewport({ scale });
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        // Cancel any in-flight render before starting a new one.
+        renderTaskRef.current?.cancel();
+        const task = page.render({
+          canvasContext: ctx,
+          viewport,
+          transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+        });
+        renderTaskRef.current = task;
+        await task.promise;
+        if (cancelled) return;
         setGeometry({
           pxWidth: Math.floor(viewport.width),
           pxHeight: Math.floor(viewport.height),
           ptWidth: viewport.width / scale,
           ptHeight: viewport.height / scale,
+          pageNumber,
         });
+      } catch (e) {
+        // RenderingCancelledException is expected on fast navigation.
+        const name = (e as { name?: string })?.name ?? "";
+        if (!cancelled && name !== "RenderingCancelledException") {
+          setError(`页面渲染失败：${String(e)}`);
+        }
       }
     })();
     return () => {
@@ -121,7 +136,9 @@ export function PdfViewer({ documentId, target }: Props) {
   }, [pdfDoc, pageNumber, scale]);
 
   const bbox = target?.bbox ?? null;
-  const overlayReady = bbox !== null && geometry !== null && target !== null;
+  // Only draw when the CURRENT rendered page matches the target page.
+  const overlayReady =
+    bbox !== null && geometry !== null && target?.page === geometry.pageNumber;
 
   return (
     <>
@@ -139,9 +156,12 @@ export function PdfViewer({ documentId, target }: Props) {
             onChange={(e) => setPageNumber(Number(e.target.value) || 1)}
             style={{ width: 56 }}
           />{" "}
-          / {pageCount} 页
+          / {pageCount || "…"} 页
         </span>
-        <button onClick={() => setPageNumber((p) => Math.min(pageCount, p + 1))} disabled={pageNumber >= pageCount}>
+        <button
+          onClick={() => setPageNumber((p) => Math.min(pageCount, p + 1))}
+          disabled={pageNumber >= pageCount}
+        >
           下一页
         </button>
         <button onClick={() => setScale((s) => Math.max(0.4, s - 0.2))}>−</button>
@@ -152,8 +172,16 @@ export function PdfViewer({ documentId, target }: Props) {
         </a>
       </div>
       <div className="pdf-canvas-wrap">
-        {error && <div className="banner error" style={{ margin: 12 }}>{error}</div>}
-        {!pdfDoc && !error && <div className="banner info" style={{ margin: 12 }}>正在加载 PDF…</div>}
+        {error && (
+          <div className="banner error" style={{ margin: 12 }}>
+            {error}
+          </div>
+        )}
+        {loadingPdf && !error && (
+          <div className="banner info" style={{ margin: 12 }}>
+            正在加载源 PDF…
+          </div>
+        )}
         <div className="pdf-canvas-inner">
           <canvas ref={canvasRef} />
           {target && target.page === null && (
@@ -163,7 +191,7 @@ export function PdfViewer({ documentId, target }: Props) {
           )}
           {target && target.page !== null && !bbox && (
             <div className="banner warn" style={{ position: "absolute", top: 8, left: 8, zIndex: 2 }}>
-              只有页码，无法精确定位（证据缺少坐标）
+              页级证据：只有页码，无区域坐标
             </div>
           )}
           {overlayReady && geometry && (
