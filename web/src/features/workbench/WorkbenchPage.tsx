@@ -11,8 +11,10 @@ import { ReviewPanel } from "../reviews/ReviewPanel";
 import { ExportDialog } from "./ExportDialog";
 import { useEvidence } from "../evidence/useEvidence";
 import { EvidenceNavigator } from "../evidence/EvidenceNavigator";
+import { TablesTab, TextTab } from "../tables/TableView";
+import { IssuePanel } from "../issues/IssuePanel";
 
-type Tab = "sequences" | "activities" | "tables" | "text" | "run";
+type Tab = "sequences" | "activities" | "tables" | "text" | "issues" | "run";
 
 /** 解析工作台（design §7）：PDF 与领域结果联动，URL 保存视图状态。 */
 
@@ -52,6 +54,10 @@ export function WorkbenchPage() {
     return record.evidence_ids ?? [];
   }, [selected]);
   const evidenceState = useEvidence(jobId ?? "", selectedEvidenceIds);
+
+  // 表格/原文视图的页码：URL page 参数优先，其次证据定位页。
+  const urlPage = Number(params.get("page") || 0) || null;
+  const detailPage = urlPage ?? evidenceState.target?.page ?? 1;
 
   const selectRecord = (id: string) => {
     const next = new URLSearchParams(params);
@@ -107,7 +113,7 @@ export function WorkbenchPage() {
         <section className="panel">
           <div className="panel-header">
             <div style={{ display: "flex", gap: 8 }}>
-              {(["sequences", "activities", "tables", "text", "run"] as Tab[]).map((t) => (
+              {(["sequences", "activities", "tables", "text", "issues", "run"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   style={{ border: "none", background: tab === t ? "var(--accent-soft)" : "none", color: tab === t ? "var(--accent)" : "inherit", fontWeight: tab === t ? 600 : 400 }}
@@ -117,7 +123,7 @@ export function WorkbenchPage() {
                     setParams(next, { replace: true });
                   }}
                 >
-                  {{ sequences: "序列", activities: "活性", tables: "表格", text: "原文", run: "运行详情" }[t]}
+                  {{ sequences: "序列", activities: "活性", tables: "表格", text: "原文", issues: "问题", run: "运行详情" }[t]}
                 </button>
               ))}
             </div>
@@ -139,8 +145,11 @@ export function WorkbenchPage() {
                 loading={records.isLoading}
               />
             )}
-            {tab === "tables" && <div className="empty-state">表格视图：结构解析产生表格后在此展示（含行列与合并表头）。</div>}
-            {tab === "text" && <div className="empty-state">原文视图：按页展示原生文本与结构解析文本（切换对比）。</div>}
+            {tab === "tables" && (
+              <TablesTab jobId={jobId} pageNumber={detailPage} />
+            )}
+            {tab === "text" && <TextTab jobId={jobId} pageNumber={detailPage} />}
+            {tab === "issues" && <IssuePanel jobId={jobId} />}
             {tab === "run" && <RunDetails jobId={jobId} />}
           </div>
         </section>

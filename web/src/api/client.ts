@@ -350,3 +350,21 @@ export interface EvidenceData {
 export function getEvidence(jobId: string, evidenceId: string): Promise<EvidenceData> {
   return request(`/jobs/${encodeURIComponent(jobId)}/evidence/${encodeURIComponent(evidenceId)}`);
 }
+
+// ---- issues (B12) ---------------------------------------------------------
+
+export interface ParseIssueData {
+  issue_id: string;
+  job_id: string;
+  scope: string;
+  reason_code: string;
+  source_ids: string[];
+  detail: string;
+  state: string;
+  baseline_id: string | null;
+  created_at: string;
+}
+
+export function getIssues(jobId: string): Promise<{ issues: ParseIssueData[]; total: number }> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/issues`);
+}

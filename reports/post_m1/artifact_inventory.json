@@ -1,0 +1,58 @@
+{
+  "job": "job-bfcc63a85600",
+  "publication": {
+    "job_id": "job-bfcc63a85600",
+    "manifest_rel": "jobs/job-bfcc63a85600/published/result-manifest-20261014T060744.9290180000.json",
+    "manifest_sha256": "669c093106ba0042ea3aac71f3efd46f5163ee2eb569c8e1f79581c8ec6f36f8",
+    "baseline_id": "669c093106ba0042",
+    "published_at": "2026-10-14T06:07:44.945214+00:00"
+  },
+  "artifacts": [
+    {
+      "path": "data\\post-m1-demo\\jobs\\job-bfcc63a85600\\published\\current.json",
+      "sha256": "f5f521a3b7b0cc2d93a284bb1a9c106a"
+    },
+    {
+      "path": "data\\post-m1-demo\\jobs\\job-bfcc63a85600\\published\\result-manifest-20261014T060744.9290180000.json",
+      "sha256": "669c093106ba0042ea3aac71f3efd46f"
+    }
+  ],
+  "issues": [
+    {
+      "issue_id": "iss-88f236d8bb5b9818",
+      "scope": "table",
+      "reason_code": "TABLE_INVENTORY",
+      "state": "open"
+    },
+    {
+      "issue_id": "iss-3dc96174507c3a76",
+      "scope": "table",
+      "reason_code": "TABLE_SCORING",
+      "state": "open"
+    },
+    {
+      "issue_id": "iss-75c72b67f475db38",
+      "scope": "mention",
+      "reason_code": "RESULT_WITHOUT_METRIC",
+      "state": "open"
+    },
+    {
+      "issue_id": "iss-d629c026e89b6320",
+      "scope": "mention",
+      "reason_code": "RESULT_WITHOUT_METRIC",
+      "state": "open"
+    },
+    {
+      "issue_id": "iss-c0eef046c0222c9a",
+      "scope": "mention",
+      "reason_code": "RESULT_WITHOUT_METRIC",
+      "state": "open"
+    },
+    {
+      "issue_id": "iss-f151025410e388cb",
+      "scope": "mention",
+      "reason_code": "RESULT_WITHOUT_METRIC",
+      "state": "open"
+    }
+  ]
+}
