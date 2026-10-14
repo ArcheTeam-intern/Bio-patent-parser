@@ -25,7 +25,19 @@ def _get_settings() -> ApiSettings:
     return ApiSettings.from_env()
 
 
-def get_settings() -> ApiSettings:
+def get_settings(request: Request) -> ApiSettings:
+    """Settings the app was created with (``create_app(settings)``).
+
+    Falls back to environment settings only when no app settings exist
+    (bare ``get_settings()`` calls outside an app). Resolving straight
+    from the environment here previously made every request ignore the
+    injected settings — tests and ``create_app`` callers got ``data/demo``
+    while the app's own service factory used the real data dir.
+    """
+
+    settings: ApiSettings | None = getattr(request.app.state, "settings", None)
+    if settings is not None:
+        return settings
     return _get_settings()
 
 

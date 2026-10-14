@@ -122,6 +122,19 @@ CREATE TABLE IF NOT EXISTS lease_counters (
     last_generation INTEGER NOT NULL DEFAULT 0
 );
 
+-- Worker presence (live-ops): an idle worker holds no job lease, so the
+-- queue would otherwise have no trace that anything is polling. Each
+-- worker upserts here every few seconds; the API reports a worker as
+-- offline once its row goes stale, so a job stuck in "queued" can be
+-- explained ("no parser process is running") instead of silently hanging.
+CREATE TABLE IF NOT EXISTS worker_presence (
+    worker_id    TEXT PRIMARY KEY,
+    pid          INTEGER,
+    data_dir     TEXT,
+    started_at   TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS record_versions (
     job_id        TEXT NOT NULL REFERENCES jobs(job_id),
     record_id     TEXT NOT NULL,
@@ -659,6 +672,45 @@ class Repository:
             "DELETE FROM worker_leases WHERE job_id = ? AND worker_id = ? AND generation = ?",
             (job_id, worker_id, generation),
         )
+
+    # ---- worker presence (live-ops) ---------------------------------------
+
+    def record_worker_presence(
+        self, worker_id: str, *, pid: int | None, data_dir: str
+    ) -> None:
+        """Upsert this worker's liveness row (called on every poll)."""
+
+        now = _utcnow_iso()
+        self._conn.execute(
+            """
+            INSERT INTO worker_presence (worker_id, pid, data_dir, started_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(worker_id) DO UPDATE SET
+                last_seen_at = excluded.last_seen_at,
+                pid = excluded.pid,
+                data_dir = excluded.data_dir
+            """,
+            (worker_id, pid, data_dir, now, now),
+        )
+
+    def clear_worker_presence(self, worker_id: str) -> None:
+        """Best-effort deregistration on clean shutdown."""
+
+        self._conn.execute(
+            "DELETE FROM worker_presence WHERE worker_id = ?", (worker_id,)
+        )
+
+    def list_worker_presence(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT worker_id, pid, data_dir, started_at, last_seen_at FROM worker_presence"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_jobs_by_status(self) -> dict[str, int]:
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"
+        ).fetchall()
+        return {str(row["status"]): int(row["n"]) for row in rows}
 
     # ---- fenced conditional commits (plan B03) ----------------------------
 

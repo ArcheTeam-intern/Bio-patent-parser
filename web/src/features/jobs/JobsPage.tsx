@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { getSamples, listJobs } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
+import { WorkerHint } from "../../components/WorkerHint";
 import { UploadDialog } from "./UploadDialog";
 
 /** 任务列表：上传、样本导入、观察状态（design §6）。 */
@@ -29,8 +30,9 @@ export function JobsPage() {
         </button>
       </div>
 
-      {jobsList.length === 0 && !jobs.isLoading ? (
-        <EmptyJobs samples={samples.data?.samples ?? []} onUpload={() => setUploadOpen(true)} />
+      <WorkerHint active={activeJobs(jobsList)} />
+
+      {jobsList.length === 0 && !jobs.isLoading ? (        <EmptyJobs samples={samples.data?.samples ?? []} onUpload={() => setUploadOpen(true)} />
       ) : (
         <div className="panel">
           <table className="data">

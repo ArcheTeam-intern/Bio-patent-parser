@@ -106,6 +106,24 @@ class JobResponse(ApiEnvelope):
     export_artifact_id: str | None = None
 
 
+class WorkerPresenceView(BaseModel):
+    worker_id: str
+    pid: int | None = None
+    seconds_since_heartbeat: float
+    online: bool
+
+
+class QueueStatusResponse(ApiEnvelope):
+    """Live-ops view: are queued jobs actually being picked up?"""
+
+    data_dir: str
+    queued_jobs: int
+    running_jobs: int
+    workers: list[WorkerPresenceView] = Field(default_factory=list)
+    online_worker_count: int
+    stale_after_seconds: float
+
+
 class EvidenceSpanView(BaseModel):
     evidence_id: str
     document_id: str

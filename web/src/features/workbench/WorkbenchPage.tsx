@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getJob, getRecords, MeasurementData, SequenceRecordData } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
+import { WorkerHint } from "../../components/WorkerHint";
 import { StageStrip } from "./StageStrip";
 import { PdfViewer } from "../pdf/PdfViewer";
 import { SequenceDetail } from "../sequences/SequenceList";
@@ -101,6 +102,8 @@ export function WorkbenchPage() {
       </div>
 
       <ExportDialog jobId={jobId} open={exportOpen} onClose={() => setExportOpen(false)} />
+
+      <WorkerHint active={isActive(job.data?.status)} />
 
       <div className="workbench">
         <section className="panel">

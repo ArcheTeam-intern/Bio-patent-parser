@@ -368,3 +368,26 @@ export interface ParseIssueData {
 export function getIssues(jobId: string): Promise<{ issues: ParseIssueData[]; total: number }> {
   return request(`/jobs/${encodeURIComponent(jobId)}/issues`);
 }
+
+// ---- queue status (live-ops) ---------------------------------------------
+
+export interface WorkerPresence {
+  worker_id: string;
+  pid: number | null;
+  seconds_since_heartbeat: number;
+  online: boolean;
+}
+
+export interface QueueStatus {
+  api_version: string;
+  data_dir: string;
+  queued_jobs: number;
+  running_jobs: number;
+  workers: WorkerPresence[];
+  online_worker_count: number;
+  stale_after_seconds: number;
+}
+
+export function getQueueStatus(): Promise<QueueStatus> {
+  return request("/queue/status");
+}

@@ -160,3 +160,39 @@
 - Wrote research/pdf_parser_comparison_2026-10-13.md with seven-project comparison, primary selection, accuracy controls, evidence schema, evaluation design, and source references.
 - Final check confirmed official origin, commit identity, clean upstream worktree, and existing nonempty report/README. Placeholder scan found none (rg exit 1 means no matches).
 - Research and source-acquisition scope complete; biological parser implementation and measured accuracy remain later stages.
+### 2026-10-14 深入修改方案
+- 用户要求给其他模型执行的具体修改方案，当前只写规划文档。
+- 已读取 writing-plans、brainstorming、planning-with-files-zh；沿用现有技术栈，准备分阶段任务、接口与验收夹具。
+- 已识别路由未接入、单路归一化、序列字母表未使用、单位边界与通用表头误识别。
+- 深入抽查：两段10残基片段被漏提；55条非目标表格候选；缺实体/assay流程；评测遗漏无SEQ ID候选。
+- 已写17任务优化计划，补连接隔离、制品occurrence身份、恢复与快照规则、实际回归输入输出及执行指令。
+- 本轮未修改业务代码、未重跑实现测试；只核验规划文档及当前制品，前一轮298 passed仍是当前已知基线。
+- 规划自检通过：17任务，641行，覆盖确定缺陷、配置/迁移、前后端证据、专利及评测；无未解决占位符，已修正M1高亮和M4复解析依赖。
+
+### M1执行后补充方案核查
+- 已读两份执行报告、源码与当前published extract/normalized/validation。
+- 当前HEAD cab949a；已有未提交规划文件，业务源码未改。
+- 复跑非live测试：351 passed、4 skipped；新增补充方案将优先修接线回归、真实字段证据、OCR执行、fencing和导出快照。
+- 已在内存直接复现表格串列/证据ID断链及角色分类漏提，未写应用数据。
+- 已写独立核查报告与12任务差量方案，含真实新job的artifact hash、延期判断、文件范围及验收条件。
+- 自检通过：12任务，315行；三轮依赖与验收覆盖完整，业务代码未改，交付文档供其他模型执行。
+
+### 扫描PDF的OCR恢复
+- 当前修复分支codex/scan-ocr-recovery；保留用户已有jobs.py/job_service.py兼容修正。
+- 发现已取消uv进程残留占用虚拟环境，已停止并安装onnxruntime1.31.0（rapidocr3.10.0/docling2.138.0）。
+- 新增OCR选择回归先5项失败，修复后OCR/路由12项通过；SDK规范化英语为iso:en-Latn。
+- 沙箱临时目录限制曾导致pytest setup权限错误，获准在外部重跑后通过；当前环境已放开权限。
+- 正准备真实一页OCR与25页任务恢复，未宣称扫描件解析成功。
+
+### 扫描任务完成与实时运行缺陷修复（提交71e7127）
+- job-6031752e8318（25页真实扫描件）：25/25页OCR出文本（20397字符），389条证据、39条mentions、13条问题；无ST.25序列标签与注册指标表，故0条自动提取记录（不伪造）。
+- 修复三处真实运行缺陷：API parser名称docling_sdk被映射回legacy导致配置校验失败；OCR引擎写死tesseract（改为自动选择已安装引擎并写入手册版本）；SEQ ID引用证据ID碰撞（同一号码不同拼写共用ev-id，改为锚定真实块偏移）。
+- 全量427 passed。
+
+### Worker 存活提示（排队任务不再静默等待）
+- 现象：用户上传后任务停在“等待解析”；空转的worker不持有任务租约，队列无从区分“无进程”与“解析慢”。
+- 新增worker_presence心跳表（worker每5s写入，独立SQLite连接，退出清理，崩溃行由API判为过期）；新增GET /api/v1/queue/status（在线worker、排队/运行数、data_dir、过期阈值）。
+- 前端WorkerHint横幅（JobsPage与工作台）：存在排队/运行任务且无在线worker时显示启动命令（含与API一致的--data-dir），worker上线后自动消失。
+- 同时修正API依赖get_settings一直忽略create_app注入设置的问题（请求此前回落到环境默认data/demo）。
+- 真实验证：停止worker→新任务job-b6e0ef8e9d92排队并显示横幅与命令；启动worker→横幅自动消失、任务被领取并完成（2条待审核）。全量431 passed、web build通过。
+

@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from bio_pdf.api.contracts import API_VERSION, CapabilitiesResponse, EngineCapability
-from bio_pdf.api.routes import documents, exports, jobs, results, reviews
+from bio_pdf.api.routes import documents, exports, jobs, queue, results, reviews
 from bio_pdf.api.settings import ApiSettings
 from bio_pdf.application.job_service import JobPaths, JobService
 from bio_pdf.errors import WorkflowError
@@ -111,6 +111,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 
     app.include_router(documents.router, prefix=api_prefix)
     app.include_router(jobs.router, prefix=api_prefix)
+    app.include_router(queue.router, prefix=api_prefix)
     app.include_router(results.router, prefix=api_prefix)
     app.include_router(reviews.router, prefix=api_prefix)
     app.include_router(exports.router, prefix=api_prefix)
