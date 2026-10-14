@@ -103,6 +103,9 @@ class _St25StateMachine:
         self.records: list[SequenceRecord] = []
         #: Pages each finalized record's residues appeared on (aligned).
         self.record_pages: list[list[int]] = []
+        #: Listings that closed with ZERO residues (B09): surfaced as
+        #: unresolved issues instead of building an empty contract object.
+        self.zero_residue_listings: list[tuple[str | None, int]] = []
         self.current: _SequenceBuilder | None = None
         self.mapper = ResidueMapper()
 
@@ -172,6 +175,12 @@ class _St25StateMachine:
 
     def _finalize(self, builder: _SequenceBuilder) -> None:
         raw = "\n".join(line.rstrip() for line in builder.residue_lines)
+        if not raw.strip():
+            # A declared listing with no residues: keep an explicit issue
+            # (the record contract forbids empty sequences) instead of
+            # crashing the whole job on a Zero-length NonEmptyStr.
+            self.zero_residue_listings.append((builder.seq_id_no, builder.residue_page))
+            return
         if builder.molecule_type in ("DNA", "RNA"):
             normalized, residues = self._normalize_nucleic(raw, builder.molecule_type)
             representation = "one_letter"
@@ -371,6 +380,7 @@ def parse_st25_blocks(
     *,
     parser_run_id: str = "native",
     evidence_index: Any | None = None,
+    issues: list[dict[str, Any]] | None = None,
 ) -> list[SequenceRecord]:
     """Parse ST.25 listing across multiple blocks/pages.
 
@@ -403,6 +413,17 @@ def parse_st25_blocks(
                 if line.strip():
                     page_fragments.setdefault(page_number, []).append(line.rstrip())
     machine.finish()
+
+    if issues is not None:
+        for seq_id, page in machine.zero_residue_listings:
+            issues.append(
+                {
+                    "scope": "document",
+                    "reason_code": "ZERO_RESIDUE_LISTING",
+                    "source_ids": [f"st25:{seq_id or 'unnamed'}"],
+                    "detail": f"listing for SEQ ID {seq_id or '?'} closed without residues (page {page})",
+                }
+            )
 
     if evidence_index is not None:
         from bio_pdf.extract.evidence import span_page_only, span_unlocated
