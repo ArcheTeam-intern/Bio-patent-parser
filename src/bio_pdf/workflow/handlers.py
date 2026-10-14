@@ -555,9 +555,30 @@ class NormalizeStage(_FileStage):
 # ---------------------------------------------------------------------------
 
 
-def _page_blocks(document: NormalizedDocument) -> list[dict[str, Any]]:
-    """Flatten a NormalizedDocument into the block dicts extractors accept."""
+def _source_parser_from_run(parser_run_id: str) -> str:
+    """Adapter metadata → source parser name (never guessed from ids)."""
 
+    lowered = parser_run_id.lower()
+    if "docling" in lowered:
+        return "layout"
+    if "mineru" in lowered:
+        return "layout"
+    if "native" in lowered:
+        return "native"
+    return "unknown"
+
+
+def _page_blocks(
+    document: NormalizedDocument, *, source_artifact_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Flatten a NormalizedDocument into the block dicts extractors accept.
+
+    ``source_parser`` and ``source_artifact_id`` travel with each block so
+    evidence records the real producer (adapter metadata), not a guess
+    derived from the block-id string (plan B02).
+    """
+
+    parser = _source_parser_from_run(document.parser_run_id)
     blocks: list[dict[str, Any]] = []
     for page in document.pages:
         for block in page.blocks:
@@ -569,6 +590,10 @@ def _page_blocks(document: NormalizedDocument) -> list[dict[str, Any]]:
                     "page_number": page.page_number,
                     "bbox": list(block.bbox) if block.bbox else None,
                     "block_id": block.block_id,
+                    "source_refs": list(block.source_refs),
+                    "source_aliases": list(block.source_aliases),
+                    "source_parser": parser,
+                    "source_artifact_id": source_artifact_id,
                 }
             )
     return blocks
@@ -603,11 +628,23 @@ class ExtractStage(_FileStage):
         )
         doc_id = document.document_id
         parser_run_id = document.parser_run_id
-        blocks = _page_blocks(document)
+        normalized_ref = context.inputs.get("normalize.normalized.json")
+        blocks = _page_blocks(
+            document,
+            source_artifact_id=(
+                normalized_ref.relative_path if normalized_ref is not None else None
+            ),
+        )
 
         # T06: evidence is constructed at extraction time from real match
         # offsets — never reconstructed from id strings later.
-        from bio_pdf.extract.evidence import EvidenceIndex, span_from_cell, span_page_only
+        from bio_pdf.extract.evidence import (
+            MAX_EVIDENCE_EXCERPT,
+            EvidenceIndex,
+            span_from_cell,
+            span_page_only,
+            span_unlocated,
+        )
 
         evidence = EvidenceIndex()
         diagnostics: list[dict[str, str]] = []
@@ -710,17 +747,17 @@ class ExtractStage(_FileStage):
 
         relation_result = link_explicit_relations([], sequences, measurements, [])
 
-        # Every record's evidence ids must resolve: page-anchor anything the
-        # extractors did not already register (legacy id shapes included).
+        # Any record id the extractors did not register resolves to an
+        # UNLOCATED span — never a fabricated page 1 (plan B02). Validation
+        # reports these as unknown; the UI shows '缺少位置证据'.
         for seq in sequences:
             for eid in seq.evidence_ids:
                 if evidence.spans.get(eid) is None:
                     evidence.add(
-                        span_page_only(
+                        span_unlocated(
                             document_id=doc_id,
                             parser_run_id=parser_run_id,
-                            page_number=_page_from_legacy_id(eid),
-                            text_raw=seq.raw_sequence[:400] or None,
+                            raw_text=seq.raw_sequence[:MAX_EVIDENCE_EXCERPT] or None,
                             source_locator=eid,
                         )
                     )
@@ -728,11 +765,10 @@ class ExtractStage(_FileStage):
             for eid in meas.evidence_ids:
                 if evidence.spans.get(eid) is None:
                     evidence.add(
-                        span_page_only(
+                        span_unlocated(
                             document_id=doc_id,
                             parser_run_id=parser_run_id,
-                            page_number=_page_from_legacy_id(eid),
-                            text_raw=None,
+                            raw_text=None,
                             source_locator=eid,
                         )
                     )

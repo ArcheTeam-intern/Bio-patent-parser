@@ -149,6 +149,18 @@ class EvidenceSpan(_StrictModel):
     legacy single-box payloads keep using ``page_number`` + ``bbox`` and
     ``bio_pdf.contracts.compat`` maps them to a one-fragment span.
 
+    Precision is split (plan B02):
+
+    - ``text_precision`` — how exactly the *text* is known: ``offset``
+      (character interval into the block), ``block`` (whole-block text),
+      ``none``.
+    - ``geometry_precision`` — how exactly the *area* is known:
+      ``character`` (a real per-character rect), ``cell``, ``line``,
+      ``block`` (a paragraph-sized box — NOT a character highlight),
+      ``page``, ``none``.
+    - ``location_precision`` is the legacy single label, kept for old
+      readers; it must never claim more than ``geometry_precision``.
+
     Page numbers are NEVER recovered from the evidence id: the id is an
     opaque content-derived string (see extract/evidence.py).
     """
@@ -165,6 +177,10 @@ class EvidenceSpan(_StrictModel):
     source_locator: NonEmptyStr | None = None
     fragments: list[EvidenceFragment] = Field(default_factory=list)
     location_precision: Literal["character", "cell", "block", "page", "none"] = "none"
+    text_precision: Literal["offset", "block", "none"] = "none"
+    geometry_precision: Literal[
+        "character", "cell", "line", "block", "page", "none"
+    ] = "none"
 
     def geometry_present(self) -> bool:
         """Return True if the span has at least one geometry anchor.

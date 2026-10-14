@@ -31,12 +31,14 @@ from bio_pdf.errors import PageCoverageMismatchError
 
 
 def _textpage_lines(
-    textpage: Any, *, page_height_pt: float
+    textpage: Any, *, page_height_pt: float, page_number: int
 ) -> list[TextBlock]:
     """Return one :class:`TextBlock` per visual line on the page.
 
-    Uses :meth:`PdfTextPage.get_rect` which yields one rect per visual line in
-    bottom-left coordinates. We convert each rect to top-left here.
+    Uses :meth:`PdfTextPage.get_rect` which yields one rect per visual line
+    (bottom-left origin), converted to the contract's top-left frame. Block
+    ids are page-scoped (``native:pN:rI``) so ids never repeat across pages
+    (plan B02).
     """
 
     blocks: list[TextBlock] = []
@@ -56,10 +58,11 @@ def _textpage_lines(
         bbox: BoundingBox = (float(x0), float(top), float(x1), float(bottom))
         blocks.append(
             TextBlock(
-                block_id=f"native:r{idx}",
+                block_id=f"native:p{page_number}:r{idx}",
                 kind="text",
                 bbox=bbox,
                 text_raw=text,
+                source_refs=[f"native:rect:{page_number}:{idx}"],
             )
         )
     return blocks
@@ -102,7 +105,9 @@ def read_native_pages(
             width_pt, height_pt = page.get_size()
             textpage = page.get_textpage()
             try:
-                text_blocks = _textpage_lines(textpage, page_height_pt=float(height_pt))
+                text_blocks = _textpage_lines(
+                    textpage, page_height_pt=float(height_pt), page_number=page_number
+                )
             finally:
                 textpage.close()
 

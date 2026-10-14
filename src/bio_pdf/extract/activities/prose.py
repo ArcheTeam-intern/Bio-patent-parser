@@ -127,7 +127,16 @@ def extract_prose_measurements(
                         block_id=block_id,
                         page_number=page_number,
                         bbox=tuple(block["bbox"]) if block.get("bbox") else None,
+                        source_parser=str(block.get("source_parser") or "unknown"),
+                        source_artifact_id=block.get("source_artifact_id"),
                     ),
+                    alias_block_refs=[
+                        a["block_id"]
+                        for a in (block.get("source_aliases") or [])
+                        if isinstance(a, dict)
+                        and a.get("block_id")
+                        and m.group(0) in (a.get("text") or "")
+                    ],
                     text_raw=m.group(0),
                     char_start=m.start(),
                     char_end=m.end(),

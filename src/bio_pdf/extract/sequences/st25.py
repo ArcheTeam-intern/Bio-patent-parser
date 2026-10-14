@@ -62,7 +62,13 @@ def _looks_like_residue_line(line: str) -> bool:
 
     if _NON_RESIDUE_RE.search(line):
         return False
-    if any(len(t) > 8 for t in line.split()):
+    tokens = line.split()
+    if any(len(t) > 8 for t in tokens):
+        # A single very long all-alphabetic token is a continuous nucleic
+        # line (ST.25 chunk length is up to 60); prose has punctuation or
+        # mixed words, already caught above.
+        if len(tokens) == 1 and tokens[0].isalpha() and len(tokens[0]) <= 60:
+            return True
         return False
     return True
 
@@ -77,6 +83,9 @@ class _SequenceBuilder:
     organism_raw: str | None = None
     feature_notes: list[str] = field(default_factory=list)
     residue_lines: list[str] = field(default_factory=list)
+    # (page_number, line) pairs: pure continuation pages without tags still
+    # record their real page (plan B09/B02 — no reverse-engineered pages).
+    residue_entries: list[tuple[int, str]] = field(default_factory=list)
     residue_page: int = 1
     in_residues: bool = False
     raw_sequence: str = ""
@@ -92,6 +101,8 @@ class _St25StateMachine:
         self.document_id = document_id
         self.default_page = default_page
         self.records: list[SequenceRecord] = []
+        #: Pages each finalized record's residues appeared on (aligned).
+        self.record_pages: list[list[int]] = []
         self.current: _SequenceBuilder | None = None
         self.mapper = ResidueMapper()
 
@@ -102,6 +113,7 @@ class _St25StateMachine:
             if self.current is not None and self.current.in_residues:
                 if not line.strip() or _looks_like_residue_line(line):
                     self.current.residue_lines.append(line)
+                    self.current.residue_entries.append((page_number, line))
                 else:
                     # Prose after the listing ends the residue block; the
                     # state machine stays open until the next <210> but no
@@ -189,6 +201,16 @@ class _St25StateMachine:
             builder.declared_length is None or observed_length == builder.declared_length
         ) and not has_unresolved
 
+        # The pages this sequence's residues actually appeared on (a pure
+        # continuation page without tags still records its real page).
+        pages: list[int] = []
+        for page, _line in builder.residue_entries:
+            if page not in pages:
+                pages.append(page)
+        if not pages and builder.residue_page:
+            pages = [builder.residue_page]
+
+        self.record_pages.append(pages)
         record = SequenceRecord(
             sequence_id=f"{self.document_id}:seq:{builder.seq_id_no or 'unnamed'}",
             document_id=self.document_id,
@@ -367,44 +389,59 @@ def parse_st25_blocks(
     """
 
     machine = _St25StateMachine(document_id=document_id, default_page=1)
-    seen_pages: dict[str, list[int]] = {}
-    for block in blocks:
-        text = block.get("text")
+    # Per-page raw residue text, captured while feeding (plan B09): each
+    # page's evidence carries ITS OWN fragment, not a copied full sequence.
+    page_fragments: dict[int, list[str]] = {}
+    for entry in blocks:
+        text = entry.get("text")
         if not text:
             continue
-        page_number = int(block.get("page_number", 1))
+        page_number = int(entry.get("page_number", 1))
         for line in str(text).splitlines():
             machine.feed_line(line, page_number=page_number)
-        if "<210>" in str(text) or "<400>" in str(text):
-            # Track which pages fed each record for multi-page evidence.
-            current = machine.current
-            if current is not None:
-                key = current.seq_id_no or "seq"
-                seen_pages.setdefault(key, [])
-                if page_number not in seen_pages[key]:
-                    seen_pages[key].append(page_number)
+            if machine.current is not None and machine.current.in_residues:
+                if line.strip():
+                    page_fragments.setdefault(page_number, []).append(line.rstrip())
     machine.finish()
 
     if evidence_index is not None:
-        from bio_pdf.extract.evidence import span_page_only
+        from bio_pdf.extract.evidence import span_page_only, span_unlocated
 
-        for record in machine.records:
-            key = record.seq_id_no or "seq"
-            pages = seen_pages.get(key) or [_record_page(record)]
+        for record, pages in zip(machine.records, machine.record_pages):
             new_ids: list[str] = []
+            if not pages:
+                # No page is known for this record: honest "unlocated",
+                # never a fabricated page 1.
+                span = span_unlocated(
+                    document_id=document_id,
+                    parser_run_id=parser_run_id,
+                    raw_text=record.raw_sequence[:400] or None,
+                    source_locator=f"st25:{record.seq_id_no or 'seq'}",
+                    source_parser="native",
+                )
+                evidence_index.add(span)
+                new_ids.append(span.evidence_id)
             for page in pages:
+                fragment_text = _join_lines(page_fragments.get(page, []))[:400] or None
                 span = span_page_only(
                     document_id=document_id,
                     parser_run_id=parser_run_id,
                     page_number=page,
-                    text_raw=record.raw_sequence[:400] or None,
+                    text_raw=fragment_text,
                     source_locator=f"st25:{record.seq_id_no or 'seq'}:p{page}",
+                    source_parser="native",
                 )
                 evidence_index.add(span)
                 new_ids.append(span.evidence_id)
             # Assign once: the strict contract forbids an empty intermediate.
             record.evidence_ids = new_ids
     return machine.records
+
+
+def _join_lines(lines: list[str]) -> str:
+    """Join residue lines with a newline character."""
+
+    return chr(10).join(lines)
 
 
 def _record_page(record: SequenceRecord) -> int:

@@ -251,6 +251,18 @@ def extract_inline_sequences(
             compact = "".join(ch for ch in run if not ch.isspace())
             if len(compact) < 2:
                 continue
+            # Structural name guard (not a word blacklist): a parenthesised
+            # mixed-case multi-letter token is an abbreviation of a name —
+            # "protein (RasGAP)", "called TAT-RasGAP317-326" — not a residue
+            # listing. Genuine paren runs are all-caps one-letter,
+            # all-lowercase nucleic, or three-letter residue tokens.
+            if is_paren and not run.isupper() and not run.islower():
+                paren_tokens = run.split()
+                three_letter_form = all(len(t) <= 3 for t in paren_tokens) and any(
+                    len(t) == 3 for t in paren_tokens
+                )
+                if not three_letter_form:
+                    continue
             # Runs dominated by digits/unknowns are notation (IC50, OD600,
             # W317A...), not residues.
             non_letter = sum(1 for ch in compact if not ch.isalpha())
@@ -327,8 +339,17 @@ def extract_inline_sequences(
                         parser_run_id=parser_run_id,
                         block_id=block_id,
                         page_number=page_number,
-                        bbox=tuple(block["bbox"]) if block.get("bbox") else None,
+                        bbox=tuple(block["bbox"]) if block["bbox"] else None,
+                        source_parser=str(block.get("source_parser") or "unknown"),
+                        source_artifact_id=block.get("source_artifact_id"),
                     ),
+                    alias_block_refs=[
+                        a["block_id"]
+                        for a in (block.get("source_aliases") or [])
+                        if isinstance(a, dict)
+                        and a.get("block_id")
+                        and (run if "run" in dir() else m.group(0)) in (a.get("text") or "")
+                    ],
                     text_raw=run,
                     char_start=m_start,
                     char_end=m_end,

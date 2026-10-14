@@ -168,6 +168,10 @@ class TextBlock(_StrictModel):
     ordinal: int | None = Field(default=None, ge=0)
     provenance: list[Provenance] = Field(default_factory=list)
     source_refs: list[NonEmptyStr] = Field(default_factory=list)
+    #: Consumed other-channel blocks (id + text) recorded by fusion, so the
+    #: extractor can attach alias evidence ONLY to the lines that actually
+    #: contain a matched expression (plan B02 — no blanket claims).
+    source_aliases: list[dict[str, str]] = Field(default_factory=list)
 
 
 class TableCell(_StrictModel):
