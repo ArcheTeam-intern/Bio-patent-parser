@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from bio_pdf.contracts import NormalizedDocument
-from bio_pdf.errors import EngineUnavailableError
+from bio_pdf.errors import EngineUnavailableError, WorkflowError
 from bio_pdf.parsers.base import ParseArtifacts, ParseRequest
 from bio_pdf.parsers.normalize_docling import (
     normalize_docling_document,
@@ -79,8 +79,8 @@ def _write_manifest(
             "structure": True,
         },
         "artifacts": {
-            "normalized": str(normalised_path.relative_to(output_dir)),
-            "raw_response": str(raw_path.relative_to(output_dir)),
+            "normalized": "normalized.json",
+            "raw_response": "raw_response.json",
         },
         "page_coverage": {
             "requested": list(request.page_numbers),
@@ -154,14 +154,14 @@ class DoclingAdapter:
             )
 
         request.output_dir.mkdir(parents=True, exist_ok=True)
-        raw_path = request.output_dir / "raw_response.json"
-        normalised_path = request.output_dir / "normalized.json"
+        raw_path = (request.output_dir / "raw_response.json").resolve()
+        normalised_path = (request.output_dir / "normalized.json").resolve()
 
         request_payload = {
             "request": {
                 "job_id": request.job_id,
                 "document_id": request.document_id,
-                "source_path": str(request.source_path),
+                "source_path": str(Path(request.source_path).resolve()),
                 "page_numbers": list(request.page_numbers),
                 "profile": request.profile,
                 "options_ref": request.options_ref,
@@ -169,21 +169,32 @@ class DoclingAdapter:
                 "normalised_path": str(normalised_path),
             }
         }
-        payload_path = request.output_dir / "docling_request.json"
+        payload_path = (request.output_dir / "docling_request.json").resolve()
         payload_path.write_text(
             json.dumps(request_payload, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
 
         env = os.environ.copy()
+        # Absolute paths only: the child runs with cwd=output_dir, so a
+        # relative payload path would resolve against the wrong directory.
         env[_DOCLING_CHILD_REQUEST_ENV] = str(payload_path)
 
-        subprocess.run(
+        completed = subprocess.run(
             [sys.executable, "-m", "bio_pdf.parsers.docling_child"],
             env=env,
-            check=True,
-            cwd=request.output_dir,
+            cwd=str(request.output_dir),
+            capture_output=True,
+            text=True,
         )
+        if completed.returncode != 0:
+            raise WorkflowError(
+                "docling child process failed",
+                details={
+                    "returncode": completed.returncode,
+                    "stderr_tail": completed.stderr[-2000:] if completed.stderr else "",
+                },
+            )
 
         # The child has already written the strict NormalizedDocument contract
         # to disk; load it back so the manifest reflects exactly what a disk
