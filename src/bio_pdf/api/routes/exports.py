@@ -1,8 +1,14 @@
-"""Export routes (design §11.1): queue an export, poll, download.
+"""Export routes (plan §11.1, fixed-snapshot in B08).
 
-POST returns 202 after the queued row is committed; the actual build runs
-as a background task against one atomic snapshot with a fixed
-``result_revision``.
+Order of operations:
+
+1. POST captures the snapshot SYNCHRONOUSLY (one read transaction) and
+   writes it under ``jobs/<job>/exports/<export_id>/snapshot.json``;
+2. the export row records the snapshot ref + result_revision;
+3. the background task builds ONLY from that snapshot file — a review
+   landing after (1) can never mix revisions;
+4. artifacts live under the export's own directory (format/filter cannot
+   collide on one revision).
 """
 
 from __future__ import annotations
@@ -19,6 +25,7 @@ from bio_pdf.api.dependencies import (
     open_background_service,
 )
 from bio_pdf.application.export_service import FORMATS, ExportService
+from bio_pdf.application.result_snapshot import SnapshotService
 from bio_pdf.errors import WorkflowError
 from fastapi.responses import FileResponse
 
@@ -27,7 +34,8 @@ router = APIRouter(tags=["exports"])
 
 class ExportCreateRequest(BaseModel):
     format: Literal["json", "csv", "fasta"]
-    accepted_only: bool = False
+    accepted_only: bool = True  # B08: default is the reviewed set
+    include_candidates: bool = False  # explicit diagnostic marker
 
 
 def _export_response(row) -> dict:
@@ -44,14 +52,29 @@ def _export_response(row) -> dict:
 
 
 def _make_background_runner(factory, export_id: str, job_id: str, fmt: str, accepted_only: bool):
-    """Build a closure that runs with its OWN connection (plan T03)."""
+    """Build from the FIXED snapshot with its own connection (plan B03/B08)."""
 
     def _run() -> None:
         service = open_background_service(factory)
         try:
             export_svc = ExportService(service.repository, service.paths.artifact_root)
+            snapshot_svc = SnapshotService(service.repository, service.paths.artifact_root)
+            row = service.repository.get_export(export_id)
+            snapshot_rel = row["snapshot_rel"] if row else None
+            if not snapshot_rel:
+                service.repository.update_export(
+                    export_id, status="failed", error="snapshot missing for export"
+                )
+                return
+            snapshot = snapshot_svc.read_snapshot(snapshot_rel)
             service.repository.update_export(export_id, status="running")
-            rel, count = export_svc.build(job_id, fmt, accepted_only=accepted_only)
+            rel, count = export_svc.build_from_snapshot(
+                job_id=job_id,
+                export_id=export_id,
+                snapshot=snapshot,
+                fmt=fmt,
+                accepted_only=accepted_only,
+            )
             service.repository.update_export(
                 export_id, status="completed", artifact_rel=rel, record_count=count
             )
@@ -77,18 +100,30 @@ def create_export(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
 
     export_id = f"exp-{uuid.uuid4().hex[:12]}"
-    # Current revision is captured at queue time; the snapshot read happens
-    # atomically when the build runs.
-    job = service.get_job(job_id)
+    accepted_only = request.accepted_only and not request.include_candidates
+
+    # B08: the snapshot is captured NOW, in this request — the background
+    # build reads only this file.
+    snapshot_svc = SnapshotService(service.repository, service.paths.artifact_root)
+    try:
+        snapshot = snapshot_svc.capture(job_id, export_id=export_id)
+    except WorkflowError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, "details": exc.details},
+        ) from exc
+
     service.repository.create_export(
         export_id=export_id,
         job_id=job_id,
         format=request.format,
-        result_revision=job.result_revision,
-        accepted_only=request.accepted_only,
+        result_revision=int(snapshot.payload.get("result_revision", 0)),
+        accepted_only=accepted_only,
+        snapshot_rel=snapshot.rel_path,
+        snapshot_sha=snapshot.sha256,
     )
     background.add_task(
-        _make_background_runner(factory, export_id, job_id, request.format, request.accepted_only)
+        _make_background_runner(factory, export_id, job_id, request.format, accepted_only)
     )
     return {
         "api_version": "v1",
@@ -96,6 +131,9 @@ def create_export(
         "job_id": job_id,
         "status": "queued",
         "format": request.format,
+        "result_revision": snapshot.payload.get("result_revision", 0),
+        "accepted_only": accepted_only,
+        "include_candidates": request.include_candidates,
     }
 
 
@@ -104,7 +142,11 @@ def get_export(export_id: str, service: ServiceDep) -> dict:
     row = service.repository.get_export(export_id)
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "export not found"})
-    return _export_response(row)
+    payload = _export_response(row)
+    # Download metadata makes the baseline/view explicit (plan B08).
+    payload["accepted_only"] = bool(row["accepted_only"])
+    payload["snapshot_rel"] = row["snapshot_rel"] if "snapshot_rel" in row.keys() else None
+    return payload
 
 
 @router.get("/exports/{export_id}/download")
@@ -129,7 +171,11 @@ def download_export(export_id: str, service: ServiceDep) -> FileResponse:
         ".csv": "text/csv",
         ".fasta": "text/plain",
     }.get(path.suffix, "application/octet-stream")
-    return FileResponse(path, media_type=media, filename=path.name)
+    # Filename carries baseline revision + filter so files on disk are not
+    # mistaken for each other.
+    filter_tag = "accepted" if row["accepted_only"] else "candidates"
+    filename = f"{export_id}-r{row['result_revision']}-{filter_tag}{path.suffix}"
+    return FileResponse(path, media_type=media, filename=filename)
 
 
 __all__ = ["router", "FORMATS"]

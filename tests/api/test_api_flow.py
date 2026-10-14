@@ -235,12 +235,22 @@ def test_export_flow_json_and_fasta_empty_fails(client) -> None:
 
     run_worker(tmp_path / "data", once=True)
 
-    # JSON export completes and downloads.
+    # B08: default is the REVIEWED set (accepted_only=true). Nothing is
+    # accepted yet → the default export contains zero records, so the
+    # candidate download must be requested explicitly.
     res = c.post(
         f"/api/v1/jobs/{job['job_id']}/exports",
         json={"format": "json"},
     )
     assert res.status_code == 202, res.text
+    assert res.json()["accepted_only"] is True
+
+    res = c.post(
+        f"/api/v1/jobs/{job['job_id']}/exports",
+        json={"format": "json", "include_candidates": True},
+    )
+    assert res.status_code == 202, res.text
+    assert res.json()["accepted_only"] is False
     export_id = res.json()["export_id"]
 
     import time

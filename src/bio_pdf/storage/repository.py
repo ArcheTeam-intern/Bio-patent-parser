@@ -155,7 +155,9 @@ CREATE TABLE IF NOT EXISTS exports (
     record_count    INTEGER NOT NULL DEFAULT 0,
     error           TEXT,
     created_at      TEXT NOT NULL,
-    completed_at    TEXT
+    completed_at    TEXT,
+    snapshot_rel    TEXT,
+    snapshot_sha256 TEXT
 );
 
 CREATE TABLE IF NOT EXISTS parse_issues (
@@ -248,6 +250,16 @@ def init_repository(database: Path | str) -> sqlite3.Connection:
     conn = _connect(database)
     try:
         conn.executescript(SCHEMA_SQL)
+        # Additive migration for pre-B08 databases (CREATE IF NOT EXISTS
+        # does not add columns to existing tables).
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(exports)").fetchall()
+        }
+        if "snapshot_rel" not in cols:
+            conn.execute("ALTER TABLE exports ADD COLUMN snapshot_rel TEXT")
+        if "snapshot_sha256" not in cols:
+            conn.execute("ALTER TABLE exports ADD COLUMN snapshot_sha256 TEXT")
     except sqlite3.Error as exc:
         conn.close()
         raise DatabaseError(
@@ -825,14 +837,25 @@ class Repository:
         format: str,
         result_revision: int,
         accepted_only: bool,
+        snapshot_rel: str | None = None,
+        snapshot_sha: str | None = None,
     ) -> None:
         self._conn.execute(
             """
             INSERT INTO exports (export_id, job_id, format, status, result_revision,
-                                 accepted_only, created_at)
-            VALUES (?, ?, ?, 'queued', ?, ?, ?)
+                                 accepted_only, created_at, snapshot_rel, snapshot_sha256)
+            VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
             """,
-            (export_id, job_id, format, result_revision, int(accepted_only), _utcnow_iso()),
+            (
+                export_id,
+                job_id,
+                format,
+                result_revision,
+                int(accepted_only),
+                _utcnow_iso(),
+                snapshot_rel,
+                snapshot_sha,
+            ),
         )
 
     def update_export(

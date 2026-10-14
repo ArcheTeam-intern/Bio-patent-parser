@@ -53,35 +53,21 @@ def get_records(
     kind: str | None = None,
     q: str | None = None,
 ) -> RecordsResponse:
-    _job_or_404(service, job_id)
-    data = ResultReader(service.paths.artifact_root).read_json(job_id, "validation")
-    sequences = data.get("sequences", [])
-    measurements = data.get("measurements", [])
+    """Records with the revision captured in the SAME transaction (B08).
 
-    # Overlay human-reviewed record heads so the workbench shows the current
-    # version, not a stale baseline.
-    heads = {row["record_id"]: row for row in service.repository.list_record_heads(job_id)}
-    overlaid_seqs = []
-    for seq in sequences:
-        head = heads.get(seq["sequence_id"])
-        if head is not None:
-            version = service.repository.get_record_version(
-                job_id, seq["sequence_id"], int(head["revision"])
-            )
-            if version is not None:
-                seq = json.loads(version["record_json"])
-        overlaid_seqs.append(seq)
-    overlaid_meas = []
-    for meas in measurements:
-        head = heads.get(meas["measurement_id"])
-        if head is not None:
-            version = service.repository.get_record_version(
-                job_id, meas["measurement_id"], int(head["revision"])
-            )
-            if version is not None:
-                meas = json.loads(version["record_json"])
-        overlaid_meas.append(meas)
-    sequences, measurements = overlaid_seqs, overlaid_meas
+    SnapshotService.read_current reads revision + baseline + heads inside
+    one read transaction, so the returned content and the reported
+    revision can never drift apart.
+    """
+
+    _job_or_404(service, job_id)
+    from bio_pdf.application.result_snapshot import SnapshotService
+
+    snapshot = SnapshotService(service.repository, service.paths.artifact_root).read_current(
+        job_id
+    )
+    sequences = snapshot.get("sequences", [])
+    measurements = snapshot.get("measurements", [])
 
     if kind == "sequence":
         measurements = []
@@ -101,10 +87,9 @@ def get_records(
             or needle in str(m.get("metric", "")).lower()
             or needle in str(m.get("target_raw", "") or "").lower()
         ]
-    job = service.get_job(job_id)
     return RecordsResponse(
         job_id=job_id,
-        revision=job.result_revision if job else 0,
+        revision=int(snapshot.get("result_revision", 0)),
         sequences=sequences,
         measurements=measurements,
     )

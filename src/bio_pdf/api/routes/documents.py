@@ -26,7 +26,28 @@ def _source_store(data_dir: Path) -> Path:
     return store
 
 
-def _inspect_or_409(target: Path) -> DocumentInspection:
+def _inspect_only(target: Path) -> DocumentInspection:
+    """Inspect WITHOUT touching the file (plan B08).
+
+    A failed re-inspection (e.g. a damaged registered source read via GET)
+    must never delete the file — the source is the audit anchor. Only the
+    upload path may clean up a file IT just created.
+    """
+
+    try:
+        return inspect_pdf(target)
+    except InputNotPdfError as exc:
+        raise HTTPException(
+            status_code=415,
+            detail={"code": exc.code, "message": exc.message, "details": exc.details},
+        ) from exc
+    except WorkflowError as exc:
+        raise workflow_error_to_http(exc, status_code=422) from exc
+
+
+def _inspect_fresh_upload(target: Path) -> DocumentInspection:
+    """Inspect a just-written upload; on failure remove ONLY this temp file."""
+
     try:
         return inspect_pdf(target)
     except InputNotPdfError as exc:
@@ -46,34 +67,55 @@ async def upload_document(
     settings: SettingsDep,
     file: UploadFile,
 ) -> DocumentResponse:
-    """Accept one PDF upload; reject non-PDF bytes with a specific reason."""
+    """Accept one PDF upload; reject non-PDF bytes with a specific reason.
 
+    The upload streams to a temp file while hashing — no full-file bytes
+    list is kept in memory (plan B08). Success moves the temp file to its
+    content-addressed path; failure removes only that temp file.
+    """
+
+    import os
+    import tempfile
+
+    store = _source_store(settings.data_dir)
     digest = hashlib.sha256()
     size = 0
-    chunks: list[bytes] = []
-    while True:
-        chunk = await file.read(1024 * 1024)
-        if not chunk:
-            break
-        size += len(chunk)
-        if size > settings.max_upload_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail={
-                    "code": "RESOURCE_EXHAUSTED",
-                    "message": f"upload exceeds limit of {settings.max_upload_bytes} bytes",
-                    "details": {"bytes": size},
-                },
-            )
-        digest.update(chunk)
-        chunks.append(chunk)
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=str(store), delete=False, prefix=".upload.", suffix=".pdf"
+        ) as handle:
+            tmp_path = handle.name
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > settings.max_upload_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail={
+                            "code": "RESOURCE_EXHAUSTED",
+                            "message": f"upload exceeds limit of {settings.max_upload_bytes} bytes",
+                            "details": {"bytes": size},
+                        },
+                    )
+                digest.update(chunk)
+                handle.write(chunk)
 
-    sha = digest.hexdigest()
-    target = _source_store(settings.data_dir) / f"{sha}.pdf"
-    if not target.exists():
-        target.write_bytes(b"".join(chunks))
+        sha = digest.hexdigest()
+        target = store / f"{sha}.pdf"
+        if target.exists():
+            os.unlink(tmp_path)
+        else:
+            os.replace(tmp_path, target)
+            tmp_path = None
 
-    inspection = _inspect_or_409(target)
+        inspection = _inspect_fresh_upload(target) if tmp_path is None else _inspect_only(target)
+    finally:
+        if tmp_path is not None:
+            Path(tmp_path).unlink(missing_ok=True)
+
     service.repository.upsert_document(
         document_id=inspection.document_id,
         sha256=inspection.sha256,
@@ -94,7 +136,7 @@ def import_sample(service: ServiceDep, settings: SettingsDep, sample_id: str) ->
             status_code=404,
             detail={"code": "SAMPLE_NOT_FOUND", "message": f"unknown sample_id: {sample_id}"},
         )
-    inspection = _inspect_or_409(sample.path)
+    inspection = _inspect_only(sample.path)
     service.repository.upsert_document(
         document_id=inspection.document_id,
         sha256=inspection.sha256,
@@ -145,7 +187,7 @@ def get_document(service: ServiceDep, document_id: str) -> DocumentResponse:
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "document not found"})
     path = Path(row["source_path"])
-    inspection = _inspect_or_409(path)
+    inspection = _inspect_only(path)
     import json as _json
 
     meta = _json.loads(row["metadata_json"] or "{}")
@@ -177,19 +219,32 @@ def get_document_source(
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag})
 
-    data = path.read_bytes()
-    total = len(data)
+    total = path.stat().st_size
     range_header = range_header or request.headers.get("range")
     if range_header and (m := _RANGE_RE.match(range_header)):
         start_s, end_s = m.group(1), m.group(2)
         if start_s == "" and end_s == "":
             return Response(status_code=416, headers={"Content-Range": f"bytes */{total}"})
-        start = int(start_s) if start_s else max(0, total - int(end_s))
-        end = int(end_s) if end_s else total - 1
-        end = min(end, total - 1)
-        if start > end or start >= total:
+        if start_s == "":
+            # Suffix range: bytes=-N → the LAST N bytes (previously this
+            # computed end=N, returning a window at the START — B08).
+            length = int(end_s)
+            if length == 0:
+                return Response(
+                    status_code=416, headers={"Content-Range": f"bytes */{total}"}
+                )
+            start = max(0, total - length)
+            end = total - 1
+        else:
+            start = int(start_s)
+            end = int(end_s) if end_s else total - 1
+            end = min(end, total - 1)
+        if start >= total or start > end or end < 0:
             return Response(status_code=416, headers={"Content-Range": f"bytes */{total}"})
-        body = data[start : end + 1]
+        # Seek + bounded read: memory does not scale with the file size.
+        with path.open("rb") as handle:
+            handle.seek(start)
+            body = handle.read(end - start + 1)
         return Response(
             content=body,
             status_code=206,
@@ -201,8 +256,11 @@ def get_document_source(
             },
         )
 
-    return Response(
-        content=data,
+    # No Range: stream the file (FileResponse), not a full in-memory read.
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        path,
         media_type="application/pdf",
         headers={"ETag": etag, "Accept-Ranges": "bytes"},
     )
