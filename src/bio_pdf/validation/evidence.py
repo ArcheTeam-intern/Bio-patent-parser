@@ -23,6 +23,27 @@ def _check(check_id: str, outcome: str, details: str) -> CheckResult:
     )
 
 
+def _has_geometry(span: Any) -> bool:
+    """True when the span (dict or object) carries any location anchor."""
+
+    if span is None:
+        return False
+    page = span.get("page_number") if isinstance(span, dict) else getattr(span, "page_number", None)
+    bbox = span.get("bbox") if isinstance(span, dict) else getattr(span, "bbox", None)
+    if page is not None or bbox is not None:
+        return True
+    fragments = (
+        span.get("fragments") if isinstance(span, dict) else getattr(span, "fragments", None)
+    )
+    if fragments:
+        return any(
+            (f.get("page_number") if isinstance(f, dict) else getattr(f, "page_number", None))
+            is not None
+            for f in fragments
+        )
+    return False
+
+
 def validate_evidence(
     evidence_ids: list[str],
     evidence_index: dict[str, Any] | None,
@@ -64,12 +85,12 @@ def validate_evidence(
             )
         checks.append(_check(CHECK_EVIDENCE_EXISTS, "pass", f"{len(evidence_ids)} evidence refs"))
 
-        # Geometry check: any span with page/bbox counts as anchored.
+        # Geometry check: a span is anchored when its page or bbox (or any
+        # fragment's) is present. Spans may arrive as dicts or model objects;
+        # dict access and attribute access must both work (plan T06: the
+        # old getattr-on-dict bug classified anchored evidence as unknown).
         unanchored = [
-            eid
-            for eid in evidence_ids
-            if not (getattr(evidence_index.get(eid), "page_number", None) is not None
-                    or getattr(evidence_index.get(eid), "bbox", None) is not None)
+            eid for eid in evidence_ids if not _has_geometry(evidence_index.get(eid))
         ]
         if unanchored:
             checks.append(

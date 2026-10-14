@@ -11,7 +11,9 @@ from bio_pdf.extract.sequences.variants import extract_variant_relations
 # ---------------------------------------------------------------------------
 
 
-def test_long_single_letter_run_is_a_candidate() -> None:
+def test_context_free_long_run_is_not_a_candidate() -> None:
+    # Plan T07: without an explicit sequence context a long letter run is a
+    # raw mention / diagnostic, never a formal candidate.
     blocks = [
         {
             "text": "MKTVFLIQDKVWAPYTNRG",
@@ -19,9 +21,27 @@ def test_long_single_letter_run_is_a_candidate() -> None:
             "page_number": 1,
         },
     ]
+    diagnostics: list[dict[str, str]] = []
+    records = extract_inline_sequences(
+        blocks, document_id="sha256:fixture", diagnostics=diagnostics
+    )
+    assert records == []
+    assert any(d["code"] == "NO_SEQUENCE_CONTEXT" for d in diagnostics)
+
+
+def test_context_hint_promotes_the_same_run() -> None:
+    blocks = [
+        {
+            "text": "The amino acid sequence MKTVFLIQDKVWAPYTNRG was used.",
+            "kind": "text",
+            "semantic_role": "body",
+            "page_number": 1,
+        },
+    ]
     records = extract_inline_sequences(blocks, document_id="sha256:fixture")
     assert len(records) == 1
     assert records[0].observed_length == 19
+    assert records[0].molecule_type == "protein"
 
 
 def test_title_block_is_not_a_candidate() -> None:

@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from bio_pdf.contracts import Measurement
+from bio_pdf.extract.activities.mentions import classify_mention_role
 from bio_pdf.extract.activities.values import normalize_unit, parse_activity_value
 from bio_pdf.extract.relations import classify_evidence_kind
 
@@ -25,9 +26,12 @@ _NUM = r"[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
 
 #: Recognised concentration/activity units in prose. µ/μ spellings are
 #: accepted here and normalised later by :func:`normalize_unit`.
+#: The lookahead ``(?![A-Za-zµμ])`` stops bare ``M`` from matching the M in
+#: words like "May"/"Mouse"/"Model" (plan T08: the classifier matched
+#: "17 May 2017" as "17 M"). Case matters: mM ≠ mm.
 _UNIT = (
     r"(?:µg/mL|μg/mL|ug/mL|mg/mL|ng/mL|µg/L|μg/L|ug/L|mg/L|ng/L"
-    r"|µM|μM|uM|nM|pM|mM|U/mL|IU/mL|M|%)"
+    r"|µM|μM|uM|nM|pM|mM|U/mL|IU/mL|M|%)(?![A-Za-zµμ])"
 )
 
 #: One full value expression followed by a unit:
@@ -77,13 +81,21 @@ def _strip_prose_operator(expr: str) -> str:
 def extract_prose_measurements(
     blocks: list[dict[str, Any]],
     document_id: str,
+    *,
+    parser_run_id: str = "native",
+    evidence_index: Any | None = None,
+    raw_mentions: list[dict[str, Any]] | None = None,
 ) -> list[Measurement]:
     """Extract conservative prose measurement candidates.
 
     Args:
         blocks: List of dicts with at least ``text`` and optionally
-            ``page_number``.
+            ``page_number``/``bbox``/``block_id``.
         document_id: Canonical document id.
+        parser_run_id: Parser run for evidence id derivation.
+        evidence_index: Optional :class:`~bio_pdf.extract.evidence.EvidenceIndex`;
+            when given, every match registers a character-precise evidence
+            span built from the real match offsets (plan T06).
 
     Returns:
         A list of :class:`Measurement` candidates. The metric is taken from
@@ -91,23 +103,64 @@ def extract_prose_measurements(
         ``unknown`` otherwise.
     """
 
+    from bio_pdf.extract.evidence import BlockRef, span_from_block_match
+
     measurements: list[Measurement] = []
     for idx, block in enumerate(blocks):
         text = str(block.get("text") or "")
         if not text:
             continue
         page_number = int(block.get("page_number", 1))
+        block_id = str(block.get("block_id") or f"{document_id}:p{page_number}:prose:{idx}")
         for m in _VALUE_UNIT_RE.finditer(text):
             expr = _strip_prose_operator(m.group("expr").strip())
             unit_raw = m.group("unit")
             value = parse_activity_value(expr)
             unit_normalized = normalize_unit(unit_raw)
             metric = _metric_before(text, m.start()) or "unknown"
-            evidence_id = f"{document_id}:p{page_number}:prose:{idx}:{m.start()}"
+
+            if evidence_index is not None:
+                span = span_from_block_match(
+                    BlockRef(
+                        document_id=document_id,
+                        parser_run_id=parser_run_id,
+                        block_id=block_id,
+                        page_number=page_number,
+                        bbox=tuple(block["bbox"]) if block.get("bbox") else None,
+                    ),
+                    text_raw=m.group(0),
+                    char_start=m.start(),
+                    char_end=m.end(),
+                    full_text=text,
+                )
+                evidence_index.add(span)
+                evidence_id = span.evidence_id
+            else:
+                # Legacy path (unit tests / pre-T06 callers).
+                evidence_id = f"{document_id}:p{page_number}:prose:{idx}:{m.start()}"
+
+            # Role gating (plan T08): metadata/statistic/condition mentions
+            # are NOT activity results. They are kept as RawMentions with
+            # their role and reasons, never silently promoted to a value.
+            window_text, _ws, _we = _sentence_for(text, m.start(), m.end())
+            role = classify_mention_role(window_text)
+            if role.role in ("metadata", "statistic", "condition"):
+                if raw_mentions is not None:
+                    raw_mentions.append(
+                        {
+                            "text": m.group(0),
+                            "role": role.role,
+                            "reasons": role.reasons,
+                            "page": page_number,
+                            "block_id": block_id,
+                            "char_start": m.start(),
+                        }
+                    )
+                continue
 
             # A prose sentence stating a claim threshold ("claims … less
             # than …") is not a measured value.
-            if classify_evidence_kind(text) == "claim_threshold":
+            if role.role == "claim" or classify_evidence_kind(text) == "claim_threshold":
                 evidence_kind = "claim_threshold"
             else:
                 evidence_kind = "general_statement"
@@ -137,3 +190,19 @@ def extract_prose_measurements(
 
 
 __all__ = ["extract_prose_measurements"]
+
+
+_SENTENCE_SPLIT_RE = __import__("re").compile(r"(?<=[.;!?])\s+")
+
+
+def _sentence_for(text: str, start: int, end: int) -> tuple[str, int, int]:
+    """Return (sentence, abs_start, abs_end) containing the match."""
+
+    boundaries = [0]
+    for m in _SENTENCE_SPLIT_RE.finditer(text):
+        boundaries.append(m.end())
+    boundaries.append(len(text))
+    for i in range(len(boundaries) - 1):
+        if boundaries[i] <= start < boundaries[i + 1]:
+            return text[boundaries[i]:boundaries[i + 1]], boundaries[i], boundaries[i + 1]
+    return text, 0, len(text)

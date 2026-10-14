@@ -598,54 +598,67 @@ class ExtractStage(_FileStage):
             _read_input_json(context, "normalize.normalized.json", "normalized.json")
         )
         doc_id = document.document_id
+        parser_run_id = document.parser_run_id
         blocks = _page_blocks(document)
 
-        evidence_spans: list[dict[str, Any]] = []
+        # T06: evidence is constructed at extraction time from real match
+        # offsets — never reconstructed from id strings later.
+        from bio_pdf.extract.evidence import EvidenceIndex, span_from_cell, span_page_only
+
+        evidence = EvidenceIndex()
+        diagnostics: list[dict[str, str]] = []
+        raw_mentions: list[dict[str, Any]] = []
 
         # ---- sequences ----------------------------------------------------
         sequences: list[SequenceRecord] = []
         if "sequences" in targets:
-            sequences.extend(parse_st25_blocks(blocks, doc_id))
+            sequences.extend(
+                parse_st25_blocks(
+                    blocks, doc_id, parser_run_id=parser_run_id, evidence_index=evidence
+                )
+            )
             st25_pages = {
                 b["page_number"]
                 for b in blocks
                 if "<210>" in b["text"] or "<400>" in b["text"]
             }
             non_st25 = [b for b in blocks if b["page_number"] not in st25_pages]
-            sequences.extend(extract_inline_sequences(non_st25, doc_id))
+            sequences.extend(
+                extract_inline_sequences(
+                    non_st25,
+                    doc_id,
+                    parser_run_id=parser_run_id,
+                    evidence_index=evidence,
+                    diagnostics=diagnostics,
+                    raw_mentions=raw_mentions,
+                )
+            )
 
         # ---- activities ---------------------------------------------------
         measurements: list[Measurement] = []
         if "activities" in targets:
-            prose = extract_prose_measurements(blocks, doc_id)
-            measurements.extend(prose)
-            for block_idx, block in enumerate(blocks):
-                if not block.get("bbox"):
-                    continue
-                prefix = f"{doc_id}:p{block['page_number']}:prose:{block_idx}:"
-                for meas in prose:
-                    for eid in meas.evidence_ids:
-                        if eid.startswith(prefix):
-                            evidence_spans.append(
-                                json.loads(
-                                    EvidenceSpan(
-                                        evidence_id=eid,
-                                        document_id=doc_id,
-                                        page_number=block["page_number"],
-                                        bbox=tuple(block["bbox"]),
-                                        raw_text=block["text"][:200],
-                                    ).model_dump_json()
-                                )
-                            )
+            measurements.extend(
+                extract_prose_measurements(
+                    blocks,
+                    doc_id,
+                    parser_run_id=parser_run_id,
+                    evidence_index=evidence,
+                    raw_mentions=raw_mentions,
+                )
+            )
             for table, evidences in _table_rows(document):
-                # Table guardrail (plan T08/M1): the header must carry a
-                # known metric before any cell becomes a Measurement;
-                # unclassified tables stay in diagnostics, never forced
-                # `measured`.
                 from bio_pdf.extract.activities.metrics import classify_table_metric
 
                 metric = classify_table_metric(table)
                 if metric is None:
+                    diagnostics.append(
+                        {
+                            "code": "TABLE_UNCLASSIFIED",
+                            "table_id": table.table_id,
+                            "page": str(table.page_number),
+                            "detail": "no recognized metric header; cells not forced to Measurements",
+                        }
+                    )
                     continue
                 table_measurements = extract_table_measurements(
                     table,
@@ -658,15 +671,16 @@ class ExtractStage(_FileStage):
                 for cell in table.cells:
                     if not cell.text_raw:
                         continue
-                    span = EvidenceSpan(
-                        evidence_id=evidences[cell.cell_id],
+                    span = span_from_cell(
                         document_id=doc_id,
+                        parser_run_id=parser_run_id,
                         page_number=table.page_number,
+                        table_id=table.table_id,
+                        cell_id=cell.cell_id,
+                        text_raw=cell.text_raw,
                         bbox=cell.bbox,
-                        raw_text=cell.text_raw,
-                        location_precision="cell",
                     )
-                    evidence_spans.append(json.loads(span.model_dump_json()))
+                    evidence.add(span)
 
         # ---- references and relations --------------------------------------
         references = []
@@ -680,63 +694,49 @@ class ExtractStage(_FileStage):
         resolved_ids = {r.seq_id_no for r in sequences if r.seq_id_no is not None}
         unresolved = [r for r in references if r.seq_id_no not in resolved_ids]
         for ref in unresolved:
-            evidence_spans.append(
-                json.loads(
-                    EvidenceSpan(
-                        evidence_id=ref.evidence_ids[0],
-                        document_id=doc_id,
-                        raw_text=ref.mention_raw,
-                    ).model_dump_json()
+            evidence.add(
+                span_page_only(
+                    document_id=doc_id,
+                    parser_run_id=parser_run_id,
+                    page_number=1,
+                    text_raw=ref.mention_raw,
+                    source_locator=f"ref:{ref.seq_id_no}",
                 )
             )
 
         relation_result = link_explicit_relations([], sequences, measurements, [])
 
+        # Every record's evidence ids must resolve: page-anchor anything the
+        # extractors did not already register (legacy id shapes included).
         for seq in sequences:
-            page_number = 1
-            if seq.evidence_ids:
-                head = seq.evidence_ids[0]
-                if ":p" in head:
-                    try:
-                        page_number = int(head.split(":p")[1].split(":")[0])
-                    except (IndexError, ValueError):
-                        page_number = 1
-            evidence_spans.append(
-                json.loads(
-                    EvidenceSpan(
-                        evidence_id=seq.evidence_ids[0],
-                        document_id=doc_id,
-                        page_number=page_number,
-                        raw_text=seq.raw_sequence[:200] or None,
-                    ).model_dump_json()
-                )
-            )
-
-        have_ids = {s["evidence_id"] for s in evidence_spans}
+            for eid in seq.evidence_ids:
+                if evidence.spans.get(eid) is None:
+                    evidence.add(
+                        span_page_only(
+                            document_id=doc_id,
+                            parser_run_id=parser_run_id,
+                            page_number=_page_from_legacy_id(eid),
+                            text_raw=seq.raw_sequence[:400] or None,
+                            source_locator=eid,
+                        )
+                    )
         for meas in measurements:
             for eid in meas.evidence_ids:
-                if eid in have_ids:
-                    continue
-                parts = eid.split(":p")
-                page_number = 1
-                if len(parts) > 1:
-                    try:
-                        page_number = int(parts[1].split(":")[0])
-                    except (IndexError, ValueError):
-                        page_number = 1
-                evidence_spans.append(
-                    json.loads(
-                        EvidenceSpan(
-                            evidence_id=eid,
+                if evidence.spans.get(eid) is None:
+                    evidence.add(
+                        span_page_only(
                             document_id=doc_id,
-                            page_number=page_number,
-                        ).model_dump_json()
+                            parser_run_id=parser_run_id,
+                            page_number=_page_from_legacy_id(eid),
+                            text_raw=None,
+                            source_locator=eid,
+                        )
                     )
-                )
 
         payload = {
             "schema_version": "1.1.0",
             "document_id": doc_id,
+            "parser_run_id": parser_run_id,
             "sequences": [json.loads(s.model_dump_json()) for s in sequences],
             "measurements": [json.loads(m.model_dump_json()) for m in measurements],
             "relations": [json.loads(r.model_dump_json()) for r in relation_result.relations],
@@ -745,14 +745,32 @@ class ExtractStage(_FileStage):
             ]
             + [json.loads(r.model_dump_json()) for r in unresolved],
             "review_reasons": list(relation_result.review_reasons),
-            "evidence_spans": evidence_spans,
+            "evidence_spans": evidence.to_payload(),
+            "raw_mentions": raw_mentions,
+            "diagnostics": diagnostics,
         }
         out_dir = Path(context.stage_dir())
         ref = atomic_write_json(out_dir, "extract.json", payload)
         return StageOutcome(
             artifact_refs=[_stage_ref(context, "extract.json", ref)],
             review_required=0,
+            warnings=[d["code"] for d in diagnostics[:5]],
         )
+
+
+def _page_from_legacy_id(evidence_id: str) -> int:
+    """Last-resort page extraction for legacy id shapes.
+
+    Only used to anchor evidence that predates the T06 extractors; new
+    evidence never needs this (ids are opaque).
+    """
+
+    if ":p" in evidence_id:
+        try:
+            return int(evidence_id.split(":p")[1].split(":")[0])
+        except (IndexError, ValueError):
+            return 1
+    return 1
 
 
 # ---------------------------------------------------------------------------

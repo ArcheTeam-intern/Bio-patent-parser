@@ -346,6 +346,9 @@ def parse_st25_text(
 def parse_st25_blocks(
     blocks: list[dict[str, Any]],
     document_id: str,
+    *,
+    parser_run_id: str = "native",
+    evidence_index: Any | None = None,
 ) -> list[SequenceRecord]:
     """Parse ST.25 listing across multiple blocks/pages.
 
@@ -353,6 +356,10 @@ def parse_st25_blocks(
         blocks: List of ``{"text": str, "page_number": int}`` dicts in
             reading order. A block with ``text=None`` is skipped.
         document_id: Canonical document id.
+        parser_run_id: Parser run id for evidence derivation.
+        evidence_index: Optional :class:`~bio_pdf.extract.evidence.EvidenceIndex`;
+            when given, each sequence's residue listing registers page-anchored
+            evidence per source block it spanned (multi-page fragments).
 
     Returns:
         Sequence records. A sequence that spans blocks continues to
@@ -360,6 +367,7 @@ def parse_st25_blocks(
     """
 
     machine = _St25StateMachine(document_id=document_id, default_page=1)
+    seen_pages: dict[str, list[int]] = {}
     for block in blocks:
         text = block.get("text")
         if not text:
@@ -367,8 +375,45 @@ def parse_st25_blocks(
         page_number = int(block.get("page_number", 1))
         for line in str(text).splitlines():
             machine.feed_line(line, page_number=page_number)
+        if "<210>" in str(text) or "<400>" in str(text):
+            # Track which pages fed each record for multi-page evidence.
+            current = machine.current
+            if current is not None:
+                key = current.seq_id_no or "seq"
+                seen_pages.setdefault(key, [])
+                if page_number not in seen_pages[key]:
+                    seen_pages[key].append(page_number)
     machine.finish()
+
+    if evidence_index is not None:
+        from bio_pdf.extract.evidence import span_page_only
+
+        for record in machine.records:
+            key = record.seq_id_no or "seq"
+            pages = seen_pages.get(key) or [_record_page(record)]
+            new_ids: list[str] = []
+            for page in pages:
+                span = span_page_only(
+                    document_id=document_id,
+                    parser_run_id=parser_run_id,
+                    page_number=page,
+                    text_raw=record.raw_sequence[:400] or None,
+                    source_locator=f"st25:{record.seq_id_no or 'seq'}:p{page}",
+                )
+                evidence_index.add(span)
+                new_ids.append(span.evidence_id)
+            # Assign once: the strict contract forbids an empty intermediate.
+            record.evidence_ids = new_ids
     return machine.records
+
+
+def _record_page(record: SequenceRecord) -> int:
+    if record.evidence_ids and ":p" in record.evidence_ids[0]:
+        try:
+            return int(record.evidence_ids[0].split(":p")[1].split(":")[0])
+        except (IndexError, ValueError):
+            return 1
+    return 1
 
 
 __all__ = ["parse_st25_text", "parse_st25_blocks"]
