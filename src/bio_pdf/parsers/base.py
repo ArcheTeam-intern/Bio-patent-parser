@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 ProfileName = Literal["native", "layout_native", "layout_ocr", "compare"]
 
@@ -24,6 +24,9 @@ class ParseRequest:
     profile: ProfileName
     options_ref: str
     output_dir: Path
+    #: Effective engine options from the persisted WorkflowConfig (B04):
+    #: tableformer_mode / do_table_structure / ocr_lang / timeout.
+    parser_options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

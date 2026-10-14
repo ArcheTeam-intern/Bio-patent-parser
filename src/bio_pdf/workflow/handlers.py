@@ -378,54 +378,180 @@ class LayoutParseStage(_FileStage):
         except WorkflowError:
             return StageOutcome(artifact_refs=[], review_required=0)
 
-        # T04: page roles from the inspect stage drive the profile. Pages
-        # classified scan/text-suspect run the OCR profile; normal pages run
-        # the fast native-layout profile. Sparse page sets are converted to
-        # contiguous runs inside the child, filtered to the request here.
+        # B04: the inspect-stage plan is EXECUTED, not merely read. Pages
+        # are grouped into (profile, contiguous pages) runs: scan/OCR pages
+        # really run the OCR profile, text pages run the native-layout
+        # profile, and the per-run documents are merged by source page
+        # number. A mixed document no longer runs one layout_native pass
+        # and pretends the scan page was parsed.
+        from bio_pdf.workflow.parse_plan import (
+            ExecutionRun,
+            build_parse_plan,
+            group_execution_runs,
+        )
+
         pages = list(context.page_numbers)
-        profile = "layout_native"
+        workflow_cfg = _workflow_options(context)
+        runs: list[ExecutionRun] = []
         try:
             quality = _read_input_json(
                 context, "inspect.quality.json", "inspect", "quality.json"
             )
             plan_payload = quality.get("parse_plan") or {}
-            ocr_pages = {
-                int(t["page_number"])
-                for t in plan_payload.get("tasks", [])
-                if t.get("kind") == "layout_ocr"
-            }
-            non_blank = {
-                int(t["page_number"])
-                for t in plan_payload.get("tasks", [])
-                if t.get("kind") != "blank"
-            }
-            if pages and non_blank and ocr_pages >= non_blank:
-                profile = "layout_ocr"
-            elif ocr_pages:
-                # Mixed document: run the layout profile; OCR pages are
-                # recorded in the manifest for reviewer awareness. Mixed
-                # per-page engine calls arrive with the region reparse work.
-                profile = "layout_native"
+            if plan_payload:
+                from bio_pdf.workflow.parse_plan import ParsePlan, PageTask
+
+                plan = ParsePlan(
+                    requested_pages=plan_payload.get("requested_pages") or pages,
+                    tasks=[
+                        PageTask(
+                            page_number=int(t["page_number"]),
+                            kind=t["kind"],
+                            reasons=list(t.get("reasons") or []),
+                            route=str(t.get("route") or "unknown"),
+                        )
+                        for t in plan_payload.get("tasks", [])
+                    ],
+                    ocr_policy=str(plan_payload.get("ocr_policy") or "auto"),
+                    engine=str(plan_payload.get("engine") or context.options.get(OPT_ENGINE, "native")),
+                )
+                runs = group_execution_runs(plan)
         except WorkflowError:
-            pass  # no plan (legacy job): keep the default profile
+            pass  # no plan (legacy job): single default run below
+
+        if not runs:
+            runs = [ExecutionRun(kind="layout_native", pages=tuple(pages))]
 
         out_dir = Path(context.stage_dir())
-        request = ParseRequest(
-            job_id=context.job_id,
-            document_id=context.document_id,
-            source_path=Path(context.source_path),
-            page_numbers=tuple(pages),
-            profile=profile,  # type: ignore[arg-type]
-            options_ref="configs/demo.toml",
-            output_dir=out_dir,
-        )
-        artifacts = DoclingAdapter().parse(request)
-        outcome = _refs_from_parse_artifacts(artifacts, out_dir, context)
-        if profile == "layout_native" and pages:
-            outcome.warnings.append(
-                "layout profile ran without per-page OCR routing (mixed OCR arrives with T16)"
+        merged_pages: dict[int, dict[str, Any]] = {}
+        planned_vs_actual: list[dict[str, Any]] = []
+        run_summaries: list[dict[str, Any]] = []
+
+        for run_index, run in enumerate(runs):
+            # layout_ocr → OCR profile; native/layout_native → layout profile.
+            profile = "layout_ocr" if run.kind == "layout_ocr" else "layout_native"
+            run_dir = out_dir / f"run-{run_index}-{run.kind.replace('_', '-')}"
+            request = ParseRequest(
+                job_id=context.job_id,
+                document_id=context.document_id,
+                source_path=Path(context.source_path),
+                page_numbers=run.pages,
+                profile=profile,  # type: ignore[arg-type]
+                options_ref="configs/demo.toml",
+                output_dir=run_dir,
+                parser_options=dict(workflow_cfg.get("parser_options") or {}),
             )
-        return outcome
+            artifacts = DoclingAdapter().parse(request)
+
+            produced = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
+            for page in produced.get("pages", []):
+                number = int(page.get("page_number"))
+                if number not in run.pages:
+                    # The engine returned a page outside the run (or the
+                    # child's merge filter failed): keep the real number and
+                    # record the mismatch — never silently relabel.
+                    planned_vs_actual.append(
+                        {
+                            "page": number,
+                            "planned_kind": run.kind,
+                            "actual": "out_of_run_page",
+                        }
+                    )
+                    continue
+                merged_pages[number] = page
+            for number in run.pages:
+                planned_vs_actual.append(
+                    {
+                        "page": number,
+                        "planned_kind": run.kind,
+                        "actual_profile": profile,
+                        "produced": number in {int(p.get("page_number")) for p in produced.get("pages", [])},
+                    }
+                )
+            run_summaries.append(
+                {
+                    "kind": run.kind,
+                    "profile": profile,
+                    "pages": list(run.pages),
+                    "normalized": str(artifacts.normalized_path.name),
+                    "raw_response": str(artifacts.raw_response_path.name),
+                }
+            )
+
+        missing_pages = sorted(set(pages) - set(merged_pages))
+        # Blank pages produce no engine run by design: synthesize an empty
+        # page with the REAL geometry from the inspection so the document
+        # covers the requested set honestly ("已检查而非漏页").
+        if missing_pages:
+            try:
+                inspection = _read_input_json(
+                    context, "ingest.inspection.json", "ingest", "inspection.json"
+                )
+                geometry = {
+                    int(p["page_number"]): p for p in inspection.get("pages", [])
+                }
+            except WorkflowError:
+                geometry = {}
+            for number in list(missing_pages):
+                geom = geometry.get(number)
+                if geom is None:
+                    continue
+                merged_pages[number] = {
+                    "page_number": number,
+                    "width_pt": float(geom.get("width_pt") or 0),
+                    "height_pt": float(geom.get("height_pt") or 0),
+                    "route": "blank",
+                    "blocks": [],
+                    "tables": [],
+                }
+            missing_pages = sorted(set(pages) - set(merged_pages))
+
+        if missing_pages:
+            from bio_pdf.errors import PageCoverageMismatchError
+
+            raise PageCoverageMismatchError(
+                f"layout runs did not produce pages: {missing_pages}",
+                details={"missing": missing_pages, "runs": run_summaries},
+            )
+
+        merged_doc = {
+            "schema_version": "1.1.0",
+            "document_id": context.document_id,
+            "parser_run_id": f"{context.job_id}:docling",
+            "pages": [merged_pages[n] for n in sorted(merged_pages)],
+            "errors": [],
+        }
+        from bio_pdf.storage.artifacts import atomic_write_json
+
+        ref = atomic_write_json(out_dir, "normalized.json", merged_doc)
+        manifest = {
+            "schema_version": "1.1.0",
+            "engine": "docling",
+            "runs": run_summaries,
+            "planned_vs_actual": planned_vs_actual,
+            "parser_options": dict(workflow_cfg.get("parser_options") or {}),
+        }
+        atomic_write_json(out_dir, "manifest.json", manifest)
+
+        from bio_pdf.storage.artifacts import compute_sha256_bytes
+
+        refs = []
+        for rel_name in ("normalized.json", "manifest.json"):
+            path = out_dir / rel_name
+            sha = compute_sha256_bytes(path.read_bytes())
+            refs.append(
+                _stage_ref(
+                    context,
+                    rel_name,
+                    ArtifactRef(
+                        artifact_id=f"sha256:{sha}",
+                        sha256=sha,
+                        relative_path=rel_name,
+                        media_type="application/json",
+                    ),
+                )
+            )
+        return StageOutcome(artifact_refs=refs, review_required=0)
 
 
 def _refs_from_parse_artifacts(artifacts: Any, out_dir: Path, context: StageContext) -> StageOutcome:

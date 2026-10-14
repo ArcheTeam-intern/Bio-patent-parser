@@ -171,4 +171,42 @@ def contiguous_runs(pages: list[int]) -> list[tuple[int, int]]:
     return runs
 
 
+@dataclass(frozen=True)
+class ExecutionRun:
+    """One engine invocation: (engine profile kind, contiguous pages)."""
+
+    kind: PageTaskKind  # native | layout_native | layout_ocr | blank | skip
+    pages: tuple[int, ...]
+
+
+def group_execution_runs(plan: ParsePlan) -> list[ExecutionRun]:
+    """Collapse the plan into executable invocations (plan B04).
+
+    Pages are grouped by task kind, then split into contiguous runs so one
+    invocation never mixes OCR and non-OCR pages: a mixed document runs
+    ``layout_ocr`` for exactly its scan pages and ``layout_native`` for the
+    text pages — the previous "one layout_native pass over everything"
+    silently skipped OCR for scan pages.
+
+    ``blank``/``skip`` pages produce no invocation.
+    """
+
+    by_kind: dict[str, list[int]] = {}
+    for task in plan.tasks:
+        if task.kind in ("blank", "skip"):
+            continue
+        by_kind.setdefault(task.kind, []).append(task.page_number)
+
+    runs: list[ExecutionRun] = []
+    for kind in ("layout_ocr", "layout_native", "native"):
+        pages = by_kind.get(kind)
+        if not pages:
+            continue
+        for start, end in contiguous_runs(pages):
+            runs.append(
+                ExecutionRun(kind=kind, pages=tuple(range(start, end + 1)))
+            )
+    return runs
+
+
 __all__ = ["ParsePlan", "PageTask", "build_parse_plan", "contiguous_runs"]

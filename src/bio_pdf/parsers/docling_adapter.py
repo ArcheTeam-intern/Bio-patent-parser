@@ -111,7 +111,13 @@ def _write_manifest(
 
 
 def _build_converter_from_request(request_payload: dict[str, Any]) -> Any:
-    """Rebuild a Docling converter inside the child process from the request."""
+    """Rebuild a Docling converter inside the child process from the request.
+
+    Plan B04: the configured ``parser_options`` (tableformer mode,
+    do_table_structure, ocr_lang) really reach the converter — previously
+    the options changed only the cache hash while the engine kept its
+    defaults.
+    """
 
     # pylint: disable=import-outside-toplevel
     from docling.datamodel.base_models import InputFormat
@@ -123,12 +129,28 @@ def _build_converter_from_request(request_payload: dict[str, Any]) -> Any:
 
     profile = request_payload["profile"]
     do_ocr = profile == "layout_ocr"
+    raw_options = request_payload.get("parser_options") or {}
 
     options = PdfPipelineOptions()
     options.do_ocr = do_ocr
-    options.do_table_structure = True
+    options.do_table_structure = bool(raw_options.get("do_table_structure", True))
     options.force_backend_text = not do_ocr
-    options.table_structure_options = TableStructureOptions(do_cell_matching=True)
+
+    tableformer_mode = raw_options.get("tableformer_mode")
+    table_kwargs: dict[str, Any] = {"do_cell_matching": True}
+    if tableformer_mode:
+        try:
+            from docling.datamodel.pipeline_options import TableFormerMode
+
+            mode_enum = (
+                TableFormerMode.ACCURATE
+                if str(tableformer_mode).lower() == "accurate"
+                else TableFormerMode.FAST
+            )
+            table_kwargs["mode"] = mode_enum
+        except Exception:  # noqa: BLE001 - installed SDK may not expose it
+            pass
+    options.table_structure_options = TableStructureOptions(**table_kwargs)
 
     if do_ocr:
         # The Tesseract CLI helper is the lightest OCR profile; other engines
@@ -139,9 +161,10 @@ def _build_converter_from_request(request_payload: dict[str, Any]) -> Any:
             TesseractCliOcrOptions,
         )
 
+        ocr_lang = str(raw_options.get("ocr_lang") or "eng")
         options.ocr_options = TesseractCliOcrOptions(
             mode=OcrMode.FULL_PAGE,
-            lang=["eng"],
+            lang=[ocr_lang],
             scale=300 / 72,
         )
 
@@ -184,6 +207,8 @@ class DoclingAdapter:
                 "timeout_seconds": float(
                     os.environ.get("BIO_PDF_ENGINE_TIMEOUT_SECONDS") or 900.0
                 ),
+                # B04: configured engine options really reach the converter.
+                "parser_options": dict(getattr(request, "parser_options", {}) or {}),
             }
         }
         payload_path = (request.output_dir / "docling_request.json").resolve()

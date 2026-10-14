@@ -52,6 +52,45 @@ def effective_workflow_config(persisted: dict[str, Any]) -> WorkflowConfig:
     )
 
 
+def _require_engine_available(config: WorkflowConfig) -> None:
+    """Reject unavailable engines at job creation (plan B04)."""
+
+    import os
+
+    from bio_pdf.errors import EngineUnavailableError
+
+    parser = config.parser
+    if parser in ("native",):
+        return
+    if parser in ("docling", "docling_sdk"):
+        from bio_pdf.parsers.docling_adapter import docling_is_available
+
+        if not docling_is_available():
+            raise EngineUnavailableError(
+                "docling SDK is not installed; engine unavailable",
+                details={"parser": parser},
+            )
+        return
+    if parser == "docling_serve":
+        base_url = os.environ.get("BIO_PDF_DOCLING_SERVE_URL", "")
+        if not base_url:
+            raise EngineUnavailableError(
+                "docling_serve requires BIO_PDF_DOCLING_SERVE_URL to be configured",
+                details={"parser": parser, "code": "ENGINE_UNAVAILABLE"},
+            )
+        return
+    if parser == "mineru_http":
+        if not os.environ.get("MINERU_TOKEN"):
+            raise EngineUnavailableError(
+                "mineru_http requires MINERU_TOKEN to be configured",
+                details={"parser": parser, "code": "ENGINE_UNAVAILABLE"},
+            )
+        return
+    raise EngineUnavailableError(
+        f"unknown parser: {parser}", details={"parser": parser}
+    )
+
+
 def validate_page_selection(
     page_numbers: tuple[int, ...] | list[int] | None, page_count: int
 ) -> tuple[int, ...]:
@@ -152,6 +191,15 @@ class JobService:
             cfg = cfg.model_copy(update={"ocr_policy": ocr_policy})  # type: ignore[arg-type]
         if document_type_hint:
             cfg = cfg.model_copy(update={"document_type_hint": document_type_hint})  # type: ignore[arg-type]
+        if targets:
+            # B04: the API/CLI targets argument must reach the effective
+            # config — it previously only changed the config hash.
+            cfg = cfg.model_copy(update={"targets": tuple(targets)})
+
+        # Engine availability is checked BEFORE enqueue (B04): an
+        # unconfigured remote service or a missing SDK is not a silent
+        # substitution candidate.
+        _require_engine_available(cfg)
 
         page_count = inspection.page_count
         pages = validate_page_selection(page_numbers, page_count)
