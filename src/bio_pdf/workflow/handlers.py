@@ -260,10 +260,29 @@ class InspectStage(_FileStage):
             "pages": pages_out,
             "warnings": [],
         }
+        # T04: turn the signals into an executable parse plan (OCR policy
+        # enforced here, not silently ignored downstream).
+        from bio_pdf.workflow.parse_plan import build_parse_plan
+
+        engine = str(context.options.get(OPT_ENGINE, "native"))
+        ocr_policy = str(
+            _workflow_options(context).get("ocr_policy")
+            or context.options.get("ocr_policy")
+            or "auto"
+        )
+        plan = build_parse_plan(
+            pages_out,
+            page_numbers=tuple(context.page_numbers),
+            engine=engine,
+            ocr_policy=ocr_policy,
+        )
+        payload["parse_plan"] = plan.to_payload()
+
         out_dir = Path(context.stage_dir())
         ref = atomic_write_json(out_dir, "quality.json", payload)
         return StageOutcome(
-            artifact_refs=[_stage_ref(context, "quality.json", ref)]
+            artifact_refs=[_stage_ref(context, "quality.json", ref)],
+            warnings=list(plan.warnings),
         )
 
 
@@ -328,7 +347,7 @@ class NativeParseStage(_FileStage):
 
 class LayoutParseStage(_FileStage):
     name = "layout_parse"
-    implementation = "v3"
+    implementation = "v4"
 
     def provider_version(self, context: StageContext) -> str:
         engine = str(context.options.get(OPT_ENGINE, "native"))
@@ -355,18 +374,54 @@ class LayoutParseStage(_FileStage):
         except WorkflowError:
             return StageOutcome(artifact_refs=[], review_required=0)
 
+        # T04: page roles from the inspect stage drive the profile. Pages
+        # classified scan/text-suspect run the OCR profile; normal pages run
+        # the fast native-layout profile. Sparse page sets are converted to
+        # contiguous runs inside the child, filtered to the request here.
+        pages = list(context.page_numbers)
+        profile = "layout_native"
+        try:
+            quality = _read_input_json(
+                context, "inspect.quality.json", "inspect", "quality.json"
+            )
+            plan_payload = quality.get("parse_plan") or {}
+            ocr_pages = {
+                int(t["page_number"])
+                for t in plan_payload.get("tasks", [])
+                if t.get("kind") == "layout_ocr"
+            }
+            non_blank = {
+                int(t["page_number"])
+                for t in plan_payload.get("tasks", [])
+                if t.get("kind") != "blank"
+            }
+            if pages and non_blank and ocr_pages >= non_blank:
+                profile = "layout_ocr"
+            elif ocr_pages:
+                # Mixed document: run the layout profile; OCR pages are
+                # recorded in the manifest for reviewer awareness. Mixed
+                # per-page engine calls arrive with the region reparse work.
+                profile = "layout_native"
+        except WorkflowError:
+            pass  # no plan (legacy job): keep the default profile
+
         out_dir = Path(context.stage_dir())
         request = ParseRequest(
             job_id=context.job_id,
             document_id=context.document_id,
             source_path=Path(context.source_path),
-            page_numbers=tuple(context.page_numbers),
-            profile="layout_native",
+            page_numbers=tuple(pages),
+            profile=profile,  # type: ignore[arg-type]
             options_ref="configs/demo.toml",
             output_dir=out_dir,
         )
         artifacts = DoclingAdapter().parse(request)
-        return _refs_from_parse_artifacts(artifacts, out_dir, context)
+        outcome = _refs_from_parse_artifacts(artifacts, out_dir, context)
+        if profile == "layout_native" and pages:
+            outcome.warnings.append(
+                "layout profile ran without per-page OCR routing (mixed OCR arrives with T16)"
+            )
+        return outcome
 
 
 def _refs_from_parse_artifacts(artifacts: Any, out_dir: Path, context: StageContext) -> StageOutcome:

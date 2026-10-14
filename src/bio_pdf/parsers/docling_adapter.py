@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from bio_pdf.contracts import NormalizedDocument
-from bio_pdf.errors import EngineUnavailableError, WorkflowError
+from bio_pdf.errors import EngineTimeoutError, EngineUnavailableError, WorkflowError
 from bio_pdf.parsers.base import ParseArtifacts, ParseRequest
 from bio_pdf.parsers.normalize_docling import (
     normalize_docling_document,
@@ -30,6 +30,20 @@ from bio_pdf.parsers.normalize_docling import (
 _DOCLING_CHILD_REQUEST_ENV = "BIO_PDF_DOCLING_CHILD_REQUEST"
 #: Environment variable carrying the child result path (reserved for future use).
 _DOCLING_CHILD_RESULT_ENV = "BIO_PDF_DOCLING_CHILD_RESULT"
+
+
+def _kill_process_tree(exc: subprocess.TimeoutExpired) -> None:
+    """Terminate a timed-out child. ``run`` already killed the direct child;
+    on Windows, torch/tesseract grandchildren may need an explicit taskkill."""
+
+    if os.name == "nt":
+        pid = getattr(exc, "pid", None) or getattr(getattr(exc, "args", [None])[0], "pid", None)
+        if isinstance(pid, int):
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                check=False,
+            )
 
 
 def _import_docling() -> Any:
@@ -167,6 +181,9 @@ class DoclingAdapter:
                 "options_ref": request.options_ref,
                 "raw_path": str(raw_path),
                 "normalised_path": str(normalised_path),
+                "timeout_seconds": float(
+                    os.environ.get("BIO_PDF_ENGINE_TIMEOUT_SECONDS") or 900.0
+                ),
             }
         }
         payload_path = (request.output_dir / "docling_request.json").resolve()
@@ -180,13 +197,23 @@ class DoclingAdapter:
         # relative payload path would resolve against the wrong directory.
         env[_DOCLING_CHILD_REQUEST_ENV] = str(payload_path)
 
-        completed = subprocess.run(
-            [sys.executable, "-m", "bio_pdf.parsers.docling_child"],
-            env=env,
-            cwd=str(request.output_dir),
-            capture_output=True,
-            text=True,
-        )
+        timeout = float(request_payload["request"].get("timeout_seconds") or 900.0)
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "bio_pdf.parsers.docling_child"],
+                env=env,
+                cwd=str(request.output_dir),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # Never leave the inference child running (plan T04).
+            _kill_process_tree(exc)
+            raise EngineTimeoutError(
+                f"docling child exceeded {timeout:.0f}s and was terminated",
+                details={"timeout_seconds": timeout},
+            ) from exc
         if completed.returncode != 0:
             raise WorkflowError(
                 "docling child process failed",
