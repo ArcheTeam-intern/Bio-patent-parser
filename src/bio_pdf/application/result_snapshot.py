@@ -39,7 +39,7 @@ class SnapshotService:
         self.repository = repository
         self.artifact_root = artifact_root
 
-    def read_current(self, job_id: str) -> dict[str, Any]:
+    def read_current(self, job_id: str, *, include_record_pages: bool = False) -> dict[str, Any]:
         """Read revision + records inside one transaction (for the records API).
 
         Returns ``{result_revision, sequences, measurements, baseline_id}``
@@ -50,6 +50,8 @@ class SnapshotService:
         conn.execute("BEGIN IMMEDIATE")
         try:
             data = self._capture_locked(job_id)
+            if include_record_pages:
+                data["record_pages"] = self._record_pages(job_id, data)
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -137,13 +139,55 @@ class SnapshotService:
                 out.append(record)
             return out
 
+        sequences = _overlay(sequences, "sequence_id")
+        measurements = _overlay(measurements, "measurement_id")
         return {
             "result_revision": job.result_revision,
             "baseline_id": publication["baseline_id"] if publication else None,
             "document_id": job.document_id,
-            "sequences": _overlay(sequences, "sequence_id"),
-            "measurements": _overlay(measurements, "measurement_id"),
+            "sequences": sequences,
+            "measurements": measurements,
         }
+
+    def _record_pages(self, job_id: str, snapshot: dict[str, Any]) -> dict[str, list[int]]:
+        """Resolve pages inside the snapshot transaction; exports keep their existing payload."""
+        reader = ResultReader(self.artifact_root)
+        spans = []
+        legacy_extract = self.artifact_root / "jobs" / job_id / "extract" / "extract.json"
+        if (
+            snapshot.get("baseline_id")
+            or reader.read_published_manifest(job_id) is not None
+            or legacy_extract.is_file()
+        ):
+            try:
+                spans = reader.read_json(job_id, "extract").get("evidence_spans", [])
+            except WorkflowError:
+                # The manifest exists but the extract artifact is missing or
+                # unreadable: records still come from the snapshot payload;
+                # page locations degrade to empty lists instead of failing
+                # the whole /records response.
+                spans = []
+        evidence_pages: dict[str, set[int]] = {}
+        for span in spans:
+            evidence_id = span.get("evidence_id")
+            if not evidence_id:
+                continue
+            pages = [span.get("page_number")]
+            pages.extend(f.get("page_number") for f in (span.get("fragments") or []))
+            evidence_pages[evidence_id] = {
+                p for p in pages if isinstance(p, int) and not isinstance(p, bool) and p >= 1
+            }
+        record_pages: dict[str, list[int]] = {}
+        for record in [*snapshot["sequences"], *snapshot["measurements"]]:
+            ids = set(record.get("evidence_ids", []))
+            for field_ids in (record.get("field_evidence") or {}).values():
+                ids.update(field_ids)
+            pages: set[int] = set()
+            for evidence_id in ids:
+                pages.update(evidence_pages.get(evidence_id, set()))
+            record_pages[record.get("sequence_id") or record["measurement_id"]] = sorted(pages)
+
+        return record_pages
 
 
 __all__ = ["SnapshotService", "Snapshot"]

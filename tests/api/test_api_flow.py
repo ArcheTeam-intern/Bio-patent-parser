@@ -125,7 +125,83 @@ def test_upload_rejects_html_disguised_as_pdf(client) -> None:
         files={"file": ("fake.pdf", fake.read_bytes(), "application/pdf")},
     )
     assert res.status_code == 415
-    assert res.json()["error"]["code"] == "INPUT_NOT_PDF"
+    error = res.json()["error"]
+    assert error["code"] == "INPUT_NOT_PDF"
+    assert error["details"]["detected_type"] == "html"
+    assert error["details"]["file_name"] == "fake.pdf"
+
+
+def test_upload_rejects_empty_file_with_specific_reason(client) -> None:
+    c, tmp_path = client
+    res = c.post(
+        "/api/v1/documents",
+        files={"file": ("empty.pdf", b"", "application/pdf")},
+    )
+    assert res.status_code == 415
+    error = res.json()["error"]
+    assert error["code"] == "INPUT_NOT_PDF"
+    assert error["details"]["detected_type"] == "empty"
+    assert "为空" in error["message"]
+
+
+def test_reupload_of_registered_pdf_keeps_source(client) -> None:
+    c, tmp_path = client
+    pdf = _sample_pdf(tmp_path / "paper.pdf")
+    body = pdf.read_bytes()
+
+    first = c.post("/api/v1/documents", files={"file": ("paper.pdf", body, "application/pdf")})
+    assert first.status_code == 201, first.text
+    document_id = first.json()["document_id"]
+
+    # Same bytes again: content-addressed dedup must not delete the already
+    # registered source file, and the response stays a success.
+    second = c.post("/api/v1/documents", files={"file": ("paper.pdf", body, "application/pdf")})
+    assert second.status_code == 201, second.text
+    assert second.json()["document_id"] == document_id
+
+    sha = document_id.removeprefix("sha256:")
+    source = tmp_path / "data" / "sources" / f"{sha}.pdf"
+    assert source.is_file()
+    assert source.read_bytes() == body
+
+
+def test_records_record_pages_consistent_with_kind_and_query(client) -> None:
+    c, tmp_path = client
+    from bio_pdf.workflow.queue_worker import run_worker
+
+    pdf = _sample_pdf(tmp_path / "paper.pdf")
+    doc = c.post(
+        "/api/v1/documents",
+        files={"file": ("paper.pdf", pdf.read_bytes(), "application/pdf")},
+    ).json()
+    job = c.post(
+        "/api/v1/jobs",
+        json={"document_id": doc["document_id"], "parser": "native"},
+    ).json()
+    run_worker(tmp_path / "data", once=True)
+    job_id = job["job_id"]
+
+    records = c.get(f"/api/v1/jobs/{job_id}/records").json()
+    seq_ids = {s["sequence_id"] for s in records["sequences"]}
+    meas_ids = {m["measurement_id"] for m in records["measurements"]}
+    assert seq_ids and meas_ids, records
+    # The page map covers exactly the returned records, one key each.
+    assert set(records["record_pages"]) == seq_ids | meas_ids
+    for pages in records["record_pages"].values():
+        assert all(isinstance(p, int) and p >= 1 for p in pages)
+
+    only_seq = c.get(f"/api/v1/jobs/{job_id}/records?kind=sequence").json()
+    assert only_seq["measurements"] == []
+    assert set(only_seq["record_pages"]) == {s["sequence_id"] for s in only_seq["sequences"]}
+
+    # A needle filter narrows records and their page map to the same ids.
+    needle = sorted(seq_ids)[0].lower()
+    filtered = c.get(f"/api/v1/jobs/{job_id}/records?q={needle}").json()
+    filtered_ids = {s["sequence_id"] for s in filtered["sequences"]} | {
+        m["measurement_id"] for m in filtered["measurements"]
+    }
+    assert filtered_ids == {needle}
+    assert set(filtered["record_pages"]) == filtered_ids
 
 
 def test_document_source_supports_range_and_etag(client) -> None:

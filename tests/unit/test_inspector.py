@@ -49,6 +49,44 @@ def test_html_disguised_as_pdf_is_rejected(tmp_path: Path) -> None:
     assert caught.value.code == "INPUT_NOT_PDF"
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_type"),
+    [
+        (b"<!DOCTYPE html><html></html>", "html"),
+        (b"<html lang=\"en\"><body>x</body></html>", "html"),
+        (b"<HTML><HEAD></HEAD></HTML>", "html"),
+        (b"  <!doctype html>\n<html>", "html"),
+        # UTF-8 BOM must not hide the <html marker from classification.
+        (b"\xef\xbb\xbf<!DOCTYPE html><html></html>", "html"),
+        (b"\xef\xbb\xbf<html>", "html"),
+        (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", "unknown"),
+        (b"not a pdf at all", "unknown"),
+    ],
+)
+def test_rejection_classifies_detected_type(
+    tmp_path: Path, payload: bytes, expected_type: str
+) -> None:
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(payload)
+    with pytest.raises(WorkflowError) as caught:
+        inspect_pdf(source)
+    assert caught.value.code == "INPUT_NOT_PDF"
+    assert caught.value.details["detected_type"] == expected_type
+    assert caught.value.details["path"] == str(source)
+    if expected_type == "html":
+        assert "HTML" in caught.value.message
+
+
+def test_empty_file_is_rejected_as_empty(tmp_path: Path) -> None:
+    source = tmp_path / "empty.pdf"
+    source.write_bytes(b"")
+    with pytest.raises(WorkflowError) as caught:
+        inspect_pdf(source)
+    assert caught.value.code == "INPUT_NOT_PDF"
+    assert caught.value.details["detected_type"] == "empty"
+    assert "为空" in caught.value.message
+
+
 def test_blank_pdf_is_accepted(tmp_path: Path) -> None:
     source = _make_blank_pdf(tmp_path / "blank.pdf", pages=2)
     inspection = inspect_pdf(source)

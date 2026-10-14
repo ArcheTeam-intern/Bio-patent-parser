@@ -104,6 +104,9 @@ class JobResponse(ApiEnvelope):
     updated_at: str
     stages: list[StageRunView] = Field(default_factory=list)
     export_artifact_id: str | None = None
+    #: Effective config identity for the run-details view (design §7.7).
+    config_hash: str = ""
+    engine: str = ""
 
 
 class WorkerPresenceView(BaseModel):
@@ -147,6 +150,7 @@ class RecordsResponse(ApiEnvelope):
     revision: int
     sequences: list[dict[str, Any]] = Field(default_factory=list)
     measurements: list[dict[str, Any]] = Field(default_factory=list)
+    record_pages: dict[str, list[int]] = Field(default_factory=dict)
 
 
 class PageResponse(ApiEnvelope):

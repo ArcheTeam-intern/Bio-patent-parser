@@ -83,9 +83,23 @@ def inspect_pdf(path: Path) -> DocumentInspection:
     document_id = f"sha256:{sha256}"
 
     if not _looks_like_pdf(data):
+        prefix = data[:1024]
+        # A UTF-8 BOM is not stripped by ``lstrip`` and would hide the
+        # ``<html`` marker from the classification below.
+        if prefix.startswith(b"\xef\xbb\xbf"):
+            prefix = prefix[3:]
+        prefix = prefix.lstrip().lower()
+        is_html = b"<!doctype html" in prefix or b"<html" in prefix
+        detected_type = "html" if is_html else ("empty" if not data else "unknown")
+        message = (
+            "文件内容是 HTML 网页，不是真正的 PDF。请在来源网站点击“下载 PDF”，不要将专利详情网页保存为 .pdf。"
+            if is_html else
+            "文件为空，请重新选择 PDF。" if not data else
+            "文件缺少 PDF 文件头，可能下载不完整或格式不正确。请重新下载原始 PDF。"
+        )
         raise InputNotPdfError(
-            f"file does not start with the PDF signature: {path}",
-            details={"path": str(path)},
+            message,
+            details={"path": str(path), "detected_type": detected_type},
         )
 
     try:

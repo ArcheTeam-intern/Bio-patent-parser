@@ -111,7 +111,12 @@ async def upload_document(
             os.replace(tmp_path, target)
             tmp_path = None
 
-        inspection = _inspect_fresh_upload(target) if tmp_path is None else _inspect_only(target)
+        try:
+            inspection = _inspect_fresh_upload(target) if tmp_path is None else _inspect_only(target)
+        except HTTPException as exc:
+            if isinstance(exc.detail, dict):
+                exc.detail.setdefault("details", {})["file_name"] = file.filename or "upload.pdf"
+            raise
     finally:
         if tmp_path is not None:
             Path(tmp_path).unlink(missing_ok=True)

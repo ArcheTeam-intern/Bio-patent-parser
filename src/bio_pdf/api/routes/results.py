@@ -64,7 +64,7 @@ def get_records(
     from bio_pdf.application.result_snapshot import SnapshotService
 
     snapshot = SnapshotService(service.repository, service.paths.artifact_root).read_current(
-        job_id
+        job_id, include_record_pages=True
     )
     sequences = snapshot.get("sequences", [])
     measurements = snapshot.get("measurements", [])
@@ -87,11 +87,18 @@ def get_records(
             or needle in str(m.get("metric", "")).lower()
             or needle in str(m.get("target_raw", "") or "").lower()
         ]
+    visible_ids = {s["sequence_id"] for s in sequences} | {
+        m["measurement_id"] for m in measurements
+    }
     return RecordsResponse(
         job_id=job_id,
         revision=int(snapshot.get("result_revision", 0)),
         sequences=sequences,
         measurements=measurements,
+        record_pages={
+            record_id: pages for record_id, pages in snapshot.get("record_pages", {}).items()
+            if record_id in visible_ids
+        },
     )
 
 
