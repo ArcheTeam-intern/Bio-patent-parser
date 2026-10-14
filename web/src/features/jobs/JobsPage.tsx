@@ -54,7 +54,7 @@ export function JobsPage() {
                     <div className="dim">{job.document_id.slice(0, 20)}…</div>
                   </td>
                   <td>
-                    <StatusLabel value={job.status} kind="job" />
+                    <StatusLabel value={job.status} kind="job" openReviews={job.open_reviews} />
                   </td>
                   <td>{job.open_reviews > 0 ? <span className="status review">{job.open_reviews} 条</span> : "—"}</td>
                   <td className="dim">{job.current_stage ?? "—"}</td>

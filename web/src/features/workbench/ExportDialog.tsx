@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createExport, exportDownloadUrl, getExport, getRecords } from "../../api/client";
+import { createExport, exportDownloadUrl, getExport, getJob, getRecords } from "../../api/client";
 import { useQuery } from "@tanstack/react-query";
 
 /**
@@ -19,14 +19,15 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
   const [exportId, setExportId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const records = useQuery({
-    queryKey: ["records", jobId],
-    queryFn: () => getRecords(jobId),
-    enabled: open,
-  });
   const job = useQuery({
     queryKey: ["job", jobId],
-    queryFn: () => getJobInfo(jobId),
+    queryFn: () => getJob(jobId),
+    enabled: open,
+  });
+  // Same key shape as the workbench so both share one cached response.
+  const records = useQuery({
+    queryKey: ["records", jobId, job.data?.result_revision, job.data?.status],
+    queryFn: () => getRecords(jobId),
     enabled: open,
   });
   const exportInfo = useQuery({
@@ -125,9 +126,4 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
       </div>
     </dialog>
   );
-}
-
-async function getJobInfo(jobId: string): Promise<{ result_revision: number }> {
-  const { getJob } = await import("../../api/client");
-  return getJob(jobId);
 }

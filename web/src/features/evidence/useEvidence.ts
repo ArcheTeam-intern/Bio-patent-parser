@@ -25,6 +25,7 @@ export interface EvidenceState {
   error: string | null;
   /** Switch to one of the record's evidence ids. */
   select: (evidenceId: string) => void;
+  clear: () => void;
   next: () => void;
   prev: () => void;
   position: { index: number; total: number };
@@ -41,7 +42,7 @@ function targetFrom(span: EvidenceData, fragmentIndex: number): EvidenceTarget {
   };
 }
 
-export function useEvidence(jobId: string, evidenceIds: string[]): EvidenceState {
+export function useEvidence(jobId: string, evidenceIds: string[], selectionKey?: string | null): EvidenceState {
   const [evidence, setEvidence] = useState<EvidenceData | null>(null);
   const [target, setTarget] = useState<EvidenceTarget | null>(null);
   const [loading, setLoading] = useState(false);
@@ -49,12 +50,22 @@ export function useEvidence(jobId: string, evidenceIds: string[]): EvidenceState
   const [activeId, setActiveId] = useState<string | null>(null);
   // Monotonic generation: only the newest request may apply.
   const generation = useRef(0);
+  const clear = useCallback(() => {
+    ++generation.current;
+    setEvidence(null);
+    setTarget(null);
+    setLoading(false);
+    setError(null);
+    setActiveId(null);
+  }, []);
 
   const load = useCallback(
     async (evidenceId: string, fragmentIndex: number) => {
       const mine = ++generation.current;
       setLoading(true);
       setError(null);
+      setEvidence(null);
+      setTarget(null);
       setActiveId(evidenceId);
       try {
         const span = await getEvidence(jobId, evidenceId);
@@ -96,16 +107,13 @@ export function useEvidence(jobId: string, evidenceIds: string[]): EvidenceState
   // Auto-select the first evidence when the record (its id set) changes.
   const idsKey = evidenceIds.join("|");
   useEffect(() => {
+    clear();
     if (evidenceIds.length > 0) {
       void load(evidenceIds[0], 0);
-    } else {
-      setEvidence(null);
-      setTarget(null);
-      setError(null);
-      setActiveId(null);
     }
+    return () => { ++generation.current; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey]);
+  }, [jobId, idsKey, selectionKey, load, clear]);
 
   return {
     evidence,
@@ -113,6 +121,7 @@ export function useEvidence(jobId: string, evidenceIds: string[]): EvidenceState
     loading,
     error,
     select,
+    clear,
     next: () => move(1),
     prev: () => move(-1),
     position: { index: index + 1, total },

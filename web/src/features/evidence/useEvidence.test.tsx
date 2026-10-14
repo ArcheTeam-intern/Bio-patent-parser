@@ -84,4 +84,55 @@ describe("useEvidence", () => {
     await waitFor(() => expect(result.current.error).toContain("证据加载失败"));
     expect(result.current.target).toBeNull();
   });
+
+  it("clear() drops the current selection and target", async () => {
+    vi.spyOn(client, "getEvidence").mockResolvedValue(span("ev-a", 9, [10, 20, 110, 40]));
+    const { result } = renderHook(() => useEvidence("job-1", ["ev-a"]));
+    await waitFor(() => expect(result.current.evidence?.evidence_id).toBe("ev-a"));
+
+    act(() => result.current.clear());
+    expect(result.current.evidence).toBeNull();
+    expect(result.current.target).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("changing the selection key reloads the record evidence", async () => {
+    const spy = vi.spyOn(client, "getEvidence").mockResolvedValue(span("ev-a", 9, [10, 20, 110, 40]));
+    const { result, rerender } = renderHook(
+      ({ key }) => useEvidence("job-1", ["ev-a"], key),
+      { initialProps: { key: "rec-1" } },
+    );
+    await waitFor(() => expect(result.current.evidence?.evidence_id).toBe("ev-a"));
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    rerender({ key: "rec-2" });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.evidence?.evidence_id).toBe("ev-a"));
+  });
+
+  it("an in-flight response from the previous selection key never lands", async () => {
+    let resolveSlow: (v: client.EvidenceData) => void = () => {};
+    const slow = new Promise<client.EvidenceData>((r) => (resolveSlow = r));
+    let call = 0;
+    vi.spyOn(client, "getEvidence").mockImplementation(() => {
+      call += 1;
+      return call === 1 ? slow : Promise.resolve(span("ev-a", 3, [1, 2, 3, 4]));
+    });
+    const { result, rerender } = renderHook(
+      ({ key }) => useEvidence("job-1", ["ev-a"], key),
+      { initialProps: { key: "rec-1" } },
+    );
+    await waitFor(() => expect(client.getEvidence).toHaveBeenCalledTimes(1));
+
+    rerender({ key: "rec-2" });
+    await waitFor(() => expect(result.current.target?.page).toBe(3));
+
+    // The stale first response (page 9) resolves late and must be dropped.
+    await act(async () => {
+      resolveSlow(span("ev-a", 9, [10, 20, 110, 40]));
+      await slow;
+    });
+    expect(result.current.target?.page).toBe(3);
+  });
 });

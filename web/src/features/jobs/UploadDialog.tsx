@@ -21,6 +21,15 @@ export function UploadDialog({ open, onClose, onCreated }: Props) {
   const uploadAndCreate = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error("请选择一个 PDF 文件");
+      setError(null);
+      const header = new TextDecoder().decode(await file.slice(0, 1024).arrayBuffer()).trimStart();
+      if (!/^%PDF-\d\.\d/.test(header)) {
+        const html = /<!doctype html|<html[\s>]/i.test(header);
+        throw new ApiError(415, "INPUT_NOT_PDF", html
+          ? "文件内容是 HTML 网页，不是真正的 PDF。请在来源网站点击“下载 PDF”，不要将专利详情网页保存为 .pdf。"
+          : file.size === 0 ? "文件为空，请重新选择 PDF。" : "文件缺少 PDF 文件头，请重新下载原始 PDF。",
+          { file_name: file.name, detected_type: html ? "html" : "unknown" });
+      }
       const doc = await uploadDocument(file);
       const pageNumbers = parsePages(pages);
       return createJob({
@@ -47,7 +56,7 @@ export function UploadDialog({ open, onClose, onCreated }: Props) {
       <div className="dialog-body">
         {error && (
           <div className="banner error">
-            上传失败：{error.message}
+            上传失败：{String(error.details.file_name ?? file?.name ?? "")} — {error.message}
             {error.code !== "HTTP_ERROR" && <span className="dim"> ({error.code})</span>}
           </div>
         )}
@@ -59,7 +68,8 @@ export function UploadDialog({ open, onClose, onCreated }: Props) {
               ref={fileInput}
               type="file"
               accept="application/pdf,.pdf"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              disabled={uploadAndCreate.isPending}
+              onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(null); }}
             />
           </label>
 

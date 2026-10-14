@@ -21,11 +21,23 @@ const RECORD_STATUS: Record<string, { cls: string; label: string }> = {
   unchecked: { cls: "muted", label: "未检查" },
 };
 
-export function StatusLabel({ value, kind = "job" }: { value: string | null | undefined; kind?: "job" | "record" }) {
+export function StatusLabel({
+  value,
+  kind = "job",
+  openReviews,
+}: {
+  value: string | null | undefined;
+  kind?: "job" | "record";
+  /** When provided for jobs, a review-complete status stops claiming 待审核. */
+  openReviews?: number;
+}) {
   if (!value) {
     return <span className="status muted">未提取</span>;
   }
   const table = kind === "job" ? JOB_STATUS : RECORD_STATUS;
-  const entry = table[value] ?? { cls: "muted", label: value };
+  let entry = table[value] ?? { cls: "muted", label: value };
+  if (kind === "job" && value === "succeeded_with_review" && openReviews === 0) {
+    entry = { cls: "ok", label: "处理完成（审核已全部处理）" };
+  }
   return <span className={`status ${entry.cls}`}>{entry.label}</span>;
 }

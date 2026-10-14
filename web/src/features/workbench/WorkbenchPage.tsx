@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getJob, getRecords, MeasurementData, SequenceRecordData } from "../../api/client";
@@ -12,6 +12,7 @@ import { ReviewPanel } from "../reviews/ReviewPanel";
 import { ExportDialog } from "./ExportDialog";
 import { useEvidence } from "../evidence/useEvidence";
 import { EvidenceNavigator } from "../evidence/EvidenceNavigator";
+import { RunDetails } from "./RunDetails";
 import { TablesTab, TextTab } from "../tables/TableView";
 import { IssuePanel } from "../issues/IssuePanel";
 
@@ -24,6 +25,9 @@ export function WorkbenchPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") as Tab) ?? "sequences";
   const recordId = params.get("record");
+  const rawPage = Number(params.get("page") ?? 1);
+  const currentPage = Number.isInteger(rawPage) && rawPage >= 1 ? rawPage : 1;
+  const scope = params.get("scope") === "all" ? "all" : "page";
 
   const job = useQuery({
     queryKey: ["job", jobId],
@@ -32,9 +36,9 @@ export function WorkbenchPage() {
     refetchInterval: (q) => (isActive(q.state.data?.status) ? 1500 : false),
   });
   const records = useQuery({
-    queryKey: ["records", jobId],
+    queryKey: ["records", jobId, job.data?.result_revision, job.data?.status],
     queryFn: () => getRecords(jobId!),
-    enabled: !!jobId,
+    enabled: !!jobId && !!job.data && !isActive(job.data.status),
   });
 
   const selected = useMemo(() => {
@@ -51,16 +55,48 @@ export function WorkbenchPage() {
   // B01: location comes from the evidence API, never from id parsing.
   const selectedEvidenceIds = useMemo(() => {
     if (!selected) return [] as string[];
-    const record = selected.record as { evidence_ids?: string[] };
-    return record.evidence_ids ?? [];
+    const record = selected.record;
+    const fields = "field_evidence" in record ? Object.values(record.field_evidence ?? {}).flat() : [];
+    return [...new Set([...(record.evidence_ids ?? []), ...fields])];
   }, [selected]);
-  const evidenceState = useEvidence(jobId ?? "", selectedEvidenceIds);
+  const evidenceState = useEvidence(jobId ?? "", selectedEvidenceIds, recordId);
 
-  // 表格/原文视图的页码：URL page 参数优先，其次证据定位页。
-  const urlPage = Number(params.get("page") || 0) || null;
-  const detailPage = urlPage ?? evidenceState.target?.page ?? 1;
+  const changePage = useCallback((page: number) => {
+    evidenceState.clear();
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("page", String(page));
+      next.delete("record");
+      return next;
+    }, { replace: true });
+  }, [evidenceState.clear, setParams]);
+
+  useEffect(() => {
+    const page = evidenceState.target?.page;
+    if (!page || !selected || !evidenceState.evidence ||
+        !selectedEvidenceIds.includes(evidenceState.evidence.evidence_id)) return;
+    setParams((previous) => {
+      if (Number(previous.get("page")) === page) return previous;
+      const next = new URLSearchParams(previous);
+      next.set("page", String(page));
+      return next;
+    }, { replace: true });
+  }, [evidenceState.target, evidenceState.evidence, selected, selectedEvidenceIds, setParams]);
+
+  const pagesFor = (id: string) => records.data?.record_pages?.[id] ?? [];
+  const allSequences = records.data?.sequences ?? [];
+  const allMeasurements = records.data?.measurements ?? [];
+  const visibleSequences = scope === "all" ? allSequences : allSequences.filter(s => pagesFor(s.sequence_id).includes(currentPage));
+  const visibleMeasurements = scope === "all" ? allMeasurements : allMeasurements.filter(m => pagesFor(m.measurement_id).includes(currentPage));
+  const unlocated = [...allSequences.map(s => s.sequence_id), ...allMeasurements.map(m => m.measurement_id)]
+    .filter(id => pagesFor(id).length === 0).length;
 
   const selectRecord = (id: string) => {
+    if (id === recordId) {
+      if (selectedEvidenceIds[0]) evidenceState.select(selectedEvidenceIds[0]);
+      return;
+    }
+    evidenceState.clear();
     const next = new URLSearchParams(params);
     next.set("record", id);
     setParams(next, { replace: true });
@@ -86,7 +122,7 @@ export function WorkbenchPage() {
         <div className="panel-header">
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <span className="mono dim">{jobId}</span>
-            <StatusLabel value={job.data?.status} kind="job" />
+            <StatusLabel value={job.data?.status} kind="job" openReviews={job.data?.open_reviews} />
             {job.data && job.data.open_reviews > 0 && (
               <span className="status review">{job.data.open_reviews} 条待审核</span>
             )}
@@ -109,17 +145,18 @@ export function WorkbenchPage() {
         <section className="panel">
           <div className="panel-header">原始 PDF</div>
           {job.data && (
-            <PdfViewer documentId={job.data.document_id} target={evidenceState.target} />
+            <PdfViewer documentId={job.data.document_id} target={evidenceState.target}
+              pageNumber={currentPage} onPageChange={changePage} />
           )}
         </section>
 
         <section className="panel">
           <div className="panel-header">
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {(["sequences", "activities", "tables", "text", "issues", "run"] as Tab[]).map((t) => (
                 <button
                   key={t}
-                  style={{ border: "none", background: tab === t ? "var(--accent-soft)" : "none", color: tab === t ? "var(--accent)" : "inherit", fontWeight: tab === t ? 600 : 400 }}
+                  style={{ border: "none", padding: "4px 8px", whiteSpace: "nowrap", background: tab === t ? "var(--accent-soft)" : "none", color: tab === t ? "var(--accent)" : "inherit", fontWeight: tab === t ? 600 : 400 }}
                   onClick={() => {
                     const next = new URLSearchParams(params);
                     next.set("tab", t);
@@ -131,10 +168,33 @@ export function WorkbenchPage() {
               ))}
             </div>
           </div>
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border-soft)" }}>
+            {(tab === "sequences" || tab === "activities") ? (
+              <>
+                <label>结果范围： <select aria-label="结果范围" value={scope} onChange={e => {
+                  const next = new URLSearchParams(params);
+                  next.set("scope", e.target.value);
+                  setParams(next, { replace: true });
+                }}>
+                  <option value="page">当前页</option>
+                  <option value="all">全部文档</option>
+                </select></label>
+                <span className="dim" style={{ marginLeft: 10 }}>
+                  {scope === "page" ? `第 ${currentPage} 页 · ` : "全文 · "}
+                  {tab === "sequences" ? `${visibleSequences.length}/${allSequences.length} 条序列` : `${visibleMeasurements.length}/${allMeasurements.length} 条活性`}
+                </span>
+                {scope === "page" && <div className="dim">随左侧 PDF 翻页；点击记录可定位证据。跨页记录会在各证据页显示。</div>}
+                {unlocated > 0 && <div className="dim">另有 {unlocated} 条记录缺少可定位页码，可在“全部文档”查看。</div>}
+              </>
+            ) : <span className="dim">{tab === "tables" || tab === "text" ? `第 ${currentPage} 页 · 与左侧 PDF 同步` : "全文视图"}</span>}
+          </div>
           <div className="panel-scroll">
+            {records.error && (tab === "sequences" || tab === "activities") && <div className="banner error">记录读取失败：{String(records.error)}</div>}
+            {isActive(job.data?.status) && <div className="banner info">解析进行中，结果将在完成后更新。</div>}
             {tab === "sequences" && (
               <SequenceTab
-                records={records.data?.sequences ?? []}
+                records={visibleSequences}
+                emptyMessage={scope === "page" ? `第 ${currentPage} 页没有序列候选。可切换“全部文档”查看其他页。` : "全文尚未提取到序列候选。"}
                 selectedId={recordId}
                 onSelect={(s: SequenceRecordData) => selectRecord(s.sequence_id)}
                 loading={records.isLoading}
@@ -142,18 +202,19 @@ export function WorkbenchPage() {
             )}
             {tab === "activities" && (
               <ActivityTab
-                records={records.data?.measurements ?? []}
+                records={visibleMeasurements}
+                emptyMessage={scope === "page" ? `第 ${currentPage} 页没有活性候选。可切换“全部文档”查看其他页。` : "全文尚未提取到活性候选。"}
                 selectedId={recordId}
                 onSelect={(m: MeasurementData) => selectRecord(m.measurement_id)}
                 loading={records.isLoading}
               />
             )}
             {tab === "tables" && (
-              <TablesTab jobId={jobId} pageNumber={detailPage} />
+              <TablesTab jobId={jobId} pageNumber={currentPage} />
             )}
-            {tab === "text" && <TextTab jobId={jobId} pageNumber={detailPage} />}
+            {tab === "text" && <TextTab jobId={jobId} pageNumber={currentPage} />}
             {tab === "issues" && <IssuePanel jobId={jobId} />}
-            {tab === "run" && <RunDetails jobId={jobId} />}
+            {tab === "run" && <RunDetails jobId={jobId} job={job.data} />}
           </div>
         </section>
 
@@ -209,14 +270,16 @@ function SequenceTab({
   selectedId,
   onSelect,
   loading,
+  emptyMessage,
 }: {
   records: SequenceRecordData[];
   selectedId: string | null;
   onSelect: (r: SequenceRecordData) => void;
   loading: boolean;
+  emptyMessage: string;
 }) {
   if (loading) return <div className="empty-state">加载中…</div>;
-  if (records.length === 0) return <div className="empty-state">尚未提取到序列候选。</div>;
+  if (records.length === 0) return <div className="empty-state">{emptyMessage}</div>;
   return (
     <table className="data">
       <thead>
@@ -255,14 +318,16 @@ function ActivityTab({
   selectedId,
   onSelect,
   loading,
+  emptyMessage,
 }: {
   records: MeasurementData[];
   selectedId: string | null;
   onSelect: (r: MeasurementData) => void;
   loading: boolean;
+  emptyMessage: string;
 }) {
   if (loading) return <div className="empty-state">加载中…</div>;
-  if (records.length === 0) return <div className="empty-state">尚未提取到活性候选。</div>;
+  if (records.length === 0) return <div className="empty-state">{emptyMessage}</div>;
   return (
     <table className="data">
       <thead>
@@ -297,17 +362,5 @@ function ActivityTab({
         ))}
       </tbody>
     </table>
-  );
-}
-
-function RunDetails({ jobId }: { jobId: string }) {
-  return (
-    <div style={{ padding: 12 }}>
-      <div className="dim">任务 {jobId}</div>
-      <div className="dim" style={{ marginTop: 8 }}>
-        运行详情包含：引擎、规则版本、配置哈希、请求/实际页集合、阶段耗时、警告与制品清单。
-        制品可在任务面板通过 /artifacts 接口按 ID 下载。
-      </div>
-    </div>
   );
 }

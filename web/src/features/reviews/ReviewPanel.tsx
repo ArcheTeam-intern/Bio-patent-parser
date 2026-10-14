@@ -69,6 +69,11 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
 
   const blockers = (currentRecord["blockers"] as string[] | undefined) ?? [];
   const item = reviewItemQuery.reviewId;
+  // The server accepts typed patches for measurements only; sequence
+  // residues are bound to per-position evidence and require re-extraction
+  // (review_service._PATCHABLE). The UI must not offer a path the server
+  // will always refuse.
+  const patchable = "measurement_id" in currentRecord;
   // B07: no automatic version bumping. While a conflict is unresolved the
   // submit path stays disabled; the reviewer reloads (fresh queries) and
   // confirms against the NEW revision explicitly. The record's own
@@ -122,7 +127,7 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
       )}
 
       {mode === "idle" && !conflict && (
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button
             className="primary"
             disabled={decide.isPending || blockers.length > 0}
@@ -131,9 +136,15 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
           >
             确认
           </button>
-          <button disabled={decide.isPending} onClick={() => setMode("correcting")}>
-            修正并确认
-          </button>
+          {patchable ? (
+            <button disabled={decide.isPending} onClick={() => setMode("correcting")}>
+              修正并确认
+            </button>
+          ) : (
+            <span className="dim" title="序列残基与位置证据绑定，修正需要重新提取">
+              序列不可直接修改（需重新提取）
+            </span>
+          )}
           <button
             disabled={decide.isPending}
             style={{ borderColor: "var(--red)", color: "var(--red)" }}

@@ -41,6 +41,8 @@ def _job_response(service, job) -> JobResponse:
         for s in service.repository.list_stages(job.job_id)
     ]
     export_id = _latest_export_artifact(service, job.job_id)
+    config = service.repository.get_job_config(job.job_id)
+    engine = str((config.get("effective_config") or {}).get("parser") or "")
     return JobResponse(
         job_id=job.job_id,
         document_id=job.document_id,
@@ -52,6 +54,8 @@ def _job_response(service, job) -> JobResponse:
         updated_at=job.updated_at.isoformat(),
         stages=stages,
         export_artifact_id=export_id,
+        config_hash=job.config_hash,
+        engine=engine,
     )
 
 

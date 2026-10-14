@@ -94,6 +94,8 @@ export interface Job {
   updated_at: string;
   stages: StageRun[];
   export_artifact_id: string | null;
+  config_hash: string;
+  engine: string;
 }
 
 export interface RecordsResponse {
@@ -102,6 +104,7 @@ export interface RecordsResponse {
   revision: number;
   sequences: SequenceRecordData[];
   measurements: MeasurementData[];
+  record_pages: Record<string, number[]>;
 }
 
 export interface ActivityValue {
@@ -390,4 +393,19 @@ export interface QueueStatus {
 
 export function getQueueStatus(): Promise<QueueStatus> {
   return request("/queue/status");
+}
+
+// ---- artifacts (run details, design §7.7) ---------------------------------
+
+export interface ArtifactInfo {
+  artifact_id: string;
+  relative_path: string;
+  media_type: string;
+  bytes: number | null;
+}
+
+export function listArtifacts(
+  jobId: string,
+): Promise<{ api_version: string; job_id: string; artifacts: ArtifactInfo[] }> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/artifacts`);
 }
