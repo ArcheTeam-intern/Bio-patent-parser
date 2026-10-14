@@ -912,7 +912,10 @@ class ExtractStage(_FileStage):
             + [json.loads(r.model_dump_json()) for r in unresolved],
             "review_reasons": list(relation_result.review_reasons),
             "evidence_spans": evidence.to_payload(),
-            "raw_mentions": raw_mentions,
+            "raw_mentions": [
+                m.model_dump(mode="json") if hasattr(m, "model_dump") else m
+                for m in raw_mentions
+            ],
             "diagnostics": diagnostics,
         }
         out_dir = Path(context.stage_dir())

@@ -289,15 +289,32 @@ def extract_inline_sequences(
             # Lowercase runs only qualify under an explicit DNA/RNA hint.
             if run.islower():
                 if hint not in ("DNA", "RNA"):
-                    if len(compact) >= _MENTION_MIN_RUN and diagnostics is not None:
-                        diagnostics.append(
-                            {
-                                "code": "NO_NUCLEIC_CONTEXT",
-                                "block_id": block_id,
-                                "page": str(page_number),
-                                "detail": compact[:80],
-                            }
-                        )
+                    if len(compact) >= _MENTION_MIN_RUN:
+                        if diagnostics is not None:
+                            diagnostics.append(
+                                {
+                                    "code": "NO_NUCLEIC_CONTEXT",
+                                    "block_id": block_id,
+                                    "page": str(page_number),
+                                    "detail": compact[:80],
+                                }
+                            )
+                        if raw_mentions is not None:
+                            raw_mentions.append(
+                                _raw_letter_mention(
+                                    run=run,
+                                    document_id=document_id,
+                                    parser_run_id=parser_run_id,
+                                    block=block,
+                                    block_id=block_id,
+                                    page_number=page_number,
+                                    m_start=m_start,
+                                    m_end=m_end,
+                                    text=text,
+                                    code="NO_NUCLEIC_CONTEXT",
+                                    evidence_index=evidence_index,
+                                )
+                            )
                     continue
             elif hint is None:
                 if len(compact) >= _MENTION_MIN_RUN:
@@ -312,12 +329,19 @@ def extract_inline_sequences(
                         )
                     if raw_mentions is not None:
                         raw_mentions.append(
-                            {
-                                "text": run,
-                                "role": "unclassified_letters",
-                                "page": page_number,
-                                "block_id": block_id,
-                            }
+                            _raw_letter_mention(
+                                run=run,
+                                document_id=document_id,
+                                parser_run_id=parser_run_id,
+                                block=block,
+                                block_id=block_id,
+                                page_number=page_number,
+                                m_start=m_start,
+                                m_end=m_end,
+                                text=text,
+                                code="NO_SEQUENCE_CONTEXT",
+                                evidence_index=evidence_index,
+                            )
                         )
                 continue
 
@@ -386,6 +410,61 @@ def extract_inline_sequences(
                 )
             )
     return records
+
+
+def _raw_letter_mention(
+    *,
+    run: str,
+    document_id: str,
+    parser_run_id: str,
+    block: dict[str, Any],
+    block_id: str,
+    page_number: int,
+    m_start: int,
+    m_end: int,
+    text: str,
+    code: str,
+    evidence_index: Any | None,
+) -> Any:
+    """Typed RawMention with real evidence (plan B05 — not a bare dict)."""
+
+    import hashlib
+
+    from bio_pdf.contracts.extraction import RawMention
+
+    evidence_id = f"{document_id}:p{page_number}:inline:{block_id}:{m_start}"
+    if evidence_index is not None:
+        from bio_pdf.extract.evidence import BlockRef, span_from_block_match
+
+        try:
+            span = span_from_block_match(
+                BlockRef(
+                    document_id=document_id,
+                    parser_run_id=parser_run_id,
+                    block_id=block_id,
+                    page_number=page_number,
+                    bbox=tuple(block["bbox"]) if block.get("bbox") else None,
+                    source_parser=str(block.get("source_parser") or "unknown"),
+                    source_artifact_id=block.get("source_artifact_id"),
+                ),
+                text_raw=run,
+                char_start=m_start,
+                char_end=m_end,
+                full_text=text,
+            )
+            evidence_index.add(span)
+            evidence_id = span.evidence_id
+        except Exception:  # noqa: BLE001 - keep the mention with its locator id
+            pass
+
+    digest = hashlib.sha256(f"{document_id}|{evidence_id}".encode("utf-8")).hexdigest()[:16]
+    return RawMention(
+        mention_id=f"rm-{digest}",
+        text=run,
+        role="unclassified_letters",
+        evidence_ids=[evidence_id],
+        reason_codes=[code],
+    )
 
 
 def _looks_like_long_letter_run(text: str) -> bool:

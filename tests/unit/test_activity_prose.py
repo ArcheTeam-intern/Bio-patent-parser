@@ -78,7 +78,7 @@ def test_t07_context_free_run_stays_a_mention() -> None:
     )
     assert records == []
     assert any(d["code"] == "NO_SEQUENCE_CONTEXT" for d in diagnostics)
-    assert mentions and mentions[0]["role"] == "unclassified_letters"
+    assert mentions and mentions[0].role == "unclassified_letters"
 
 
 def test_t07_digit_in_run_is_an_unresolved_position() -> None:
@@ -141,13 +141,13 @@ def test_t08_plus_minus_is_not_truncated() -> None:
 def test_t08_treatment_dose_is_a_condition_not_a_result() -> None:
     records, mentions = _prose("cells were treated with 20 uM peptide A for 2 h")
     assert records == []
-    assert any(m["role"] == "condition" for m in mentions)
+    assert any(m.role == "condition" for m in mentions)
 
 
 def test_t08_confidence_interval_is_a_statistic() -> None:
     records, mentions = _prose("The 95% confidence interval was computed.")
     assert records == []
-    assert any(m["role"] == "statistic" for m in mentions)
+    assert any(m.role == "statistic" for m in mentions)
 
 
 def test_t08_viability_result_is_kept() -> None:

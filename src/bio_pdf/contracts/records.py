@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, model_validator
 
 from bio_pdf.contracts.common import (
     BoundingBox,
@@ -239,6 +239,11 @@ class ActivityValue(_StrictModel):
     ``kind`` discriminates how ``number``/``lower``/``upper``/``uncertainty``
     are interpreted. ``raw`` always retains the original string from the
     source so reviewers can audit the parse.
+
+    Structural invariants (plan B05) are enforced on construction:
+    numbers are finite decimals, a range has ``lower <= upper``,
+    ``uncertainty >= 0``, and fields from other branches must stay empty
+    (no scalar carrying range fields, no categorical with a number).
     """
 
     kind: Literal["scalar", "range", "plus_minus", "categorical", "unparsed"]
@@ -249,6 +254,52 @@ class ActivityValue(_StrictModel):
     uncertainty: str | None = None
     qualifier: NonEmptyStr | None = None
     raw: NonEmptyStr
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> "ActivityValue":
+        from decimal import Decimal, InvalidOperation
+
+        def dec(name: str, text: str | None) -> Decimal | None:
+            if text is None:
+                return None
+            try:
+                value = Decimal(text)
+            except InvalidOperation as exc:
+                raise ValueError(f"{name}={text!r} is not a decimal") from exc
+            if not value.is_finite():
+                raise ValueError(f"{name}={text!r} is not finite")
+            return value
+
+        number = dec("number", self.number)
+        lower = dec("lower", self.lower)
+        upper = dec("upper", self.upper)
+        uncertainty = dec("uncertainty", self.uncertainty)
+
+        if self.kind == "range":
+            if lower is None or upper is None:
+                raise ValueError("range requires lower and upper")
+            if lower > upper:
+                raise ValueError(f"range lower {self.lower} > upper {self.upper}")
+            if self.number is not None or uncertainty is not None:
+                raise ValueError("range must not carry number/uncertainty")
+        elif self.kind == "plus_minus":
+            if number is None or uncertainty is None:
+                raise ValueError("plus_minus requires number and uncertainty")
+            if uncertainty < 0:
+                raise ValueError("uncertainty must be >= 0")
+            if lower is not None or upper is not None:
+                raise ValueError("plus_minus must not carry range fields")
+        elif self.kind == "scalar":
+            if number is None:
+                raise ValueError("scalar requires number")
+            if lower is not None or upper is not None or uncertainty is not None:
+                raise ValueError("scalar must not carry range/uncertainty fields")
+        elif self.kind == "categorical":
+            if self.qualifier is None:
+                raise ValueError("categorical requires qualifier")
+            if number is not None or lower is not None or upper is not None:
+                raise ValueError("categorical must not carry numeric fields")
+        return self
 
 
 class Measurement(_StrictModel):

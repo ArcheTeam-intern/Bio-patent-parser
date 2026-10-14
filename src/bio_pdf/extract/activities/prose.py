@@ -17,7 +17,11 @@ import re
 from typing import Any
 
 from bio_pdf.contracts import Measurement
-from bio_pdf.extract.activities.mentions import classify_mention_role
+from bio_pdf.extract.activities.mentions import (
+    classify_mention_role,
+    clause_for,
+    resolve_percent_metric,
+)
 from bio_pdf.extract.activities.values import normalize_unit, parse_activity_value
 from bio_pdf.extract.relations import classify_evidence_kind
 
@@ -64,6 +68,32 @@ def _metric_before(text: str, start: int) -> str | None:
 #: A leading operator directly followed by a ± or range expression is
 #: sentence context ("IC50 = 1.2 ± 0.3"), not a value comparator.
 _PROSE_OP_PREFIX_RE = re.compile(r"^(<=|>=|<|>|=|~|≤|≥)\s*(.+)$")
+
+
+#: Word comparators → contract symbols (plan B05: "less than" in a
+#: RESULTS sentence is a value comparison, not a patent claim).
+_WORD_OPERATORS: list[tuple[str, str]] = [
+    ("no more than", "<="),
+    ("no less than", ">="),
+    ("less than", "<"),
+    ("fewer than", "<"),
+    ("greater than", ">"),
+    ("more than", ">"),
+    ("higher than", ">"),
+    ("at least", ">="),
+    ("at most", "<="),
+    ("up to", "<="),
+]
+
+
+def _word_operator_before(text: str, pos: int, *, window: int = 24) -> tuple[str, str] | None:
+    """Return (symbol, raw_words) for a word comparator right before pos."""
+
+    prefix = text[max(0, pos - window):pos].lower()
+    for words, symbol in _WORD_OPERATORS:
+        if words in prefix:
+            return symbol, words
+    return None
 
 
 def _strip_prose_operator(expr: str) -> str:
@@ -117,8 +147,19 @@ def extract_prose_measurements(
             unit_raw = m.group("unit")
             value = parse_activity_value(expr)
             unit_normalized = normalize_unit(unit_raw)
-            metric = _metric_before(text, m.start()) or "unknown"
 
+            # Word comparator ("less than 10 µM") → operator, with the
+            # word→symbol transformation recorded as provenance.
+            operator_source: str | None = None
+            if value.kind == "scalar" and value.operator is None:
+                word_op = _word_operator_before(text, m.start("expr"))
+                if word_op is not None:
+                    symbol, words = word_op
+                    value = value.model_copy(update={"operator": symbol})
+                    operator_source = words
+
+            # Register the span up front: EVERY mention (result, condition,
+            # statistic …) carries real evidence (plan B05).
             if evidence_index is not None:
                 span = span_from_block_match(
                     BlockRef(
@@ -145,34 +186,51 @@ def extract_prose_measurements(
                 evidence_index.add(span)
                 evidence_id = span.evidence_id
             else:
-                # Legacy path (unit tests / pre-T06 callers).
                 evidence_id = f"{document_id}:p{page_number}:prose:{idx}:{m.start()}"
 
-            # Role gating (plan T08): metadata/statistic/condition mentions
-            # are NOT activity results. They are kept as RawMentions with
-            # their role and reasons, never silently promoted to a value.
-            window_text, _ws, _we = _sentence_for(text, m.start(), m.end())
-            role = classify_mention_role(window_text)
-            if role.role in ("metadata", "statistic", "condition"):
+            # B05: role is judged from the mention's LOCAL CLAUSE (plus the
+            # sentence for claim context) — a dose in one clause no longer
+            # kills a result in the next, and "Figure 1"/"(mean ± SD)" are
+            # not vetoes.
+            sentence, sent_start, _sent_end = _sentence_for(text, m.start(), m.end())
+            clause, clause_start = clause_for(sentence, m.start() - sent_start, m.end() - sent_start)
+            role = classify_mention_role(clause, sentence)
+
+            # Metric resolution: registered keyword near the value, or a
+            # canonical percent metric from the clause.
+            metric, metric_raw = _resolve_metric(
+                sentence, m.start() - sent_start, unit_raw, clause
+            )
+
+            claim_here = role.role == "claim" or classify_evidence_kind(text) == "claim_threshold"
+
+            keep_as_measurement = (
+                role.role in ("result", "undetermined")
+                and not claim_here
+                and metric is not None
+            )
+            if claim_here and metric is not None:
+                keep_as_measurement = True  # claim-threshold rows stay visible
+
+            if not keep_as_measurement:
                 if raw_mentions is not None:
+                    reason = list(role.reasons)
+                    if metric is None and role.role in ("result", "undetermined"):
+                        reason.append("no recognized metric")
                     raw_mentions.append(
-                        {
-                            "text": m.group(0),
-                            "role": role.role,
-                            "reasons": role.reasons,
-                            "page": page_number,
-                            "block_id": block_id,
-                            "char_start": m.start(),
-                        }
+                        _make_mention(
+                            text=m.group(0),
+                            role=role.role if metric is None and role.role == "undetermined" else role.role,
+                            evidence_id=evidence_id,
+                            reason_codes=reason,
+                            document_id=document_id,
+                        )
                     )
                 continue
 
-            # A prose sentence stating a claim threshold ("claims … less
-            # than …") is not a measured value.
-            if role.role == "claim" or classify_evidence_kind(text) == "claim_threshold":
-                evidence_kind = "claim_threshold"
-            else:
-                evidence_kind = "general_statement"
+            evidence_kind = (
+                "claim_threshold" if claim_here else "general_statement"
+            )
 
             measurements.append(
                 Measurement(
@@ -182,11 +240,16 @@ def extract_prose_measurements(
                     sequence_ids=[],
                     assay_id=None,
                     metric=metric,
+                    metric_raw=metric_raw,
                     value=value,
                     unit_raw=unit_raw,
                     unit_normalized=unit_normalized,
                     target_raw=None,
-                    conditions=[],
+                    conditions=(
+                        [{"key": "operator_source", "value_raw": operator_source}]
+                        if operator_source
+                        else []
+                    ),
                     evidence_kind=evidence_kind,  # type: ignore[arg-type]
                     field_evidence={"value": [evidence_id]},
                     evidence_ids=[evidence_id],
@@ -196,6 +259,73 @@ def extract_prose_measurements(
                 )
             )
     return measurements
+
+
+def _resolve_metric(
+    sentence: str,
+    offset_in_sentence: int,
+    unit_raw: str | None,
+    clause: str,
+) -> tuple[str | None, str | None]:
+    """Resolve the canonical metric for a mention.
+
+    Order: a registered keyword immediately before the value ("MIC of … was
+    <10 µM", "IC50 of 5 nM"), else a canonical percent metric from the
+    clause ("viability to 5%"). Unknown stays None — the caller keeps a
+    typed mention instead of an ``unknown`` Measurement.
+    """
+
+    from bio_pdf.extract.activities.metrics import lookup_metric
+
+    keyword = _metric_before(sentence, offset_in_sentence)
+    if keyword:
+        hit = lookup_metric(keyword)
+        if hit is not None:
+            canonical, raw = hit
+            return canonical, raw or keyword
+        return keyword, keyword  # e.g. KD normalized by the registry alias map
+
+    if unit_raw == "%":
+        percent_metric = resolve_percent_metric(clause) or resolve_percent_metric(sentence)
+        if percent_metric:
+            return percent_metric, None
+        return None, None
+
+    # Fall back to any registered metric word in the same clause
+    # ("…viability of 5%" style handled above; MIC/IC50 mid-clause here).
+    words = re.findall(r"[A-Za-z][A-Za-z0-9₅₀]{1,9}", clause)
+    for word in words:
+        hit = lookup_metric(word)
+        if hit is not None:
+            canonical, raw = hit
+            return canonical, raw or word
+    return None, None
+
+
+def _make_mention(
+    *,
+    text: str,
+    role: str,
+    evidence_id: str,
+    reason_codes: list[str],
+    document_id: str,
+):
+    """Typed RawMention contract object (plan B05 — not a bare dict)."""
+
+    import hashlib
+
+    from bio_pdf.contracts.extraction import RawMention
+
+    digest = hashlib.sha256(
+        f"{document_id}|{evidence_id}".encode("utf-8")
+    ).hexdigest()[:16]
+    return RawMention(
+        mention_id=f"rm-{digest}",
+        text=text,
+        role=role,
+        evidence_ids=[evidence_id],
+        reason_codes=reason_codes or ["role_undetermined"],
+    )
 
 
 __all__ = ["extract_prose_measurements"]
