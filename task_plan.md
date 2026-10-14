@@ -46,3 +46,14 @@ Research, source acquisition, and design only. Implementation and performance be
 - [complete] 前端WorkerHint横幅（JobsPage/工作台）：无在线worker且存在排队/运行任务时显示启动命令，worker上线自动消失。
 - [complete] 修正get_settings忽略create_app注入设置（请求此前回落data/demo默认值）。
 - [complete] 真实验证横幅出现/消失与任务启动；431 passed、web build通过。
+
+## 上传失败与页码联动（用户反馈）
+- [complete] 查明失败哈希对应 HTML 专利网页；归档三个伪 PDF，补充两个真正 B1 PDF 并通过上传接口。
+- [complete] 上传提示包含实际格式与原始文件名；前端内容预检和错误清理。
+- [complete] 统一 URL/PDF/结果页码，默认当前页筛选，全文切换，真实证据页映射，手动翻页取消旧证据。
+- [complete] PDF 适合宽度、证据自动滚入视野、标签与网格布局修正；构建及真实浏览器核对，报告见 reports/2026-10-14_frontend_upload_page_sync.md。
+
+## 前端收尾验收（按 2026-10-14-frontend-acceptance-and-commit.md 执行）
+- [complete] 阶段A：A1–A16 逐页浏览器验收（真实 API/制品）。A12 失败（运行详情为静态占位），其余 pass；A15 序列 typed patch 按设计不可用已如实记录。
+- [complete] 阶段B：B1 BOM 分类；B2 record_pages 降级；B3/B4 records/上传测试；B5 useEvidence+Navigator 测试；B6 查询键共享；B7 运行详情真实数据（JobResponse 暴露 engine/config_hash）；B8 状态标签一致；B9 序列隐藏修正按钮。
+- [complete] 阶段C：446 passed / vitest 14 passed / build 通过；服务重启复核；提交 c49124c、285a3cf 及本文件与报告；验收记录见 reports/2026-10-14_frontend_upload_page_sync.md。

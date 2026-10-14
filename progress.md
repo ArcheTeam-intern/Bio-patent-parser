@@ -196,3 +196,9 @@
 - 同时修正API依赖get_settings一直忽略create_app注入设置的问题（请求此前回落到环境默认data/demo）。
 - 真实验证：停止worker→新任务job-b6e0ef8e9d92排队并显示横幅与命令；启动worker→横幅自动消失、任务被领取并完成（2条待审核）。全量431 passed、web build通过。
 
+
+### 前端逐页验收与收尾修复（提交 c49124c / 285a3cf）
+- 按批准方案执行 A1–A16 逐页实测：页码联动/范围切换/URL恢复/证据高亮/导出闭环/审核决定(含409)/扫描件表格与问题全部通过；发现并修复三处：运行详情原是静态占位（现为引擎+配置哈希+阶段表+21条制品清单真实渲染）、序列记录暴露了服务端必然拒绝的“修正并确认”按钮（现隐藏并说明需重新提取）、succeeded_with_review 在0条待审核时仍显示“待审核”。
+- 补齐上轮缺口：inspector BOM 归类、record_pages 对缺失 extract 的降级、上传415 details、records 过滤一致性、useEvidence clear/selectionKey、EvidenceNavigator 组件测试。
+- 环境事实：IAB webview 不触发 rAF，pdf.js 渲染需截图驱动帧（测试环境行为，非应用缺陷）；浏览器会缓存旧 bundle，验收新前端需绕过缓存。
+- 446 passed（+15）、vitest 14 passed（+7）、build 通过；服务以新代码运行。
