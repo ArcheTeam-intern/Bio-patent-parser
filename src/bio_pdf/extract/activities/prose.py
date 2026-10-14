@@ -57,6 +57,23 @@ def _metric_before(text: str, start: int) -> str | None:
     return None
 
 
+#: A leading operator directly followed by a ± or range expression is
+#: sentence context ("IC50 = 1.2 ± 0.3"), not a value comparator.
+_PROSE_OP_PREFIX_RE = re.compile(r"^(<=|>=|<|>|=|~|≤|≥)\s*(.+)$")
+
+
+def _strip_prose_operator(expr: str) -> str:
+    """Drop a leading operator when the remainder carries ± or a range.
+
+    ``= 1.2 ± 0.3`` → ``1.2 ± 0.3``; ``>128`` stays (a real comparator).
+    """
+
+    m = _PROSE_OP_PREFIX_RE.match(expr)
+    if m and re.search(r"±|\d\s*(?:-|–|—|~|\bto\b)\s*\d", m.group(2)):
+        return m.group(2).strip()
+    return expr
+
+
 def extract_prose_measurements(
     blocks: list[dict[str, Any]],
     document_id: str,
@@ -81,7 +98,7 @@ def extract_prose_measurements(
             continue
         page_number = int(block.get("page_number", 1))
         for m in _VALUE_UNIT_RE.finditer(text):
-            expr = m.group("expr").strip()
+            expr = _strip_prose_operator(m.group("expr").strip())
             unit_raw = m.group("unit")
             value = parse_activity_value(expr)
             unit_normalized = normalize_unit(unit_raw)
