@@ -132,3 +132,9 @@ class RemoteJobLostError(WorkflowError):
 
 class ReviewRevisionConflictError(WorkflowError):
     code = "REVIEW_REVISION_CONFLICT"
+
+
+class JobRunningError(WorkflowError):
+    """Resume attempted on a job whose lease is still valid (plan T03)."""
+
+    code = "JOB_RUNNING"

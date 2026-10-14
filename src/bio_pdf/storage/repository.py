@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -114,6 +115,13 @@ CREATE TABLE IF NOT EXISTS worker_leases (
     generation    INTEGER NOT NULL DEFAULT 1
 );
 
+-- Monotonic per-job generation counter; survives lease deletion so a
+-- recycled claim can never reuse generation=1 (plan T03 fencing).
+CREATE TABLE IF NOT EXISTS lease_counters (
+    job_id          TEXT PRIMARY KEY REFERENCES jobs(job_id),
+    last_generation INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS record_versions (
     job_id        TEXT NOT NULL REFERENCES jobs(job_id),
     record_id     TEXT NOT NULL,
@@ -154,6 +162,21 @@ CREATE TABLE IF NOT EXISTS exports (
 
 def _utcnow_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class ClaimedJob:
+    """A job claim with fencing identity (plan T03).
+
+    ``generation`` must flow into every heartbeat, stage commit, status
+    write and release: an old-generation worker can never overwrite a
+    newer one's results.
+    """
+
+    job: "Job"
+    worker_id: str
+    generation: int
+    lease_until: str
 
 
 def _connect(database: Path | str) -> sqlite3.Connection:
@@ -460,15 +483,18 @@ class Repository:
 
     def claim_next_queued_job(
         self, *, worker_id: str, lease_seconds: float = 600.0
-    ) -> Job | None:
-        """Atomically claim the oldest queued job with a fresh lease.
+    ) -> "ClaimedJob | None":
+        """Atomically claim the oldest runnable job with a fenced lease.
 
-        The claim (SELECT → INSERT lease → UPDATE status) runs inside one
-        transaction; SQLite serialises writers so two workers can never
-        claim the same job. Expired leases from crashed workers are
-        reclaimable: a queued job always wins, then a running job whose
-        lease has lapsed is re-claimed with a bumped generation.
+        The claim (SELECT → bump counter → INSERT lease → UPDATE status)
+        runs inside one transaction; SQLite serialises writers so two
+        workers can never claim the same job. The generation comes from a
+        persistent ``lease_counters`` row and increases monotonically per
+        job — a recycled claim after a crash never reuses generation=1, so
+        a stale worker's writes can be fenced out.
         """
+
+        from datetime import datetime, timedelta, timezone
 
         conn = self._conn
         conn.execute("BEGIN IMMEDIATE")
@@ -490,14 +516,16 @@ class Repository:
                 return None
             job_id = row["job_id"]
 
-            generation = 1
-            prev = conn.execute(
-                "SELECT generation FROM worker_leases WHERE job_id = ?", (job_id,)
+            conn.execute(
+                "INSERT INTO lease_counters (job_id, last_generation) VALUES (?, 1) "
+                "ON CONFLICT(job_id) DO UPDATE SET last_generation = last_generation + 1",
+                (job_id,),
+            )
+            counter = conn.execute(
+                "SELECT last_generation FROM lease_counters WHERE job_id = ?",
+                (job_id,),
             ).fetchone()
-            if prev is not None:
-                generation = int(prev["generation"]) + 1
-
-            from datetime import datetime, timedelta, timezone
+            generation = int(counter["last_generation"])
 
             lease_until = (
                 datetime.now(tz=timezone.utc) + timedelta(seconds=lease_seconds)
@@ -524,27 +552,61 @@ class Repository:
             raise
         job = self.get_job(job_id)
         assert job is not None
-        return job
+        return ClaimedJob(
+            job=job,
+            worker_id=worker_id,
+            generation=generation,
+            lease_until=lease_until,
+        )
 
-    def heartbeat(self, job_id: str, *, worker_id: str, lease_seconds: float = 600.0) -> None:
+    def heartbeat(
+        self,
+        job_id: str,
+        *,
+        worker_id: str,
+        generation: int,
+        lease_seconds: float = 600.0,
+    ) -> bool:
+        """Extend the lease if (and only if) this worker still owns it.
+
+        Returns False when the rowcount is not 1 — the caller has lost the
+        lease (fencing) and must stop writing.
+        """
+
         from datetime import datetime, timedelta, timezone
 
         lease_until = (
             datetime.now(tz=timezone.utc) + timedelta(seconds=lease_seconds)
         ).isoformat()
-        self._conn.execute(
+        cursor = self._conn.execute(
             """
             UPDATE worker_leases
             SET heartbeat_at = ?, lease_until = ?
-            WHERE job_id = ? AND worker_id = ?
+            WHERE job_id = ? AND worker_id = ? AND generation = ?
             """,
-            (_utcnow_iso(), lease_until, job_id, worker_id),
+            (_utcnow_iso(), lease_until, job_id, worker_id, generation),
+        )
+        return cursor.rowcount == 1
+
+    def lease_is_valid(
+        self, job_id: str, *, worker_id: str, generation: int
+    ) -> bool:
+        """Fencing check: does this worker/generation still hold the job?"""
+
+        row = self._conn.execute(
+            "SELECT worker_id, generation FROM worker_leases WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        return (
+            row is not None
+            and row["worker_id"] == worker_id
+            and int(row["generation"]) == generation
         )
 
-    def release_lease(self, job_id: str, *, worker_id: str) -> None:
+    def release_lease(self, job_id: str, *, worker_id: str, generation: int) -> None:
         self._conn.execute(
-            "DELETE FROM worker_leases WHERE job_id = ? AND worker_id = ?",
-            (job_id, worker_id),
+            "DELETE FROM worker_leases WHERE job_id = ? AND worker_id = ? AND generation = ?",
+            (job_id, worker_id, generation),
         )
 
     # ---- exports ----------------------------------------------------------
@@ -709,6 +771,8 @@ class Repository:
         return out
 
     def upsert_review_item(self, item: ReviewItem) -> None:
+        # Idempotent vs. resolved: re-deriving the same baseline plan must
+        # never reopen an item a human already decided (plan T03).
         self._conn.execute(
             """
             INSERT INTO review_items (review_id, job_id, record_id, record_revision,
@@ -720,9 +784,9 @@ class Repository:
                 record_id = excluded.record_id,
                 record_revision = excluded.record_revision,
                 reason_codes_json = excluded.reason_codes_json,
-                status = excluded.status,
                 evidence_ids_json = excluded.evidence_ids_json,
                 proposed_actions_json = excluded.proposed_actions_json
+            WHERE review_items.status != 'resolved'
             """,
             (
                 item.review_id,

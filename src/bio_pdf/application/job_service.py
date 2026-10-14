@@ -9,6 +9,7 @@ is wired exactly once (review finding 2).
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,7 @@ from typing import Any
 
 from bio_pdf.contracts import Job, ReviewItem
 from bio_pdf.config import WorkflowConfig, load_workflow_config
-from bio_pdf.errors import PageRangeInvalidError, WorkflowError
+from bio_pdf.errors import JobRunningError, PageRangeInvalidError, WorkflowError
 from bio_pdf.ingest.inspector import inspect_pdf
 from bio_pdf.storage.artifacts import make_cache_key
 from bio_pdf.storage.repository import Repository
@@ -174,8 +175,18 @@ class JobService:
         self._repository.set_job_config(job.job_id, effective)
         return job, inspection.page_count
 
-    def run_job(self, job_id: str, *, resume: bool = False) -> RunResult:
-        """Run (or resume) a job through the full production pipeline."""
+    def run_job(
+        self,
+        job_id: str,
+        *,
+        resume: bool = False,
+        lease_guard: Callable[[], bool] | None = None,
+    ) -> RunResult:
+        """Run (or resume) a job through the full production pipeline.
+
+        ``lease_guard`` (plan T03) is checked before every stage and before
+        publishing; returning False aborts the run without writing status.
+        """
 
         job = self._repository.get_job(job_id)
         if job is None:
@@ -192,7 +203,7 @@ class JobService:
 
         config = self.job_config(job_id)
         effective = effective_workflow_config(config)
-        runner = self._build_runner(effective)
+        runner = self._build_runner(effective, lease_guard=lease_guard)
         self._repository.update_job_status(job_id, "running", current_stage=None)
         result = runner.run(
             job,
@@ -202,6 +213,34 @@ class JobService:
             options=self.job_options(job, config),
         )
         return result
+
+    def requeue_resume(self, job_id: str) -> None:
+        """Persist the resume intent and requeue the job (plan T03).
+
+        A running job with a VALID lease refuses (JOB_RUNNING) — resetting
+        it to queued would let a second worker double-claim. An expired
+        lease (crashed worker) may be requeued; the reclaim bumps the
+        generation and the worker resumes from verified cache.
+        """
+
+        job = self._repository.get_job(job_id)
+        if job is None:
+            raise WorkflowError(f"job not found: {job_id}", details={"job_id": job_id})
+        if job.status == "running":
+            row = self._repository.connection.execute(
+                "SELECT lease_until FROM worker_leases WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            lease_until = row["lease_until"] if row else None
+            if lease_until and lease_until > datetime.now(tz=timezone.utc).isoformat():
+                raise JobRunningError(
+                    "job is running and its lease is still valid",
+                    details={"job_id": job_id, "lease_until": lease_until},
+                )
+        config = self.job_config(job_id)
+        config["execution_mode"] = "resume"
+        self._repository.set_job_config(job_id, config)
+        self._repository.update_job_status(job_id, "queued")
 
     # ---- queries ---------------------------------------------------------
 
@@ -266,12 +305,18 @@ class JobService:
 
     # ---- internals -------------------------------------------------------
 
-    def _build_runner(self, effective: WorkflowConfig | None = None) -> WorkflowRunner:
+    def _build_runner(
+        self,
+        effective: WorkflowConfig | None = None,
+        *,
+        lease_guard: Callable[[], bool] | None = None,
+    ) -> WorkflowRunner:
         runner = WorkflowRunner(
             self._repository,
             self.paths.artifact_root,
             required_stages=STAGE_ORDER,
             workflow_config=effective,
+            lease_guard=lease_guard,
         )
         for handler in build_production_handlers():
             runner.register(handler)

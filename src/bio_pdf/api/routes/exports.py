@@ -10,10 +10,14 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from bio_pdf.api.dependencies import ServiceDep
+from bio_pdf.api.dependencies import (
+    ServiceDep,
+    get_service_factory,
+    open_background_service,
+)
 from bio_pdf.application.export_service import FORMATS, ExportService
 from bio_pdf.errors import WorkflowError
 from fastapi.responses import FileResponse
@@ -39,18 +43,26 @@ def _export_response(row) -> dict:
     }
 
 
-def _run_export(service, export_id: str, job_id: str, fmt: str, accepted_only: bool) -> None:
-    export_svc = ExportService(service.repository, service.paths.artifact_root)
-    try:
-        service.repository.update_export(export_id, status="running")
-        rel, count = export_svc.build(job_id, fmt, accepted_only=accepted_only)
-        service.repository.update_export(
-            export_id, status="completed", artifact_rel=rel, record_count=count
-        )
-    except WorkflowError as exc:
-        service.repository.update_export(export_id, status="failed", error=exc.message)
-    except Exception as exc:  # noqa: BLE001 - export failure is recorded, not raised
-        service.repository.update_export(export_id, status="failed", error=str(exc))
+def _make_background_runner(factory, export_id: str, job_id: str, fmt: str, accepted_only: bool):
+    """Build a closure that runs with its OWN connection (plan T03)."""
+
+    def _run() -> None:
+        service = open_background_service(factory)
+        try:
+            export_svc = ExportService(service.repository, service.paths.artifact_root)
+            service.repository.update_export(export_id, status="running")
+            rel, count = export_svc.build(job_id, fmt, accepted_only=accepted_only)
+            service.repository.update_export(
+                export_id, status="completed", artifact_rel=rel, record_count=count
+            )
+        except WorkflowError as exc:
+            service.repository.update_export(export_id, status="failed", error=exc.message)
+        except Exception as exc:  # noqa: BLE001 - export failure is recorded, not raised
+            service.repository.update_export(export_id, status="failed", error=str(exc))
+        finally:
+            service.close()
+
+    return _run
 
 
 @router.post("/jobs/{job_id}/exports", status_code=202)
@@ -59,6 +71,7 @@ def create_export(
     request: ExportCreateRequest,
     background: BackgroundTasks,
     service: ServiceDep,
+    factory=Depends(get_service_factory),
 ) -> dict:
     if service.get_job(job_id) is None:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
@@ -74,7 +87,9 @@ def create_export(
         result_revision=job.result_revision,
         accepted_only=request.accepted_only,
     )
-    background.add_task(_run_export, service, export_id, job_id, request.format, request.accepted_only)
+    background.add_task(
+        _make_background_runner(factory, export_id, job_id, request.format, request.accepted_only)
+    )
     return {
         "api_version": "v1",
         "export_id": export_id,

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,13 +82,20 @@ class WorkflowRunner:
         max_attempts: int = 2,
         required_stages: tuple[str, ...] = (),
         workflow_config: WorkflowConfig | None = None,
+        lease_guard: Callable[[], bool] | None = None,
     ) -> None:
         self.repository = repository
         self.artifact_root = artifact_root
         self.max_attempts = max_attempts
         self.required_stages = required_stages
         self.workflow_config = workflow_config
+        #: Fencing hook (plan T03): when it returns False the worker lost
+        #: its lease and the run aborts without publishing.
+        self.lease_guard = lease_guard
         self._handlers: dict[str, StageHandler] = {}
+
+    def _lease_ok(self) -> bool:
+        return self.lease_guard is None or self.lease_guard()
 
     def register(self, handler: StageHandler) -> None:
         if handler.name not in STAGE_ORDER:
@@ -236,6 +244,17 @@ class WorkflowRunner:
                 stages_skipped.append(stage_name)
                 continue
 
+            if not self._lease_ok():
+                # Lease lost (fenced): abort without touching status or
+                # publishing. The new owner owns the job from here.
+                return RunResult(
+                    job_id=job.job_id,
+                    status="fenced",
+                    stages_run=stages_run,
+                    review_count=review_total,
+                    failed_stage=stage_name,
+                )
+
             inputs = self._inputs_for(handler.name, available_inputs)
             context = self._context(
                 job, source_path, page_numbers, options, stage_name, "", inputs
@@ -282,6 +301,14 @@ class WorkflowRunner:
         # Coverage: the produced pages must cover the requested set. A
         # partial parse never reports success.
         self._verify_coverage(job.job_id, page_numbers)
+
+        if not self._lease_ok():
+            return RunResult(
+                job_id=job.job_id,
+                status="fenced",
+                stages_run=stages_run,
+                review_count=review_total,
+            )
 
         final_status = self._final_status(job.job_id, review_total)
         self.repository.update_job_status(job.job_id, final_status, current_stage=None)

@@ -12,7 +12,7 @@ from bio_pdf.api.contracts import (
     StageRunView,
 )
 from bio_pdf.api.dependencies import ServiceDep, workflow_error_to_http
-from bio_pdf.errors import WorkflowError
+from bio_pdf.errors import JobRunningError, WorkflowError
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -147,18 +147,30 @@ def get_stages(service: ServiceDep, job_id: str) -> list[StageRunView]:
     ]
 
 
-@router.post("/{job_id}/resume", response_model=JobResponse, status_code=202)
-def resume_job(service: ServiceDep, job_id: str) -> JobResponse:
+@router.post("/{job_id}/resume", status_code=202)
+def resume_job(service: ServiceDep, job_id: str) -> dict:
     job = service.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
     if job.status not in ("failed", "running", "queued"):
         # A fully succeeded job simply returns its current state.
         return _job_response(service, job)
-    # Requeue for the worker; the runner's resume path verifies artifact
-    # hashes before trusting any cached stage.
-    service.repository.update_job_status(job_id, "queued")
-    return _job_response(service, service.get_job(job_id))
+    try:
+        # T03: a running job with a valid lease refuses (409 JOB_RUNNING);
+        # otherwise the resume intent is persisted and the job requeued.
+        service.requeue_resume(job_id)
+    except JobRunningError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, "details": exc.details},
+        ) from exc
+    except WorkflowError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": exc.message, "details": exc.details},
+        ) from exc
+    response = _job_response(service, service.get_job(job_id))
+    return {**response.model_dump(mode="json"), "execution_mode": "resume"}
 
 
 def _resolved_source_path(raw: str) -> object:

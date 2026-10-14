@@ -1,14 +1,17 @@
-"""FastAPI dependency wiring.
+"""FastAPI dependency wiring (plan T03: per-request SQLite connections).
 
-Every request that needs the application service gets a process-local
-:class:`JobService` (one SQLite connection per process — never handed to
-another process). The service is created lazily and closed on shutdown.
+The app stores a service *factory*; every request (and every background
+task) creates its own :class:`JobService` with its own connection and
+closes it when done. Sharing one connection across requests/threads let
+concurrent transactions join each other — ``check_same_thread=False`` does
+not isolate BEGIN/COMMIT.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Callable
 
 from fastapi import Depends, HTTPException, Request
 
@@ -26,13 +29,31 @@ def get_settings() -> ApiSettings:
     return _get_settings()
 
 
-def get_job_service(request: Request) -> JobService:
-    """Return the process-local application service stored on app.state."""
-
-    service: JobService | None = getattr(request.app.state, "job_service", None)
-    if service is None:
+def get_service_factory(request: Request) -> Callable[[], JobService]:
+    factory: Callable[[], JobService] | None = getattr(
+        request.app.state, "service_factory", None
+    )
+    if factory is None:
         raise HTTPException(status_code=503, detail="application service not ready")
-    return service
+    return factory
+
+
+def get_job_service(
+    factory: Annotated[Callable[[], JobService], Depends(get_service_factory)],
+) -> Iterator[JobService]:
+    """One JobService (one SQLite connection) per request."""
+
+    service = factory()
+    try:
+        yield service
+    finally:
+        service.close()
+
+
+def open_background_service(factory: Callable[[], JobService]) -> JobService:
+    """Open a dedicated service for a background task (own connection)."""
+
+    return factory()
 
 
 ServiceDep = Annotated[JobService, Depends(get_job_service)]
@@ -50,7 +71,9 @@ def workflow_error_to_http(exc: WorkflowError, status_code: int = 400) -> HTTPEx
 
 __all__ = [
     "get_settings",
+    "get_service_factory",
     "get_job_service",
+    "open_background_service",
     "ServiceDep",
     "SettingsDep",
     "workflow_error_to_http",

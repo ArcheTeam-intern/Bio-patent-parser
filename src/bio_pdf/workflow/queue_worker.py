@@ -1,17 +1,13 @@
-"""Persistent single-concurrency worker.
+"""Persistent single-concurrency worker with fenced leases (plan T03).
 
-The worker is a separate process from the API. It claims queued jobs
-through short SQLite transactions (never holding a transaction across
-model execution), runs the full production pipeline via
-:class:`~bio_pdf.application.job_service.JobService`, and heartbeats a
-lease so a crashed worker's job becomes claimable again after the lease
-expires. Old-generation results can never clobber a newer run because the
-runner only switches the job status at the end and artifacts are
-content-addressed.
-
-Run it with::
-
-    python -m bio_pdf.workflow.queue_worker --data-dir data/demo
+- Claims return a :class:`ClaimedJob` carrying ``worker_id``/``generation``;
+  every heartbeat, stage gate and release is fenced by that identity.
+- A background heartbeat thread (its OWN SQLite connection — never shared
+  across threads) extends the lease every 30 s. Losing the lease sets a
+  stop flag checked before every stage; the runner aborts without
+  publishing.
+- Resume intent is persisted in the job config (``execution_mode``), so a
+  crash + reclaim resumes from verified cache while a first run does not.
 """
 
 from __future__ import annotations
@@ -19,20 +15,54 @@ from __future__ import annotations
 import argparse
 import socket
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from bio_pdf.application.job_service import JobPaths, JobService
 from bio_pdf.errors import WorkflowError
+from bio_pdf.storage.repository import ClaimedJob
 
-#: Lease duration; the worker heartbeats at half this interval.
+#: Lease duration; the worker heartbeats at one fifth of this interval.
 LEASE_SECONDS = 900.0
+HEARTBEAT_INTERVAL = LEASE_SECONDS / 5
 
 
 def _worker_id() -> str:
     stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d%H%M%S")
     return f"worker-{socket.gethostname()}-{stamp}"
+
+
+class _LeaseKeeper:
+    """Owns its own SQLite connection; stops on lost lease."""
+
+    def __init__(self, data_dir: Path, claimed: ClaimedJob) -> None:
+        self._repo = JobService(JobPaths.under(data_dir)).repository
+        self.claimed = claimed
+        self.lost = threading.Event()
+        self._stop = threading.Event()
+
+    def _loop(self) -> None:
+        while not self._stop.wait(HEARTBEAT_INTERVAL):
+            ok = self._repo.heartbeat(
+                self.claimed.job.job_id,
+                worker_id=self.claimed.worker_id,
+                generation=self.claimed.generation,
+                lease_seconds=LEASE_SECONDS,
+            )
+            if not ok:
+                self.lost.set()
+                return
+
+    def start(self) -> None:
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def close(self) -> None:
+        self._repo.close()
 
 
 def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False) -> int:
@@ -43,18 +73,31 @@ def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False
     print(f"[queue_worker] {worker_id} polling {data_dir}", flush=True)
     try:
         while True:
-            job = service.repository.claim_next_queued_job(
+            claimed = service.repository.claim_next_queued_job(
                 worker_id=worker_id, lease_seconds=LEASE_SECONDS
             )
-            if job is None:
+            if claimed is None:
                 if once:
                     return 0
                 time.sleep(poll_interval)
                 continue
 
-            print(f"[queue_worker] claimed {job.job_id}", flush=True)
+            job = claimed.job
+            print(
+                f"[queue_worker] claimed {job.job_id} (gen={claimed.generation})",
+                flush=True,
+            )
+            keeper = _LeaseKeeper(data_dir, claimed)
+            keeper.start()
             try:
-                result = service.run_job(job.job_id)
+                resume_mode = service.job_config(job.job_id).get("execution_mode") == "resume"
+                result = service.run_job(
+                    job.job_id,
+                    resume=resume_mode,
+                    # Fencing: the runner aborts before any status write or
+                    # publish once this worker no longer holds the lease.
+                    lease_guard=lambda: not keeper.lost.is_set(),
+                )
                 print(
                     f"[queue_worker] {job.job_id} -> {result.status}"
                     f" (review={result.review_count})",
@@ -64,9 +107,21 @@ def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False
                 print(f"[queue_worker] {job.job_id} failed: {exc}", flush=True)
             except Exception as exc:  # noqa: BLE001 - worker must survive jobs
                 print(f"[queue_worker] {job.job_id} crashed: {exc!r}", flush=True)
-                service.repository.update_job_status(job.job_id, "failed")
+                if keeper.lost.is_set():
+                    print(
+                        f"[queue_worker] {job.job_id} lease lost — writes stopped",
+                        flush=True,
+                    )
+                else:
+                    service.repository.update_job_status(job.job_id, "failed")
             finally:
-                service.repository.release_lease(job.job_id, worker_id=worker_id)
+                keeper.stop()
+                service.repository.release_lease(
+                    job.job_id,
+                    worker_id=claimed.worker_id,
+                    generation=claimed.generation,
+                )
+                keeper.close()
             if once:
                 return 0
     except KeyboardInterrupt:

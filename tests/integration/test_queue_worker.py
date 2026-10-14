@@ -52,7 +52,7 @@ def test_expired_lease_is_reclaimable(service) -> None:
 
     # Simulate a crashed worker: claim, then force the lease into the past.
     claimed = svc.repository.claim_next_queued_job(worker_id="crashed", lease_seconds=900)
-    assert claimed is not None and claimed.job_id == job.job_id
+    assert claimed is not None and claimed.job.job_id == job.job_id
     svc.repository.connection.execute(
         "UPDATE worker_leases SET lease_until = ? WHERE job_id = ?",
         ("2000-01-01T00:00:00+00:00", job.job_id),
@@ -72,6 +72,6 @@ def test_fresh_claim_beats_expired_lease_ordering(service) -> None:
     second, _ = svc.create_job(_make_pdf(tmp_path))
 
     claimed = svc.repository.claim_next_queued_job(worker_id="w1", lease_seconds=900)
-    assert claimed is not None and claimed.job_id == first.job_id
+    assert claimed is not None and claimed.job.job_id == first.job_id
     # An active lease is not stealable.
-    assert svc.repository.claim_next_queued_job(worker_id="w2", lease_seconds=900).job_id == second.job_id
+    assert svc.repository.claim_next_queued_job(worker_id="w2", lease_seconds=900).job.job_id == second.job_id

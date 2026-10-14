@@ -33,13 +33,13 @@ mimetypes.add_type("text/javascript", ".js")
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     settings: ApiSettings = app.state.settings
-    app.state.job_service = JobService(JobPaths.under(settings.data_dir))
-    try:
-        yield
-    finally:
-        service: JobService | None = getattr(app.state, "job_service", None)
-        if service is not None:
-            service.close()
+    # T03: the app keeps a *factory*, not a shared connection. Each request
+    # (and each background task) opens its own JobService/SQLite connection.
+    def service_factory() -> JobService:
+        return JobService(JobPaths.under(settings.data_dir))
+
+    app.state.service_factory = service_factory
+    yield
 
 
 def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:

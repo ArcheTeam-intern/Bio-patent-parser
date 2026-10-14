@@ -7,6 +7,7 @@ the number of auto-created review items.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from bio_pdf.contracts import ReviewItem
@@ -70,15 +71,19 @@ def build_review_plan(
             break
         record_id = record.get("record_id") or record.get("sequence_id") or record.get("measurement_id")
         job_id = str(record.get("job_id", ""))
-        # review_ids are globally unique: per-job sequence numbers collide
-        # across jobs and would silently merge queue rows.
-        scope = job_id or "unscoped"
+        # Stable, content-derived id: re-deriving the same baseline plan
+        # yields the same ids, so a resumed/re-run job never reopens a
+        # resolved review item (plan T03).
+        revision = int(record.get("record_revision", 1) or 1)
+        digest = hashlib.sha256(
+            f"{job_id}|{record_id}|{revision}".encode("utf-8")
+        ).hexdigest()[:16]
         items.append(
             ReviewItem(
-                review_id=f"review-{scope}-{idx + 1}",
+                review_id=f"review-{digest}",
                 job_id=job_id,
                 record_id=str(record_id),
-                record_revision=int(record.get("record_revision", 1) or 1),
+                record_revision=revision,
                 reason_codes=list(record.get("reason_codes", []) or []),
                 evidence_ids=list(record.get("evidence_ids", []) or []),
                 proposed_actions=list(record.get("proposed_actions", []) or []),
