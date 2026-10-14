@@ -891,18 +891,17 @@ class ValidateStage(_FileStage):
             )
 
         items = build_review_plan(review_records, budget=0)
-        repo = Repository(_repo_path(context))
-        try:
-            for item in items:
-                repo.upsert_review_item(item)
-        finally:
-            repo.close()
 
+        # B03: the validate stage produces the review PLAN only. Review
+        # items are registered by the runner inside the lease-verified
+        # publish transaction — a fenced worker must not write the shared
+        # review queue through a side connection.
         payload = {
             "schema_version": "1.1.0",
             "sequences": sequences,
             "measurements": measurements,
             "review_count": len(items),
+            "review_plan": [json.loads(item.model_dump_json()) for item in items],
             "review_reasons": extract.get("review_reasons", []),
         }
         out_dir = Path(context.stage_dir())

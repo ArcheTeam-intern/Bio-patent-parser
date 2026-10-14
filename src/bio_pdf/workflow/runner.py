@@ -44,6 +44,10 @@ from bio_pdf.storage.repository import Repository
 from bio_pdf.workflow.stages import STAGE_ORDER, StageContext, StageHandler
 
 
+class _FencedError(Exception):
+    """Internal sentinel: the lease was refused at a commit gate."""
+
+
 def _utcnow() -> datetime:
     return datetime.now(tz=timezone.utc)
 
@@ -83,6 +87,7 @@ class WorkflowRunner:
         required_stages: tuple[str, ...] = (),
         workflow_config: WorkflowConfig | None = None,
         lease_guard: Callable[[], bool] | None = None,
+        lease_token: "LeaseToken | None" = None,
     ) -> None:
         self.repository = repository
         self.artifact_root = artifact_root
@@ -92,6 +97,10 @@ class WorkflowRunner:
         #: Fencing hook (plan T03): when it returns False the worker lost
         #: its lease and the run aborts without publishing.
         self.lease_guard = lease_guard
+        #: Token for CONDITIONAL DB commits (plan B03): stage completion and
+        #: publication re-verify the lease inside their own transaction, so
+        #: a stale worker cannot write even between two guard checks.
+        self.lease_token = lease_token
         self._handlers: dict[str, StageHandler] = {}
 
     def _lease_ok(self) -> bool:
@@ -172,10 +181,14 @@ class WorkflowRunner:
     def _cache_is_intact(
         self, job_id: str, stage_name: str, cache_key: str
     ) -> tuple[bool, dict[str, ArtifactRef]]:
-        """Verify a cached success: manifest present, every output verifiable.
+        """Verify a cached success: manifest identity, hash, semantics and
+        every output file (plan B03).
 
-        Returns ``(intact, outputs)`` — the verified output refs are reused
-        as downstream inputs so cache reuse keys on real content.
+        Order matters: the MANIFEST file is hash-verified first (it is
+        registered as an artifact), then its semantics are checked against
+        the request (job/stage/cache_key), then each output's hash. A
+        tamperer who rewrites both the manifest and the outputs still fails
+        the manifest hash check.
         """
 
         stage = self._latest_success(job_id, stage_name, cache_key)
@@ -190,13 +203,26 @@ class WorkflowRunner:
         manifest_path = self.artifact_root / manifest_artifact.relative_path
         if not manifest_path.is_file():
             return False, {}
+        # 1) Manifest bytes must match the registered hash.
         try:
+            if _sha256_file(manifest_path) != manifest_artifact.sha256:
+                return False, {}
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return False, {}
-
+        # 2) Semantics: the manifest must describe THIS stage/cache key.
+        if (
+            manifest.get("stage_name") != stage_name
+            or manifest.get("cache_key") != cache_key
+            or manifest.get("stage_run_id") != stage.stage_run_id
+        ):
+            return False, {}
+        # 3) Every output verifies.
         outputs: dict[str, ArtifactRef] = {}
-        for name, entry in (manifest.get("outputs") or {}).items():
+        entries = manifest.get("outputs")
+        if not isinstance(entries, dict):
+            return False, {}
+        for name, entry in entries.items():
             rel = entry.get("relative_path")
             sha = entry.get("sha256")
             if not rel or not sha:
@@ -274,13 +300,23 @@ class WorkflowRunner:
                     }
                     continue
 
-            outcome, outputs, stage_run_id, ok = self._run_stage(
-                job, handler, context, inputs, cache_key
-            )
-            if not ok:
-                self.repository.update_job_status(
-                    job.job_id, "failed", current_stage=stage_name
+            try:
+                outcome, outputs, stage_run_id, ok = self._run_stage(
+                    job, handler, context, inputs, cache_key
                 )
+            except _FencedError:
+                return RunResult(
+                    job_id=job.job_id,
+                    status="fenced",
+                    stages_run=stages_run,
+                    review_count=review_total,
+                    failed_stage=stage_name,
+                )
+            if not ok:
+                if self._lease_ok():
+                    self.repository.update_job_status(
+                        job.job_id, "failed", current_stage=stage_name
+                    )
                 return RunResult(
                     job_id=job.job_id,
                     status="failed",
@@ -310,17 +346,41 @@ class WorkflowRunner:
                 review_count=review_total,
             )
 
-        final_status = self._final_status(job.job_id, review_total)
-        self.repository.update_job_status(job.job_id, final_status, current_stage=None)
-        manifest_rel = self._publish_result(job, published, final_status)
+        # B03: the publication is ONE transaction that re-verifies the
+        # lease, writes the status, the immutable manifest pointer AND the
+        # review items from the validate plan. Fenced → nothing written.
+        review_plan = self._load_review_plan(job.job_id, published)
+        final_status = self._final_status(job.job_id, review_total, review_plan)
+        manifest_payload = self._result_manifest(job, published, final_status)
+        job_dir = self.artifact_root / "jobs" / job.job_id
+        # Immutable manifest file first; the DB commit makes it current.
+        manifest_rel = self._write_immutable_manifest(job_dir, manifest_payload)
+        manifest_path = self.artifact_root / manifest_rel
+        manifest_sha = self._sha256(manifest_path)
+
+        ok = self.repository.publish_result_fenced(
+            token=self.lease_token,
+            job_id=job.job_id,
+            final_status=final_status,
+            manifest_rel=manifest_rel,
+            manifest_sha=manifest_sha,
+            review_items=review_plan,
+        )
+        if not ok:
+            return RunResult(
+                job_id=job.job_id,
+                status="fenced",
+                stages_run=stages_run,
+                review_count=review_total,
+            )
+        # Display mirror of the DB pointer.
+        self._write_pointer_mirror(job_dir, manifest_rel, manifest_sha)
         return RunResult(
             job_id=job.job_id,
             status=final_status,
             stages_run=stages_run,
             stages_skipped=stages_skipped,
-            review_count=max(
-                review_total, self.repository_open_reviews(job.job_id)
-            ),
+            review_count=max(review_total, len(review_plan)),
             published_manifest=manifest_rel,
         )
 
@@ -381,10 +441,20 @@ class WorkflowRunner:
                     outputs,
                     outcome,
                 )
-                self.repository.complete_stage(
-                    stage.stage_run_id, artifact_manifest_ref=manifest_ref
+                # B03: the stage completes ONLY inside a lease-verified
+                # transaction. If the lease was stolen mid-stage, the write
+                # is refused and the runner aborts fenced — the failure
+                # path must not write a status either.
+                completed = self.repository.complete_stage_fenced(
+                    stage.stage_run_id,
+                    token=self.lease_token,
+                    artifact_manifest_ref=manifest_ref,
                 )
+                if not completed:
+                    raise _FencedError()
                 return outcome, outputs, stage_run_id, True
+            except _FencedError:
+                raise
             except WorkflowError as exc:
                 self.repository.fail_stage(
                     stage.stage_run_id,
@@ -512,32 +582,91 @@ class WorkflowRunner:
         ).fetchone()
         return int(row["n"]) if row else 0
 
-    def _final_status(self, job_id: str, review_total: int) -> str:
-        open_reviews = max(review_total, self.repository_open_reviews(job_id))
+    def _final_status(
+        self,
+        job_id: str,
+        review_total: int,
+        review_plan: list[Any] | None = None,
+    ) -> str:
+        planned = len(review_plan) if review_plan else 0
+        open_reviews = max(review_total, planned, self.repository_open_reviews(job_id))
         return "succeeded_with_review" if open_reviews > 0 else "succeeded"
 
-    def _publish_result(
+    def _load_review_plan(
+        self, job_id: str, published: dict[str, dict[str, Any]]
+    ) -> list[Any]:
+        """Read the review plan the validate stage produced (plan B03).
+
+        Review items are registered ONLY in the publish transaction — the
+        validate handler never opens its own repository, so a fenced worker
+        cannot write the shared review queue through a side channel.
+        """
+
+        from bio_pdf.contracts import ReviewItem
+
+        entry = (published.get("validate") or {}).get("validation.json")
+        if not entry:
+            return []
+        path = self.artifact_root / entry["relative_path"]
+        if not path.is_file():
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        items: list[Any] = []
+        for raw in data.get("review_plan", []):
+            try:
+                items.append(ReviewItem.model_validate(raw))
+            except Exception:  # noqa: BLE001 - a malformed plan entry is skipped loudly
+                continue
+        return items
+
+    def _write_immutable_manifest(
+        self, job_dir: Path, payload: dict[str, Any]
+    ) -> str:
+        """Write an immutable result manifest (per-publish file), return rel path."""
+
+        published_at = str(payload.get("published_at", "unknown")).replace(":", "").replace("+", "").replace("-", "")
+        name = f"result-manifest-{published_at}.json"
+        ref = atomic_write_json(job_dir / "published", name, payload)
+        return (Path("jobs") / job_dir.name / "published" / name).as_posix()
+
+    def _write_pointer_mirror(
+        self, job_dir: Path, manifest_rel: str, manifest_sha: str
+    ) -> None:
+        """FS display mirror of the DB publication pointer (plan B03).
+
+        Readers resolve the baseline through the DB; the mirror exists for
+        humans browsing the artifact tree.
+        """
+
+        atomic_replace_json(
+            job_dir / "published",
+            "current.json",
+            {"manifest_rel": manifest_rel, "manifest_sha256": manifest_sha},
+        )
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        import hashlib
+
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _result_manifest(
         self,
         job: Job,
         published: dict[str, dict[str, Any]],
         final_status: str,
-    ) -> str | None:
-        """Atomically publish the result manifest pointing at stage outputs."""
-
-        manifest = {
+    ) -> dict[str, Any]:
+        return {
             "job_id": job.job_id,
             "document_id": job.document_id,
             "published_at": _utcnow().isoformat(),
             "final_status": final_status,
-            "stages": {
-                name: refs for name, refs in published.items() if refs
-            },
+            "stages": {name: refs for name, refs in published.items() if refs},
         }
-        job_dir = self.artifact_root / "jobs" / job.job_id
-        # Publishing is a pointer replacement, not an immutable write: the
-        # referenced stage-run artifacts stay immutable and audited.
-        atomic_replace_json(job_dir / "published", "result-manifest.json", manifest)
-        return (Path("jobs") / job.job_id / "published" / "result-manifest.json").as_posix()
 
 
 __all__ = ["WorkflowRunner", "RunResult"]

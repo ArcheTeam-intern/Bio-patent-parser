@@ -1,15 +1,12 @@
-"""Published result reader (plan T02).
+"""Published result reader (plan T02, strict in B03).
 
-One place that answers "what does job X currently publish?" — consumers
-(API records/pages, ReviewService baselines, ExportService snapshots) read
-through this, never by guessing fixed paths.
-
-Resolution order:
-
-1. ``jobs/<job>/published/result-manifest.json`` — the runner's published
-   baseline; every file is hash-verified before use.
-2. Legacy fixed paths (``jobs/<job>/validate/validation.json`` etc.) for
-   pre-T02 jobs, without hash guarantees but still strict JSON.
+One place that answers "what does job X currently publish?". The DB is the
+source of truth for the current baseline (``publications`` table); the FS
+mirror ``published/current.json`` points at an immutable per-publish
+manifest whose hash is verified. Legacy jobs without a mirror fall back to
+the fixed working paths — but ONLY when no published baseline exists at
+all. A present-yet-corrupt mirror/manifest is ``RESULT_CORRUPT``: silently
+reading working files could mix revisions.
 """
 
 from __future__ import annotations
@@ -19,6 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from bio_pdf.errors import WorkflowError
+
+
+class ResultCorruptError(WorkflowError):
+    code = "RESULT_CORRUPT"
 
 
 class ResultReader:
@@ -32,6 +33,13 @@ class ResultReader:
         "export": ("result.json", "result"),
     }
 
+    _LEGACY = {
+        "normalized": ("normalized.json",),
+        "extract": ("extract", "extract.json"),
+        "validation": ("validate", "validation.json"),
+        "result": ("export", "result.json"),
+    }
+
     def __init__(self, artifact_root: Path) -> None:
         self.artifact_root = artifact_root
 
@@ -43,36 +51,70 @@ class ResultReader:
 
         path = self.artifact_root / rel_path
         if not path.is_file():
-            raise WorkflowError(
+            raise ResultCorruptError(
                 f"published artifact missing: {rel_path}",
                 details={"relative_path": rel_path},
             )
         data = path.read_bytes()
         if compute_sha256_bytes(data) != sha256:
-            raise WorkflowError(
+            raise ResultCorruptError(
                 f"published artifact hash mismatch: {rel_path}",
                 details={"relative_path": rel_path},
             )
         try:
             return json.loads(data.decode("utf-8"))
         except json.JSONDecodeError as exc:
-            raise WorkflowError(
+            raise ResultCorruptError(
                 f"published artifact is not valid JSON: {rel_path}",
                 details={"relative_path": rel_path},
             ) from exc
 
-    def _read_legacy(self, *parts: str) -> dict[str, Any] | None:
-        del parts
-        return None
-
     def read_published_manifest(self, job_id: str) -> dict[str, Any] | None:
-        path = self._job_dir(job_id) / "published" / "result-manifest.json"
-        if not path.is_file():
-            return None
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
+        """Resolve the current baseline manifest.
+
+        - FS mirror ``published/current.json`` → immutable per-publish
+          manifest (hash-verified). Corrupt anything → RESULT_CORRUPT.
+        - No mirror: legacy single ``result-manifest.json`` (older jobs),
+          hash-verified against its own content is not possible for old
+          layouts; its presence is trusted only when it parses. Corrupt →
+          RESULT_CORRUPT.
+        - Neither present → None (job never published).
+        """
+
+        published_dir = self._job_dir(job_id) / "published"
+        mirror = published_dir / "current.json"
+        if mirror.is_file():
+            try:
+                mirror_data = json.loads(mirror.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ResultCorruptError(
+                    f"published pointer mirror is unreadable for job {job_id}",
+                    details={"path": str(mirror)},
+                ) from exc
+            rel = mirror_data.get("manifest_rel")
+            sha = mirror_data.get("manifest_sha256")
+            if not rel or not sha:
+                raise ResultCorruptError(
+                    f"published pointer mirror lacks manifest_rel/sha for job {job_id}",
+                    details={"mirror": mirror_data},
+                )
+            manifest = self._read_verified(rel, sha)
+            manifest.setdefault("baseline_id", sha[:16])
+            manifest["_manifest_rel"] = rel
+            return manifest
+
+        legacy = published_dir / "result-manifest.json"
+        if legacy.is_file():
+            try:
+                manifest = json.loads(legacy.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ResultCorruptError(
+                    f"legacy published manifest is unreadable for job {job_id}",
+                    details={"path": str(legacy)},
+                ) from exc
+            manifest.setdefault("baseline_id", manifest.get("published_at"))
+            return manifest
+        return None
 
     def read_json(
         self, job_id: str, name: str, *, prefer_published: bool = True
@@ -80,17 +122,12 @@ class ResultReader:
         """Read a logical result artifact for a job.
 
         ``name`` is one of ``normalized``/``extract``/``validation``/``result``.
-        Published (hash-verified) wins when present; legacy fixed paths are
-        the fallback so old jobs stay readable.
+        When a published baseline exists, it is authoritative: a missing or
+        broken entry raises RESULT_CORRUPT instead of silently reading the
+        working tree (plan B03).
         """
 
-        legacy_map = {
-            "normalized": ("normalized.json",),
-            "extract": ("extract", "extract.json"),
-            "validation": ("validate", "validation.json"),
-            "result": ("export", "result.json"),
-        }
-        if name not in legacy_map:
+        if name not in self._LEGACY:
             raise WorkflowError(
                 f"unknown result artifact name: {name}",
                 details={"name": name},
@@ -99,19 +136,26 @@ class ResultReader:
         if prefer_published:
             manifest = self.read_published_manifest(job_id)
             if manifest is not None:
+                found_any_stage = False
                 for stage_name, outputs in (manifest.get("stages") or {}).items():
-                    logical_file, logical_name = self._LOGICAL.get(
-                        stage_name, ("", "")
-                    )
+                    logical_file, logical_name = self._LOGICAL.get(stage_name, ("", ""))
                     if logical_name != name:
                         continue
-                    entry = outputs.get(logical_file)
-                    if entry:
-                        return self._read_verified(
-                            entry["relative_path"], entry["sha256"]
+                    found_any_stage = True
+                    entry = (outputs or {}).get(logical_file)
+                    if not isinstance(entry, dict) or not entry.get("relative_path") or not entry.get("sha256"):
+                        raise ResultCorruptError(
+                            f"published manifest entry is incomplete for {name}",
+                            details={"stage": stage_name, "entry": entry},
                         )
+                    return self._read_verified(entry["relative_path"], entry["sha256"])
+                if not found_any_stage:
+                    raise ResultCorruptError(
+                        f"published manifest has no entry for {name}",
+                        details={"job_id": job_id, "name": name},
+                    )
 
-        parts = legacy_map[name]
+        parts = self._LEGACY[name]
         path = self._job_dir(job_id).joinpath(*parts)
         if path.is_file():
             try:
@@ -119,7 +163,7 @@ class ResultReader:
             except (OSError, json.JSONDecodeError) as exc:
                 raise WorkflowError(
                     f"legacy artifact unreadable: {path}",
-                    details={"error": str(exc)},
+                    details={"error": str(exc), "code": "RESULT_CORRUPT"},
                 ) from exc
 
         raise WorkflowError(
@@ -128,4 +172,4 @@ class ResultReader:
         )
 
 
-__all__ = ["ResultReader"]
+__all__ = ["ResultReader", "ResultCorruptError"]

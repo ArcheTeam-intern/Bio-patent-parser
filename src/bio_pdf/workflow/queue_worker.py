@@ -22,7 +22,7 @@ from pathlib import Path
 
 from bio_pdf.application.job_service import JobPaths, JobService
 from bio_pdf.errors import WorkflowError
-from bio_pdf.storage.repository import ClaimedJob
+from bio_pdf.storage.repository import ClaimedJob, LeaseToken
 
 #: Lease duration; the worker heartbeats at one fifth of this interval.
 LEASE_SECONDS = 900.0
@@ -30,8 +30,12 @@ HEARTBEAT_INTERVAL = LEASE_SECONDS / 5
 
 
 def _worker_id() -> str:
-    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"worker-{socket.gethostname()}-{stamp}"
+    """Globally unique worker identity (B03: not hostname+second)."""
+
+    import os
+    import uuid
+
+    return f"worker-{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
 
 class _LeaseKeeper:
@@ -97,6 +101,9 @@ def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False
                     # Fencing: the runner aborts before any status write or
                     # publish once this worker no longer holds the lease.
                     lease_guard=lambda: not keeper.lost.is_set(),
+                    # B03: conditional commits re-verify this token inside
+                    # their own transactions (stage completion, publication).
+                    lease_token=LeaseToken.from_claim(claimed),
                 )
                 print(
                     f"[queue_worker] {job.job_id} -> {result.status}"

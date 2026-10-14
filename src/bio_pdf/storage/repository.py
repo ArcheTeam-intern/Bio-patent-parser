@@ -157,6 +157,16 @@ CREATE TABLE IF NOT EXISTS exports (
     created_at      TEXT NOT NULL,
     completed_at    TEXT
 );
+
+-- Published baseline pointer (plan B03): the DB is the source of truth for
+-- which immutable manifest is current; the FS copy is a display mirror.
+CREATE TABLE IF NOT EXISTS publications (
+    job_id          TEXT PRIMARY KEY REFERENCES jobs(job_id),
+    manifest_rel    TEXT NOT NULL,
+    manifest_sha256 TEXT NOT NULL,
+    baseline_id     TEXT NOT NULL,
+    published_at    TEXT NOT NULL
+);
 """
 
 
@@ -177,6 +187,23 @@ class ClaimedJob:
     worker_id: str
     generation: int
     lease_until: str
+
+
+@dataclass(frozen=True)
+class LeaseToken:
+    """Fencing identity for conditional commits (plan B03)."""
+
+    job_id: str
+    worker_id: str
+    generation: int
+
+    @classmethod
+    def from_claim(cls, claimed: ClaimedJob) -> "LeaseToken":
+        return cls(
+            job_id=claimed.job.job_id,
+            worker_id=claimed.worker_id,
+            generation=claimed.generation,
+        )
 
 
 def _connect(database: Path | str) -> sqlite3.Connection:
@@ -608,6 +635,133 @@ class Repository:
             "DELETE FROM worker_leases WHERE job_id = ? AND worker_id = ? AND generation = ?",
             (job_id, worker_id, generation),
         )
+
+    # ---- fenced conditional commits (plan B03) ----------------------------
+
+    def _token_holds(self, token: "LeaseToken") -> bool:
+        """Caller must be inside a transaction. True when the lease is live."""
+
+        row = self._conn.execute(
+            """
+            SELECT 1 FROM worker_leases
+            WHERE job_id = ? AND worker_id = ? AND generation = ? AND lease_until >= ?
+            """,
+            (token.job_id, token.worker_id, token.generation, _utcnow_iso()),
+        ).fetchone()
+        return row is not None
+
+    def complete_stage_fenced(
+        self,
+        stage_run_id: str,
+        *,
+        token: "LeaseToken | None",
+        artifact_manifest_ref: str | None,
+    ) -> bool:
+        """Complete a stage ONLY while the lease is still held.
+
+        The lease check and the write share one transaction (plan B03): a
+        worker whose lease was reclaimed mid-stage cannot record success.
+        Returns False when fenced (nothing written).
+        """
+
+        if token is None:
+            self.complete_stage(stage_run_id, artifact_manifest_ref=artifact_manifest_ref)
+            return True
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            if not self._token_holds(token):
+                self._conn.execute("ROLLBACK")
+                return False
+            self._conn.execute(
+                """
+                UPDATE stage_runs SET status = 'succeeded', ended_at = ?, artifact_manifest_ref = ?
+                WHERE stage_run_id = ?
+                """,
+                (_utcnow_iso(), artifact_manifest_ref, stage_run_id),
+            )
+            self._conn.execute("COMMIT")
+            return True
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    def publish_result_fenced(
+        self,
+        *,
+        token: "LeaseToken | None",
+        job_id: str,
+        final_status: str,
+        manifest_rel: str,
+        manifest_sha: str,
+        review_items: list["ReviewItem"],
+    ) -> bool:
+        """Atomically publish: status + manifest pointer + review items.
+
+        One transaction, re-verifying the lease (plan B03): stealing the
+        lease between the last guard and here aborts the publish, and a
+        stale worker can never register review items through a side path.
+        Returns False when fenced (nothing written).
+        """
+
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            if token is not None and not self._token_holds(token):
+                self._conn.execute("ROLLBACK")
+                return False
+            now = _utcnow_iso()
+            self._conn.execute(
+                "UPDATE jobs SET status = ?, current_stage = NULL, updated_at = ? WHERE job_id = ?",
+                (final_status, now, job_id),
+            )
+            for item in review_items:
+                self._conn.execute(
+                    """
+                    INSERT INTO review_items (review_id, job_id, record_id, record_revision,
+                                               reason_codes_json, status, evidence_ids_json,
+                                               proposed_actions_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(review_id) DO UPDATE SET
+                        job_id = excluded.job_id,
+                        record_id = excluded.record_id,
+                        record_revision = excluded.record_revision,
+                        reason_codes_json = excluded.reason_codes_json,
+                        evidence_ids_json = excluded.evidence_ids_json,
+                        proposed_actions_json = excluded.proposed_actions_json
+                    WHERE review_items.status != 'resolved'
+                    """,
+                    (
+                        item.review_id,
+                        item.job_id,
+                        item.record_id,
+                        item.record_revision,
+                        _json_dumps(item.reason_codes),
+                        item.status,
+                        _json_dumps(item.evidence_ids),
+                        _json_dumps(item.proposed_actions),
+                    ),
+                )
+            self._conn.execute(
+                """
+                INSERT INTO publications (job_id, manifest_rel, manifest_sha256, baseline_id, published_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    manifest_rel = excluded.manifest_rel,
+                    manifest_sha256 = excluded.manifest_sha256,
+                    baseline_id = excluded.baseline_id,
+                    published_at = excluded.published_at
+                """,
+                (job_id, manifest_rel, manifest_sha, manifest_sha[:16], now),
+            )
+            self._conn.execute("COMMIT")
+            return True
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    def get_publication(self, job_id: str) -> Any:
+        return self._conn.execute(
+            "SELECT * FROM publications WHERE job_id = ?", (job_id,)
+        ).fetchone()
 
     # ---- exports ----------------------------------------------------------
 

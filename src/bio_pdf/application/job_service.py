@@ -20,7 +20,7 @@ from bio_pdf.config import WorkflowConfig, load_workflow_config
 from bio_pdf.errors import JobRunningError, PageRangeInvalidError, WorkflowError
 from bio_pdf.ingest.inspector import inspect_pdf
 from bio_pdf.storage.artifacts import make_cache_key
-from bio_pdf.storage.repository import Repository
+from bio_pdf.storage.repository import LeaseToken, Repository
 from bio_pdf.workflow.handlers import build_production_handlers
 from bio_pdf.workflow.runner import RunResult, WorkflowRunner
 from bio_pdf.workflow.stages import STAGE_ORDER
@@ -181,11 +181,13 @@ class JobService:
         *,
         resume: bool = False,
         lease_guard: Callable[[], bool] | None = None,
+        lease_token: "LeaseToken | None" = None,
     ) -> RunResult:
         """Run (or resume) a job through the full production pipeline.
 
-        ``lease_guard`` (plan T03) is checked before every stage and before
-        publishing; returning False aborts the run without writing status.
+        ``lease_guard`` (plan T03) is checked before every stage; the
+        ``lease_token`` (plan B03) fences the stage-completion and publish
+        transactions themselves, so no write slips through between checks.
         """
 
         job = self._repository.get_job(job_id)
@@ -203,7 +205,9 @@ class JobService:
 
         config = self.job_config(job_id)
         effective = effective_workflow_config(config)
-        runner = self._build_runner(effective, lease_guard=lease_guard)
+        runner = self._build_runner(
+            effective, lease_guard=lease_guard, lease_token=lease_token
+        )
         self._repository.update_job_status(job_id, "running", current_stage=None)
         result = runner.run(
             job,
@@ -310,6 +314,7 @@ class JobService:
         effective: WorkflowConfig | None = None,
         *,
         lease_guard: Callable[[], bool] | None = None,
+        lease_token: "LeaseToken | None" = None,
     ) -> WorkflowRunner:
         runner = WorkflowRunner(
             self._repository,
@@ -317,6 +322,7 @@ class JobService:
             required_stages=STAGE_ORDER,
             workflow_config=effective,
             lease_guard=lease_guard,
+            lease_token=lease_token,
         )
         for handler in build_production_handlers():
             runner.register(handler)
