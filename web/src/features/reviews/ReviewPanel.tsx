@@ -67,12 +67,15 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
     },
   });
 
+  const blockers = (currentRecord["blockers"] as string[] | undefined) ?? [];
   const item = reviewItemQuery.reviewId;
-  const baseRevision = Math.max(
-    reviewItemQuery.recordRevision,
-    conflict?.live ?? 0,
-    Number(currentRecord["_revision"] ?? 0),
-  );
+  // B07: no automatic version bumping. While a conflict is unresolved the
+  // submit path stays disabled; the reviewer reloads (fresh queries) and
+  // confirms against the NEW revision explicitly. The record's own
+  // _revision (server-provided) is the fallback when no review item exists.
+  const baseRevision = conflict
+    ? conflict.live
+    : Math.max(reviewItemQuery.recordRevision, Number(currentRecord["_revision"] ?? 0));
 
   if (!item) {
     return (
@@ -99,11 +102,31 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
 
       {message && <div className={`banner ${conflict ? "warn" : "info"}`}>{message}</div>}
 
-      {mode === "idle" && (
+      {mode === "idle" && conflict && (
         <div style={{ display: "flex", gap: 8 }}>
           <button
             className="primary"
-            disabled={decide.isPending}
+            onClick={() => {
+              // Explicit re-verification: reload both the record and the
+              // review item, then the reviewer decides again.
+              setConflict(null);
+              setMessage("已重新加载最新记录与审核状态，请再次核对后提交。");
+              queryClient.invalidateQueries({ queryKey: ["records", jobId] });
+              reviewItemQuery.refresh();
+            }}
+          >
+            重新核对最新版本
+          </button>
+          <button onClick={() => setConflict(null)}>取消</button>
+        </div>
+      )}
+
+      {mode === "idle" && !conflict && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="primary"
+            disabled={decide.isPending || blockers.length > 0}
+            title={blockers.join("；")}
             onClick={() => decide.mutate({ action: "confirm", baseRevision })}
           >
             确认
@@ -121,7 +144,7 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
         </div>
       )}
 
-      {mode === "rejecting" && (
+      {mode === "rejecting" && !conflict && (
         <div style={{ display: "grid", gap: 8 }}>
           <label>
             <div className="dim">拒绝原因（必填）</div>
@@ -139,7 +162,7 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
         </div>
       )}
 
-      {mode === "correcting" && (
+      {mode === "correcting" && !conflict && (
         <div style={{ display: "grid", gap: 8 }}>
           <div className="dim">
             结构化修正（typed patch）。数值保持十进制字符串；raw 只能写证据中实际存在的表达。

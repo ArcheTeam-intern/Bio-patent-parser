@@ -105,13 +105,35 @@ class SnapshotService:
         def _overlay(records: list[dict[str, Any]], id_field: str) -> list[dict[str, Any]]:
             out = []
             for record in records:
+                revision = 1
                 head = heads.get(record[id_field])
                 if head is not None:
+                    revision = int(head["revision"])
                     version = self.repository.get_record_version(
-                        job_id, record[id_field], int(head["revision"])
+                        job_id, record[id_field], revision
                     )
                     if version is not None:
                         record = json.loads(version["record_json"])
+                record = dict(record)
+                # B07: the UI never guesses the head version.
+                record["_revision"] = revision
+                failed = [
+                    c.get("check_id")
+                    for c in record.get("checks", [])
+                    if c.get("outcome") == "fail"
+                ]
+                unresolved = any(
+                    r.get("resolved") == "false" for r in record.get("residues", [])
+                )
+                blockers = []
+                if failed:
+                    blockers.append(f"failed checks: {failed}")
+                if unresolved:
+                    blockers.append("sequence contains unresolved residues")
+                record["blockers"] = blockers
+                record["allowed_actions"] = (
+                    ["correct", "reject"] if blockers else ["confirm", "correct", "reject"]
+                )
                 out.append(record)
             return out
 

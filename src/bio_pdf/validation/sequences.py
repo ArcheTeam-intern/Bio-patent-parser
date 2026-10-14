@@ -74,9 +74,23 @@ def validate_sequence(
     else:
         checks.append(_check(CHECK_ALPHABET, "unknown", "alphabet not defined for molecule type"))
 
-    # Completeness.
+    # Completeness. A sequence explicitly DISPLAYED as a fragment is
+    # complete in its own scope (plan B07): rejecting it forever blocked
+    # the review loop for genuinely displayed short peptides.
+    is_displayed_fragment = (
+        getattr(record, "sequence_scope", "undetermined") == "fragment"
+        and getattr(record, "is_explicit_sequence", False)
+    )
     if record.is_complete:
         checks.append(_check(CHECK_COMPLETENESS, "pass", "sequence marked complete"))
+    elif is_displayed_fragment:
+        checks.append(
+            _check(
+                CHECK_COMPLETENESS,
+                "pass",
+                "explicitly displayed fragment; full-listing completeness not claimed",
+            )
+        )
     else:
         checks.append(_check(CHECK_COMPLETENESS, "fail", "sequence incomplete or trailing"))
         reasons.append("sequence is incomplete")

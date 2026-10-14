@@ -401,8 +401,11 @@ def extract_inline_sequences(
                     raw_sequence=run.strip(),
                     normalized_sequence=normalized,
                     residues=residues,
-                    is_complete=False,  # a fragment is never silently "complete"
-                    is_explicit_sequence=False,
+                    # A hinted, explicitly displayed run IS an explicit
+                    # sequence (of fragment scope); completeness as a full
+                    # listing is not claimed.
+                    is_complete=False,
+                    is_explicit_sequence=True,
                     evidence_ids=evidence_ids,
                     checks=[],
                     validation_state="unchecked",

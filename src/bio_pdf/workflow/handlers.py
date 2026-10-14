@@ -40,6 +40,7 @@ from bio_pdf.contracts import (
 from bio_pdf.errors import PageCoverageMismatchError, WorkflowError
 from bio_pdf.extract.activities.prose import extract_prose_measurements
 from bio_pdf.extract.activities.tables import extract_table_measurements
+from bio_pdf.extract.entities import extract_entities, link_measurements_to_entities
 from bio_pdf.extract.relations import link_explicit_relations
 from bio_pdf.extract.sequences.inline import extract_inline_sequences
 from bio_pdf.extract.sequences.references import extract_sequence_references
@@ -917,7 +918,13 @@ class ExtractStage(_FileStage):
                 )
             )
 
-        relation_result = link_explicit_relations([], sequences, measurements, [])
+        # B07: explicit entities from prose/table labels; measurements link
+        # ONLY on an exact name match (a non-match keeps entity_id None and
+        # carries a review reason — no closest-match guessing).
+        entities = extract_entities(blocks, doc_id)
+        measurements, entity_reasons = link_measurements_to_entities(measurements, entities)
+
+        relation_result = link_explicit_relations(entities, sequences, measurements, [])
 
         # Any record id the extractors did not register resolves to an
         # UNLOCATED span — never a fabricated page 1 (plan B02). Validation
@@ -963,12 +970,13 @@ class ExtractStage(_FileStage):
             "parser_run_id": parser_run_id,
             "sequences": [json.loads(s.model_dump_json()) for s in sequences],
             "measurements": [json.loads(m.model_dump_json()) for m in measurements],
+            "entities": [json.loads(e.model_dump_json()) for e in entities],
             "relations": [json.loads(r.model_dump_json()) for r in relation_result.relations],
             "unresolved_references": [
                 json.loads(r.model_dump_json()) for r in relation_result.unresolved_references
             ]
             + [json.loads(r.model_dump_json()) for r in unresolved],
-            "review_reasons": list(relation_result.review_reasons),
+            "review_reasons": list(relation_result.review_reasons) + list(entity_reasons),
             "evidence_spans": evidence.to_payload(),
             "raw_mentions": [
                 m.model_dump(mode="json") if hasattr(m, "model_dump") else m

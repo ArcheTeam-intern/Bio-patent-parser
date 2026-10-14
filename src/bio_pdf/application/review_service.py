@@ -301,6 +301,31 @@ class ReviewService:
                     f"value.{field} must be a decimal string",
                     details={"field": field},
                 )
+
+        # B07: structured fields must AGREE with raw — a patch claiming
+        # raw=">128" with number="12.8"/operator="=" is a typo or a lie,
+        # and accepting it would corrupt the export while looking audited.
+        raw = str(value.get("raw") or "").strip()
+        if raw and kind != "unparsed":
+            from bio_pdf.extract.activities.values import parse_activity_value
+
+            parsed = parse_activity_value(raw)
+            mismatches: list[str] = []
+            if parsed.kind != kind:
+                mismatches.append(f"kind: raw parses as {parsed.kind}, patch says {kind}")
+            else:
+                for field in ("operator", "number", "lower", "upper", "uncertainty"):
+                    raw_value = getattr(parsed, field, None)
+                    patch_value = value.get(field)
+                    if (raw_value or None) != (patch_value or None):
+                        mismatches.append(
+                            f"{field}: raw gives {raw_value!r}, patch says {patch_value!r}"
+                        )
+            if mismatches:
+                raise WorkflowError(
+                    "value patch contradicts its raw expression: " + "; ".join(mismatches),
+                    details={"raw": raw, "mismatches": mismatches},
+                )
         return value
 
     def _verify_raw_against_evidence(
