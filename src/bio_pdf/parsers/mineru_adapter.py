@@ -708,7 +708,10 @@ def _project_table_item(item: dict[str, Any], page_no: int, seq: int) -> dict[st
 
     cells: list[dict[str, Any]] = []
     row_idx = -1
-    # Walk <tr> rows, then <td>/<th> cells with their attributes.
+    # Occupancy grid: a rowspan/colspan cell occupies the positions of the
+    # rows below it, so every row must place cells in the first free column
+    # (plan T05). Without this, merged headers shift columns.
+    occupied: set[tuple[int, int]] = set()
     for tr_m in re.finditer(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL):
         row_idx += 1
         col_idx = 0
@@ -721,16 +724,26 @@ def _project_table_item(item: dict[str, Any], page_no: int, seq: int) -> dict[st
                 sm = re.search(rf"{name}\s*=\s*[\"']?(\d+)", attrs, re.IGNORECASE)
                 return max(int(sm.group(1)), 1) if sm else 1
 
+            rowspan = _span("rowspan")
+            colspan = _span("colspan")
+            # Skip columns already consumed by a previous row's rowspan.
+            while (row_idx, col_idx) in occupied:
+                col_idx += 1
+            for r in range(row_idx, row_idx + rowspan):
+                for c in range(col_idx, col_idx + colspan):
+                    occupied.add((r, c))
+
             cells.append(
                 {
                     "start_row_offset_idx": row_idx,
                     "start_col_offset_idx": col_idx,
-                    "row_span": _span("rowspan"),
-                    "col_span": _span("colspan"),
+                    "row_span": rowspan,
+                    "col_span": colspan,
+                    "is_header": cell_m.group(1).lower() == "th",
                     "text": inner,
                 }
             )
-            col_idx += _span("colspan")
+            col_idx += colspan
 
     # Empty placeholder cells (e.g. the void under a merged header) carry no
     # text and the contract requires text_raw to be non-empty; skip them.

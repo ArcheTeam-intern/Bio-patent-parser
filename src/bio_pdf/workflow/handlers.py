@@ -455,18 +455,31 @@ def _refs_from_parse_artifacts(artifacts: Any, out_dir: Path, context: StageCont
 
 class NormalizeStage(_FileStage):
     name = "normalize"
-    implementation = "v3"
+    implementation = "v4"
 
     def run(self, context: StageContext) -> StageOutcome:
         # Primary structure: layout parse when the engine produced one,
-        # else the native parse. Legacy jobs keep their fixed paths.
-        payload: dict[str, Any] | None = None
-        for logical in ("layout_parse.normalized.json", "native_parse.normalized.json"):
+        # else the native parse. The native channel, when present alongside
+        # layout, is fused in by spatial overlap (plan T05) rather than
+        # concatenated.
+        primary_payload: dict[str, Any] | None = None
+        native_payload: dict[str, Any] | None = None
+        for logical, target in (
+            ("layout_parse.normalized.json", "primary"),
+            ("native_parse.normalized.json", "native"),
+        ):
             if logical in context.inputs:
                 payload = _read_input_json(context, logical)
-                if payload:
-                    break
-        if payload is None:
+                if target == "primary" and payload:
+                    primary_payload = payload
+                elif target == "native" and payload:
+                    native_payload = payload
+        if primary_payload is None and native_payload is not None:
+            # Native-only job: the native parse IS the primary structure.
+            primary_payload = native_payload
+            native_payload = None
+        if primary_payload is None:
+            # Legacy job: fixed parse paths.
             docling_norm = Path(context.output_dir) / "parse" / "docling" / "normalized.json"
             native_norm = Path(context.output_dir) / "parse" / "native" / "normalized.json"
             source_path = docling_norm if docling_norm.is_file() else native_norm
@@ -475,16 +488,37 @@ class NormalizeStage(_FileStage):
                     "no parse artifacts to normalize (both docling and native missing)",
                     details={"docling": str(docling_norm), "native": str(native_norm)},
                 )
-            payload = json.loads(source_path.read_text(encoding="utf-8"))
+            primary_payload = json.loads(source_path.read_text(encoding="utf-8"))
+            if docling_norm.is_file() and native_norm.is_file():
+                native_payload = json.loads(native_norm.read_text(encoding="utf-8"))
 
-        # Strict contract validation: the on-disk file must be a valid
-        # NormalizedDocument.
-        document = NormalizedDocument.model_validate(payload)
+        document = NormalizedDocument.model_validate(primary_payload)
         if not document.pages:
             raise WorkflowError(
                 "normalized document has no pages",
                 details={"job_id": context.job_id},
             )
+
+        fusion_warnings: list[str] = []
+        native_doc = None
+        if native_payload is not None and native_payload != primary_payload:
+            try:
+                native_doc = NormalizedDocument.model_validate(native_payload)
+            except Exception:  # noqa: BLE001 - fusion is best-effort enrichment
+                native_doc = None
+        if native_doc is not None:
+            from bio_pdf.parsers.fusion import fuse_documents
+
+            fused = fuse_documents(document, native_doc)
+            document = fused.document
+            fusion_warnings.extend(fused.warnings)
+            if fused.conflicts:
+                document = document.model_copy(
+                    update={
+                        "errors": list(document.errors)
+                        + [f"TEXT_CONFLICT page={c['page']} block={c['block_id']}" for c in fused.conflicts[:10]]
+                    }
+                )
 
         # Coverage: every requested page must be present. A partial parse
         # fails here instead of faking completion downstream.
@@ -494,7 +528,11 @@ class NormalizeStage(_FileStage):
         if requested and missing:
             raise PageCoverageMismatchError(
                 f"normalized document is missing requested pages: {missing}",
-                details={"missing": missing, "requested": sorted(requested)},
+                details={
+                    "missing": missing,
+                    "requested": sorted(requested),
+                    "document_errors": list(document.errors)[:5],
+                },
             )
 
         out_dir = Path(context.stage_dir())
@@ -504,6 +542,7 @@ class NormalizeStage(_FileStage):
         return StageOutcome(
             artifact_refs=[_stage_ref(context, "normalized.json", ref)],
             review_required=0,
+            warnings=fusion_warnings,
         )
 
 

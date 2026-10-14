@@ -363,6 +363,60 @@ def _coerce_tables(
     return out
 
 
+def _structure_issues(cells: list[TableCell]) -> list[str]:
+    """Detect span overlap / ragged structure via an occupancy grid.
+
+    A table whose merged cells overlap cannot be trusted for header chains;
+    the issue is recorded so downstream validation never marks a broken
+    matrix as healthy (plan T05).
+    """
+
+    issues: list[str] = []
+    occupied: dict[tuple[int, int], str] = {}
+    for cell in cells:
+        for r in range(cell.row_index, cell.row_index + cell.rowspan):
+            for c in range(cell.column_index, cell.column_index + cell.colspan):
+                if (r, c) in occupied:
+                    issues.append(
+                        f"TABLE_GRID_OVERLAP at r{r}c{c}: {occupied[(r, c)]} vs {cell.cell_id}"
+                    )
+                else:
+                    occupied[(r, c)] = cell.cell_id
+    if len(issues) > 4:
+        issues = issues[:4] + [f"... {len(issues) - 4} more overlaps"]
+    return issues
+
+
+def _validate_id_uniqueness(document: NormalizedDocument) -> list[str]:
+    """Same id with different content/location is a hard normalization error."""
+
+    from bio_pdf.errors import WorkflowError
+
+    seen: dict[str, tuple] = {}
+    errors: list[str] = []
+    for page in document.pages:
+        for block in page.blocks:
+            key = block.block_id
+            payload = (page.page_number, block.bbox, block.text_raw)
+            if key in seen and seen[key] != payload:
+                errors.append(f"NORMALIZATION_ID_COLLISION block {key}")
+            seen[key] = payload
+        for table in page.tables:
+            seen.setdefault(table.table_id, (page.page_number,))
+            for cell in table.cells:
+                key = cell.cell_id
+                payload = (table.table_id, cell.row_index, cell.column_index, cell.text_raw)
+                if key in seen and seen[key] != payload:
+                    errors.append(f"NORMALIZATION_ID_COLLISION cell {key}")
+                seen[key] = payload
+    if errors:
+        raise WorkflowError(
+            "; ".join(errors[:5]),
+            details={"code": "NORMALIZATION_ID_COLLISION", "count": len(errors)},
+        )
+    return []
+
+
 def normalize_docling_document(
     payload: dict[str, Any],
     *,
@@ -395,6 +449,7 @@ def normalize_docling_document(
             details={"keys": list(payload.keys())},
         )
 
+    geometry_warnings: list[str] = []
     if isinstance(pages_raw, list):
         normalised_pages = []
         for i, p in enumerate(pages_raw):
@@ -417,7 +472,9 @@ def normalize_docling_document(
     elif isinstance(pages_raw, dict):
         # Docling 2.x: per-page size under pages[i].size, and top-level
         # ``texts`` / ``tables`` share a ``prov`` array with ``page_no``.
-        normalised_pages = _expand_top_level_pages(payload, parser_run_id=parser_run_id)
+        normalised_pages, geometry_warnings = _expand_top_level_pages(
+            payload, parser_run_id=parser_run_id
+        )
     else:
         raise NormalizationLossError(
             "docling 'pages' must be a list or dict",
@@ -430,20 +487,22 @@ def normalize_docling_document(
             details={"page_count_raw": len(pages_raw) if hasattr(pages_raw, '__len__') else 'n/a'},
         )
 
-    return NormalizedDocument(
-        schema_version="1.0.0",
+    document = NormalizedDocument(
+        schema_version="1.1.0",
         document_id=document_id,
         parser_run_id=parser_run_id,
         pages=normalised_pages,
-        errors=[],
+        errors=list(geometry_warnings),
     )
+    _validate_id_uniqueness(document)
+    return document
 
 
 def _expand_top_level_pages(
     payload: dict[str, Any],
     *,
     parser_run_id: str,
-) -> list[NormalizedPage]:
+) -> tuple[list[NormalizedPage], list[str]]:
     """Build per-page :class:`NormalizedPage` for Docling 2.x exports.
 
     The 2.x format keeps texts/tables at the top level, each with a
@@ -452,6 +511,7 @@ def _expand_top_level_pages(
     """
 
     pages_dict: dict[str, dict[str, Any]] = {}
+    geometry_warnings: list[str] = []
     for page_no_key, page_dict in payload["pages"].items():
         if not isinstance(page_dict, dict):
             continue
@@ -462,11 +522,20 @@ def _expand_top_level_pages(
         except (TypeError, ValueError):
             width, height = 0.0, 0.0
         if width <= 0 or height <= 0:
-            width, height = 612.0, 792.0
+            # Never invent 612x792: a fabricated size silently corrupts every
+            # bbox. Skip the page and record why — the coverage check then
+            # fails loudly instead of passing with wrong geometry.
+            geometry_warnings.append(
+                f"page {page_no_key}: missing page size; page skipped (geometry unknown)"
+            )
+            continue
         try:
             page_no = int(page_no_key)
         except (TypeError, ValueError):
             page_no = len(pages_dict) + 1
+            geometry_warnings.append(
+                f"page key {page_no_key!r} is not an integer; order position used"
+            )
         pages_dict[str(page_no)] = {
             "page_number": page_no,
             "width": width,
@@ -546,33 +615,55 @@ def _expand_top_level_pages(
             rowspan = max(int(cell.get("row_span", cell.get("rowspan", 1)) or 1), 1)
             colspan = max(int(cell.get("col_span", cell.get("colspan", 1)) or 1), 1)
             text = str(cell.get("text", "") or "")
+            # Docling marks header cells explicitly; honour the real flags
+            # instead of assuming row 0 is all headers (plan T05).
+            is_col_header = bool(cell.get("column_header"))
+            is_row_header = bool(cell.get("row_header"))
+            if is_col_header and is_row_header:
+                header_role = "both"
+            elif is_col_header:
+                header_role = "column"
+            elif is_row_header:
+                header_role = "row"
+            else:
+                header_role = "data"
             # Cell coordinates live in the cell's own prov spans.
             cell_bbox, _cell_locators = _bbox_from_prov(cell, page_height_pt=target["height"])
             cells.append(
                 TableCell(
-                    cell_id=f"{prov_page}:t:{c_idx}",
+                    # Include the table index: two tables on one page must
+                    # not produce colliding cell ids (plan T05).
+                    cell_id=f"{prov_page}:t{len(tables_out)}:c{c_idx}",
                     row_index=row,
                     column_index=col,
                     rowspan=rowspan,
                     colspan=colspan,
                     text_raw=text,
+                    header_role=header_role,
                     bbox=cell_bbox,
                 )
             )
         if not cells:
             continue
         table_bbox, _table_locators = _bbox_from_prov(table, page_height_pt=target["height"])
+        issues = _structure_issues(cells)
+        header_ids = [c.cell_id for c in cells if c.header_role in ("column", "row", "both")]
+        if not header_ids:
+            # No explicit flags (older Docling exports): fall back to row 0.
+            header_ids = [c.cell_id for c in cells if c.row_index == 0]
+        caption_raw = table.get("caption")
+        if isinstance(caption_raw, list):
+            caption_raw = " ".join(str(x) for x in caption_raw)
         table_obj = Table(
-            table_id=f"{prov_page}:t:{len(tables_out)}",
+            table_id=f"{prov_page}:t{len(tables_out)}",
             page_number=prov_page,
             row_count=max(c.row_index + c.rowspan for c in cells),
             column_count=max(c.column_index + c.colspan for c in cells),
             cells=cells,
-            header_cell_ids=[
-                c.cell_id for c in cells if c.row_index == 0
-            ],
-            caption=str(table.get("caption") or "") or None,
+            header_cell_ids=header_ids,
+            caption=str(caption_raw or "") or None,
             bbox=table_bbox,
+            structure_issues=issues,
         )
         tables_out.append(table_obj)
 
@@ -591,7 +682,7 @@ def _expand_top_level_pages(
                 tables=page_tables,
             )
         )
-    return out
+    return out, geometry_warnings
 
 
 def normalise_docling_file(
