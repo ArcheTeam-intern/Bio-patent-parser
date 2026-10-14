@@ -56,10 +56,10 @@ export function MeasurementDetail({
 export function CheckList({ checks, reasons }: { checks: { check_id: string; outcome: string; details: Record<string, string> }[]; reasons: string[] }) {
   if (checks.length === 0 && reasons.length === 0) return null;
   return (
-    <div style={{ padding: "0 12px 12px" }}>
-      <div className="dim" style={{ marginBottom: 4 }}>检查结果</div>
+    <div style={{ padding: "0 14px 14px" }}>
+      <div className="section-label">检查结果</div>
       {checks.map((c, i) => (
-        <div key={i} style={{ fontSize: 12, marginBottom: 2 }}>
+        <div key={i} className="check-row">
           <span className={`status ${c.outcome === "pass" ? "ok" : c.outcome === "fail" ? "conflict" : "muted"}`}>
             {c.outcome === "pass" ? "通过" : c.outcome === "fail" ? "未通过" : "未知"}
           </span>{" "}
@@ -68,7 +68,7 @@ export function CheckList({ checks, reasons }: { checks: { check_id: string; out
         </div>
       ))}
       {reasons.map((r, i) => (
-        <div key={`r${i}`} className="dim">· {r}</div>
+        <div key={`r${i}`} className="dim" style={{ lineHeight: 1.9 }}>· {r}</div>
       ))}
     </div>
   );

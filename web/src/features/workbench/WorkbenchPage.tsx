@@ -152,11 +152,11 @@ export function WorkbenchPage() {
 
         <section className="panel">
           <div className="panel-header">
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            <div className="wb-tabs">
               {(["sequences", "activities", "tables", "text", "issues", "run"] as Tab[]).map((t) => (
                 <button
                   key={t}
-                  style={{ border: "none", padding: "4px 8px", whiteSpace: "nowrap", background: tab === t ? "var(--accent-soft)" : "none", color: tab === t ? "var(--accent)" : "inherit", fontWeight: tab === t ? 600 : 400 }}
+                  className={`wb-tab${tab === t ? " active" : ""}`}
                   onClick={() => {
                     const next = new URLSearchParams(params);
                     next.set("tab", t);
@@ -168,25 +168,30 @@ export function WorkbenchPage() {
               ))}
             </div>
           </div>
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border-soft)" }}>
+          <div className="wb-scope">
             {(tab === "sequences" || tab === "activities") ? (
               <>
-                <label>结果范围： <select aria-label="结果范围" value={scope} onChange={e => {
-                  const next = new URLSearchParams(params);
-                  next.set("scope", e.target.value);
-                  setParams(next, { replace: true });
-                }}>
-                  <option value="page">当前页</option>
-                  <option value="all">全部文档</option>
-                </select></label>
-                <span className="dim" style={{ marginLeft: 10 }}>
-                  {scope === "page" ? `第 ${currentPage} 页 · ` : "全文 · "}
-                  {tab === "sequences" ? `${visibleSequences.length}/${allSequences.length} 条序列` : `${visibleMeasurements.length}/${allMeasurements.length} 条活性`}
-                </span>
-                {scope === "page" && <div className="dim">随左侧 PDF 翻页；点击记录可定位证据。跨页记录会在各证据页显示。</div>}
-                {unlocated > 0 && <div className="dim">另有 {unlocated} 条记录缺少可定位页码，可在“全部文档”查看。</div>}
+                <div className="wb-scope-row">
+                  <label>
+                    结果范围：{" "}
+                    <select aria-label="结果范围" value={scope} onChange={e => {
+                      const next = new URLSearchParams(params);
+                      next.set("scope", e.target.value);
+                      setParams(next, { replace: true });
+                    }}>
+                      <option value="page">当前页</option>
+                      <option value="all">全部文档</option>
+                    </select>
+                  </label>
+                  <span className="wb-count">
+                    {scope === "page" ? `第 ${currentPage} 页 · ` : "全文 · "}
+                    {tab === "sequences" ? `${visibleSequences.length}/${allSequences.length} 条序列` : `${visibleMeasurements.length}/${allMeasurements.length} 条活性`}
+                  </span>
+                </div>
+                {scope === "page" && <div className="wb-hint">随左侧 PDF 翻页；点击记录可定位证据。跨页记录会在各证据页显示。</div>}
+                {unlocated > 0 && <div className="wb-hint">另有 {unlocated} 条记录缺少可定位页码，可在“全部文档”查看。</div>}
               </>
-            ) : <span className="dim">{tab === "tables" || tab === "text" ? `第 ${currentPage} 页 · 与左侧 PDF 同步` : "全文视图"}</span>}
+            ) : <span className="wb-count">{tab === "tables" || tab === "text" ? `第 ${currentPage} 页 · 与左侧 PDF 同步` : "全文视图"}</span>}
           </div>
           <div className="panel-scroll">
             {records.error && (tab === "sequences" || tab === "activities") && <div className="banner error">记录读取失败：{String(records.error)}</div>}

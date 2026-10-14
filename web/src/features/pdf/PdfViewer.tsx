@@ -182,34 +182,38 @@ export function PdfViewer({ documentId, target, pageNumber, onPageChange }: Prop
   return (
     <>
       <div className="pdf-toolbar">
-        <button onClick={() => onPageChange(Math.max(1, pageNumber - 1))} disabled={pageNumber <= 1 || loadingPdf}>
-          上一页
-        </button>
-        <span>
-          第{" "}
-          <input
-            type="number"
-            aria-label="PDF 页码"
-            value={pageNumber}
-            min={1}
-            max={pageCount || undefined}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isInteger(n) && n >= 1) onPageChange(Math.min(pageCount || n, n));
-            }}
-            style={{ width: 56 }}
-          />{" "}
-          / {pageCount || "…"} 页
+        <span className="seg">
+          <button onClick={() => onPageChange(Math.max(1, pageNumber - 1))} disabled={pageNumber <= 1 || loadingPdf}>
+            上一页
+          </button>
+          <span className="seg-label">
+            第{" "}
+            <input
+              type="number"
+              aria-label="PDF 页码"
+              value={pageNumber}
+              min={1}
+              max={pageCount || undefined}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isInteger(n) && n >= 1) onPageChange(Math.min(pageCount || n, n));
+              }}
+            />{" "}
+            / {pageCount || "…"} 页
+          </span>
+          <button
+            onClick={() => onPageChange(Math.min(pageCount, pageNumber + 1))}
+            disabled={pageNumber >= pageCount || loadingPdf}
+          >
+            下一页
+          </button>
         </span>
-        <button
-          onClick={() => onPageChange(Math.min(pageCount, pageNumber + 1))}
-          disabled={pageNumber >= pageCount || loadingPdf}
-        >
-          下一页
-        </button>
-        <button onClick={() => { setFitWidth(false); setScale(Math.max(0.4, displayScale - 0.2)); }}>−</button>
-        <span>{Math.round(displayScale * 100)}%</span>
-        <button onClick={() => { setFitWidth(false); setScale(Math.min(4, displayScale + 0.2)); }}>+</button>
+        <span className="spacer" />
+        <span className="seg">
+          <button title="缩小" onClick={() => { setFitWidth(false); setScale(Math.max(0.4, displayScale - 0.2)); }}>−</button>
+          <span className="seg-label">{Math.round(displayScale * 100)}%</span>
+          <button title="放大" onClick={() => { setFitWidth(false); setScale(Math.min(4, displayScale + 0.2)); }}>+</button>
+        </span>
         <button aria-pressed={fitWidth} onClick={() => setFitWidth(true)}>适合宽度</button>
         <a href={documentSourceUrl(documentId)} target="_blank" rel="noreferrer">
           查看源文件

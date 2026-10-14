@@ -202,3 +202,10 @@
 - 补齐上轮缺口：inspector BOM 归类、record_pages 对缺失 extract 的降级、上传415 details、records 过滤一致性、useEvidence clear/selectionKey、EvidenceNavigator 组件测试。
 - 环境事实：IAB webview 不触发 rAF，pdf.js 渲染需截图驱动帧（测试环境行为，非应用缺陷）；浏览器会缓存旧 bundle，验收新前端需绕过缓存。
 - 446 passed（+15）、vitest 14 passed（+7）、build 通过；服务以新代码运行。
+
+### 前端视觉美化（用户要求）
+- 设计令牌扩充（阴影/圆角/浅色分隔线/更柔和的灰阶），面板加投影与表头底色，表格行悬浮、选中行左侧强调条。
+- 工作台主标签改为分段控件；PDF 工具栏单行化（翻页/缩放各自分段组合，适合宽度与查看源文件右置）。
+- 右栏详情：序列/原始序列放入浅色代码框，检查结果行分隔线，字段标签统一 .section-label/细化 .detail-grid。
+- 对话框：投影+标题/操作区底色+入场动画+毛玻璃遮罩；文件选择按钮样式统一；状态胶囊加描边；横幅加左侧强调条；自定义滚动条与 focus ring。
+- 仅样式与分类型名调整，行为不变；vitest 14 通过、构建通过。

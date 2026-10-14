@@ -83,11 +83,13 @@ export function SequenceDetail({ record }: { record: SequenceRecordData }) {
         <dd>{record.is_complete ? "完整" : <span className="status review">不完整 / 含未知残基</span>}</dd>
       </dl>
 
-      <div style={{ padding: "0 12px 12px" }}>
-        <div className="dim" style={{ marginBottom: 4 }}>规范序列（未知残基红色标注）</div>
-        <SequenceText sequence={record.normalized_sequence} residues={record.residues} />
-        <div className="dim" style={{ margin: "12px 0 4px" }}>原始序列</div>
-        <div className="sequence-text dim">{record.raw_sequence}</div>
+      <div style={{ padding: "0 14px 14px" }}>
+        <div className="section-label">规范序列（未知残基红色标注）</div>
+        <div className="sequence-box">
+          <SequenceText sequence={record.normalized_sequence} residues={record.residues} />
+        </div>
+        <div className="section-label" style={{ margin: "12px 0 6px" }}>原始序列</div>
+        <div className="sequence-box sequence-text dim">{record.raw_sequence}</div>
         <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={copyWithState}>复制规范序列</button>
           {copied && <span className="dim">{copied}</span>}
