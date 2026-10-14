@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from bio_pdf.contracts import Job, ReviewItem
-from bio_pdf.errors import WorkflowError
+from bio_pdf.config import WorkflowConfig, load_workflow_config
+from bio_pdf.errors import PageRangeInvalidError, WorkflowError
 from bio_pdf.ingest.inspector import inspect_pdf
 from bio_pdf.storage.artifacts import make_cache_key
 from bio_pdf.storage.repository import Repository
@@ -25,7 +26,57 @@ from bio_pdf.workflow.stages import STAGE_ORDER
 
 #: Bump when the stage wiring or domain rules change so old cache entries
 #: cannot be mixed with new semantics.
-PIPELINE_VERSION = "v1"
+PIPELINE_VERSION = "v2"
+
+
+def effective_workflow_config(persisted: dict[str, Any]) -> WorkflowConfig:
+    """Read the WorkflowConfig from a persisted job config row.
+
+    New rows carry ``effective_config``; legacy rows (v1 shape with
+    top-level engine/pages/…) are mapped so old jobs stay runnable without
+    rewriting their history.
+    """
+
+    raw = persisted.get("effective_config")
+    if isinstance(raw, dict):
+        return WorkflowConfig.model_validate(raw)
+    # Legacy v1 shape.
+    hint = persisted.get("document_type_hint")
+    return WorkflowConfig.model_validate(
+        {
+            "parser": str(persisted.get("engine") or "native"),
+            "pages": persisted.get("pages"),
+            "document_type_hint": hint if hint in ("paper", "patent") else "auto",
+        }
+    )
+
+
+def validate_page_selection(
+    page_numbers: tuple[int, ...] | list[int] | None, page_count: int
+) -> tuple[int, ...]:
+    """Validate an explicit page selection against the real page count.
+
+    Empty/None → all pages. Out-of-range pages and duplicates are
+    rejected at creation time (422 at the API layer) — silently dropping
+    duplicates produced page sets that differed from the request.
+    """
+
+    if not page_numbers:
+        return tuple(range(1, page_count + 1))
+    pages = tuple(int(p) for p in page_numbers)
+    out_of_range = [p for p in pages if p < 1 or p > page_count]
+    if out_of_range:
+        raise PageRangeInvalidError(
+            f"page numbers out of range {out_of_range} (document has {page_count})",
+            details={"pages": out_of_range, "page_count": page_count},
+        )
+    duplicates = sorted({p for p in pages if pages.count(p) > 1})
+    if duplicates:
+        raise PageRangeInvalidError(
+            f"duplicate pages in request: {duplicates}",
+            details={"duplicates": duplicates},
+        )
+    return pages
 
 
 @dataclass
@@ -71,12 +122,17 @@ class JobService:
         page_numbers: tuple[int, ...] = (),
         targets: tuple[str, ...] = ("sequences", "activities"),
         document_type_hint: str | None = None,
+        ocr_policy: str = "auto",
+        workflow_config: WorkflowConfig | None = None,
+        config_path: Path | str | None = None,
     ) -> tuple[Job, int]:
         """Register the document and enqueue a job. Returns (job, page_count).
 
-        ``page_numbers`` may be empty for "all pages". The inspection runs
-        up front so a non-PDF input fails at creation time, not in the
-        worker.
+        The effective :class:`WorkflowConfig` is loaded (base TOML + API
+        overrides), completed with the concrete page set and persisted with
+        its hash — this is what stages read and what makes a rerun
+        reproducible. ``page_numbers`` may be empty for "all pages"; pages
+        outside 1..page_count or duplicates fail at creation time.
         """
 
         inspection = inspect_pdf(source_path)
@@ -88,15 +144,23 @@ class JobService:
             metadata={"document_type_hint": document_type_hint},
         )
 
-        pages = tuple(page_numbers) or tuple(range(1, inspection.page_count + 1))
-        config = {
+        if workflow_config is None:
+            workflow_config = load_workflow_config(config_path)
+        cfg = workflow_config.model_copy(update={"parser": engine})
+        if ocr_policy != "auto":
+            cfg = cfg.model_copy(update={"ocr_policy": ocr_policy})  # type: ignore[arg-type]
+        if document_type_hint:
+            cfg = cfg.model_copy(update={"document_type_hint": document_type_hint})  # type: ignore[arg-type]
+
+        page_count = inspection.page_count
+        pages = validate_page_selection(page_numbers, page_count)
+        cfg = cfg.model_copy(update={"pages": list(pages)})
+
+        effective = {
             "pipeline": PIPELINE_VERSION,
-            "engine": engine,
-            "pages": list(pages),
-            "targets": list(targets),
-            "document_type_hint": document_type_hint,
+            "effective_config": cfg.model_dump(mode="json"),
         }
-        config_hash = make_cache_key(config)
+        config_hash = make_cache_key(effective)
         now = datetime.now(tz=timezone.utc)
         job = Job(
             job_id=f"job-{uuid.uuid4().hex[:12]}",
@@ -107,7 +171,7 @@ class JobService:
             updated_at=now,
         )
         self._repository.create_job(job)
-        self._repository.set_job_config(job.job_id, config)
+        self._repository.set_job_config(job.job_id, effective)
         return job, inspection.page_count
 
     def run_job(self, job_id: str, *, resume: bool = False) -> RunResult:
@@ -128,11 +192,12 @@ class JobService:
 
         runner = self._build_runner()
         config = self.job_config(job_id)
+        effective = effective_workflow_config(config)
         self._repository.update_job_status(job_id, "running", current_stage=None)
         result = runner.run(
             job,
             source_path=str(row["source_path"]),
-            page_numbers=tuple(config.get("pages") or ()),
+            page_numbers=tuple(effective.pages or ()),
             resume=resume,
             options=self.job_options(job, config),
         )
@@ -155,13 +220,19 @@ class JobService:
         return self._repository.get_job_config(job_id)
 
     def job_options(self, job: Job, config: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Options dict handed to every stage handler."""
+        """Options dict handed to every stage handler.
+
+        Stages read their slice via effective_options_for_stage; the full
+        effective config travels under ``workflow_config``.
+        """
 
         cfg = config if config is not None else self.job_config(job.job_id)
+        effective = effective_workflow_config(cfg)
         return {
-            "engine": str(cfg.get("engine") or "native"),
-            "targets": tuple(cfg.get("targets") or ("sequences", "activities")),
-            "document_type_hint": cfg.get("document_type_hint"),
+            "engine": effective.parser,
+            "targets": tuple(effective.targets),
+            "document_type_hint": effective.document_type_hint,
+            "workflow_config": effective.model_dump(mode="json"),
             "repository_path": str(self.paths.database),
         }
 

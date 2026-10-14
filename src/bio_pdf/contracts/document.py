@@ -35,6 +35,27 @@ BlockKind = Literal[
     "unknown",
 ]
 
+#: Semantic role of a block: what the text *is*, decided from layout/section
+#: evidence. Role drives extraction gating (authors/references are never
+#: sequence candidates). Uncertain → "unknown"; never guess from blacklists
+#: of person names.
+SemanticRole = Literal[
+    "body",
+    "title",
+    "caption",
+    "author",
+    "header",
+    "footer",
+    "reference",
+    "claims",
+    "methods",
+    "sequence_listing",
+    "unknown",
+]
+
+#: Role of a cell inside the table's header structure.
+CellHeaderRole = Literal["column", "row", "both", "data", "unknown"]
+
 
 class PageGeometry(_StrictModel):
     """Page dimensions in PDF points after rotation/CropBox has been applied.
@@ -130,14 +151,22 @@ class TextBlock(_StrictModel):
     if the upstream source could not produce coordinates (e.g. an OCR page
     that returned text only). ``kind`` separates sequence listings from
     regular prose so downstream extractors can dispatch cheaply.
+
+    ``ordinal`` is the block's 0-based position in the provider's reading
+    order for the page — stable evidence addressing that survives block-id
+    formatting changes. ``source_refs`` links to upstream provider items
+    (e.g. Docling ``#/texts/42``) so evidence can be re-derived.
     """
 
     block_id: NonEmptyStr
     kind: BlockKind = "text"
+    semantic_role: SemanticRole = "unknown"
     bbox: BoundingBox | None = None
     text_raw: NonEmptyStr
     table_id: NonEmptyStr | None = None
+    ordinal: int | None = Field(default=None, ge=0)
     provenance: list[Provenance] = Field(default_factory=list)
+    source_refs: list[NonEmptyStr] = Field(default_factory=list)
 
 
 class TableCell(_StrictModel):
@@ -145,6 +174,11 @@ class TableCell(_StrictModel):
 
     ``row_index``/``column_index`` are zero-based. ``rowspan``/``colspan``
     follow the HTML convention (both default to 1).
+
+    ``text_raw`` may be an empty string: a *present but empty* cell
+    (placeholder under a merged header) is different from a *missing* cell
+    (absent from ``cells``). ``header_role`` records whether the cell acts
+    as a column header, row header, both, or plain data.
     """
 
     cell_id: NonEmptyStr
@@ -152,8 +186,10 @@ class TableCell(_StrictModel):
     column_index: int = Field(ge=0)
     rowspan: int = Field(default=1, ge=1)
     colspan: int = Field(default=1, ge=1)
-    text_raw: NonEmptyStr
+    text_raw: str
+    header_role: CellHeaderRole = "unknown"
     bbox: BoundingBox | None = None
+    source_refs: list[NonEmptyStr] = Field(default_factory=list)
 
 
 class Table(_StrictModel):
@@ -161,6 +197,12 @@ class Table(_StrictModel):
 
     ``header_cell_ids`` keeps the linkage to the cells acting as the
     column/row headers so evidence can travel with each measurement.
+    ``footnote_refs``/``caption_refs`` point at the block ids carrying the
+    table's caption and footnotes (units and legend text often live there).
+
+    ``structure_issues`` lists detected structural problems (span overlap,
+    ragged rows, missing grid positions); a table with issues must not
+    silently pass downstream checks as a healthy matrix.
     """
 
     table_id: NonEmptyStr
@@ -170,8 +212,11 @@ class Table(_StrictModel):
     cells: list[TableCell]
     header_cell_ids: list[NonEmptyStr] = Field(default_factory=list)
     caption: NonEmptyStr | None = None
+    caption_refs: list[NonEmptyStr] = Field(default_factory=list)
+    footnote_refs: list[NonEmptyStr] = Field(default_factory=list)
     bbox: BoundingBox | None = None
     continuation_group: NonEmptyStr | None = None
+    structure_issues: list[NonEmptyStr] = Field(default_factory=list)
 
 
 class NormalizedPage(_StrictModel):

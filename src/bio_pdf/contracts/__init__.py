@@ -10,13 +10,16 @@ from __future__ import annotations
 
 from bio_pdf.contracts.common import (
     BoundingBox,
+    EvidenceFragment,
     EvidenceSpan,
     PageNumber,
     SCHEMA_VERSION,
+    DOMAIN_SCHEMA_VERSION,
     validate_bbox,
 )
 from bio_pdf.contracts.document import (
     BlockKind,
+    CellHeaderRole,
     DocumentInspection,
     EvidenceImage,
     NormalizedDocument,
@@ -26,6 +29,7 @@ from bio_pdf.contracts.document import (
     Provenance,
     QualityConfig,
     RouteDecision,
+    SemanticRole,
     Table,
     TableCell,
     TextBlock,
@@ -33,6 +37,7 @@ from bio_pdf.contracts.document import (
 from bio_pdf.contracts.records import (
     AcceptanceState,
     ActivityValue,
+    AssayRecord,
     CheckOutcome,
     CheckResult,
     ChainName,
@@ -41,6 +46,7 @@ from bio_pdf.contracts.records import (
     EvidenceKind,
     EvidenceRef,
     Measurement,
+    MetricDefinition,
     MoleculeType,
     RelationPredicate,
     RelationResult,
@@ -51,6 +57,7 @@ from bio_pdf.contracts.records import (
     SeqIdNo,
     ValidationState,
 )
+from bio_pdf.contracts.extraction import ExtractionBatch, RawMention
 from bio_pdf.contracts.job import (
     AcceptanceDecision,
     ArtifactRef,
@@ -72,9 +79,11 @@ from bio_pdf.contracts.export_schema import (
 
 __all__ = [
     "SCHEMA_VERSION",
+    "DOMAIN_SCHEMA_VERSION",
     "PageNumber",
     "BoundingBox",
     "EvidenceSpan",
+    "EvidenceFragment",
     "validate_bbox",
     "DocumentInspection",
     "NormalizedDocument",
@@ -85,6 +94,8 @@ __all__ = [
     "RouteDecision",
     "TextBlock",
     "BlockKind",
+    "SemanticRole",
+    "CellHeaderRole",
     "Table",
     "TableCell",
     "Provenance",
@@ -108,6 +119,10 @@ __all__ = [
     "CheckOutcome",
     "SeqIdNo",
     "CheckResult",
+    "AssayRecord",
+    "MetricDefinition",
+    "RawMention",
+    "ExtractionBatch",
     "Job",
     "Stage",
     "JobStatus",

@@ -123,6 +123,13 @@ class SequenceRecord(_StrictModel):
     blocks) and the normalized one-letter form. ``declared_length`` and
     ``observed_length`` are stored independently so incomplete trailing
     segments remain honest.
+
+    Provenance: ``source_kind`` says where the candidate came from — a
+    listing block, a prose fragment, a table cell or an attachment — and
+    ``sequence_scope`` says whether it claims to be a full listing entry or
+    a fragment of a natural moiety. Residue-level notes (D/L, modifications,
+    linkers, retro-inverso) live in ``residue_annotations`` and never alter
+    ``normalized_sequence`` silently.
     """
 
     sequence_id: NonEmptyStr
@@ -130,6 +137,16 @@ class SequenceRecord(_StrictModel):
     seq_id_no: SeqIdNo | None = None
     molecule_type: MoleculeType
     representation: Representation
+
+    entity_id: NonEmptyStr | None = None
+    source_kind: Literal[
+        "listing", "inline_fragment", "table", "reference_attachment"
+    ] = "inline_fragment"
+    sequence_scope: Literal[
+        "fragment", "full_listing", "undetermined"
+    ] = "undetermined"
+    residue_annotations: list[dict[str, str]] = Field(default_factory=list)
+    source_refs: list[NonEmptyStr] = Field(default_factory=list)
 
     declared_length: int | None = Field(default=None, ge=0)
     observed_length: int | None = Field(default=None, ge=0)
@@ -240,20 +257,30 @@ class Measurement(_StrictModel):
     Field-level evidence is required for ``value``/``unit``/``entity``/
     ``target`` so that reviewers can audit which cell or paragraph
     contributed each component.
+
+    Entity identity: ``entity_id`` is the id of an Entity object (resolvable
+    in the job's entity list) or None. The *original surface text* lives in
+    ``entity_raw`` — legacy table rows that stuffed a row label into
+    ``entity_id`` are mapped by compat to ``entity_raw`` and are NOT
+    considered linked. ``metric_raw`` keeps the source spelling (``IC₅₀``,
+    ``MIC50``) while ``metric`` holds the canonical registry name.
     """
 
     measurement_id: NonEmptyStr
     document_id: NonEmptyStr
     entity_id: NonEmptyStr | None = None
+    entity_raw: NonEmptyStr | None = None
     sequence_ids: list[NonEmptyStr] = Field(default_factory=list)
     assay_id: NonEmptyStr | None = None
     metric: NonEmptyStr
+    metric_raw: NonEmptyStr | None = None
     value: ActivityValue
 
     unit_raw: NonEmptyStr | None = None
     unit_normalized: NonEmptyStr | None = None
 
     target_raw: NonEmptyStr | None = None
+    target_id: NonEmptyStr | None = None
     conditions: list[dict[str, str]] = Field(default_factory=list)
 
     evidence_kind: EvidenceKind = "undetermined"
@@ -263,6 +290,44 @@ class Measurement(_StrictModel):
 
     validation_state: ValidationState = "unchecked"
     acceptance_state: AcceptanceState = "candidate"
+
+
+class AssayRecord(_StrictModel):
+    """An experimental method that produced measurements.
+
+    Extracted from methods sections, captions and table legends. Every
+    condition field must point back to its source evidence — a method
+    paragraph never silently becomes THE assay for the whole document.
+    """
+
+    assay_id: NonEmptyStr
+    document_id: NonEmptyStr
+    method_raw: NonEmptyStr
+    target_raw: NonEmptyStr | None = None
+    conditions: list[dict[str, str]] = Field(default_factory=list)
+    condition_evidence: dict[str, list[NonEmptyStr]] = Field(default_factory=dict)
+    evidence_ids: list[NonEmptyStr] = Field(min_length=1)
+
+
+class MetricDefinition(_StrictModel):
+    """Registry entry describing what a metric means and requires.
+
+    ``value_kind`` constrains which ActivityValue shapes are acceptable;
+    the requirement flags drive validation (an S/R/I susceptibility result
+    has no concentration unit; MIC without a unit is incomplete). Registry
+    names are canonical; the source spelling stays on the record as
+    ``metric_raw``.
+    """
+
+    name: NonEmptyStr
+    value_kind: Literal[
+        "numeric", "categorical", "numeric_or_categorical"
+    ] = "numeric"
+    unit_requirement: Literal["required", "optional", "not_applicable"] = "required"
+    target_requirement: Literal["required", "optional", "not_applicable"] = "optional"
+    entity_requirement: Literal["required", "optional", "not_applicable"] = "required"
+    allowed_units: list[NonEmptyStr] = Field(default_factory=list)
+    description: NonEmptyStr | None = None
 
 
 # ---------------------------------------------------------------------------

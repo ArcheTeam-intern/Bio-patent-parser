@@ -104,13 +104,25 @@ class ExportService:
         measurements = snap["measurements"]
         revision = snap["result_revision"]
 
+        # Provenance: everything a downstream consumer needs to reproduce
+        # and audit this export.
+        job = self.repository.get_job(job_id)
+        cfg_row = self.repository.get_job_config(job_id)
+        effective_cfg = cfg_row.get("effective_config") or {}
         manifest = {
-            "schema_version": "1.0.0",
+            "schema_version": "1.1.0",
             "job_id": job_id,
             "document_id": snap["document_id"],
+            "source_sha256": snap["document_id"].removeprefix("sha256:"),
             "result_revision": revision,
+            "pipeline_version": cfg_row.get("pipeline"),
+            "effective_config_hash": job.config_hash if job else None,
+            "effective_config": effective_cfg,
+            "rule_versions": (effective_cfg.get("rule_versions") or {}),
             "format": fmt,
             "accepted_only": accepted_only,
+            "coverage": snap.get("coverage"),
+            "warnings": snap.get("warnings", []),
             "counts": {
                 "sequences": len(sequences),
                 "measurements": len(measurements),

@@ -21,6 +21,11 @@ from pydantic import (
 #: way that breaks compatibility with the previous revision.
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
+#: Domain result schema version carried by NormalizedDocument / ExtractionBatch
+#: / exports. `1.1.0` adds semantic roles, evidence fragments and source
+#: provenance; readers accept `1.0.0` via bio_pdf.contracts.compat.
+DOMAIN_SCHEMA_VERSION = "1.1.0"
+
 
 class _StrictModel(BaseModel):
     """Base model that rejects unknown fields by default.
@@ -112,6 +117,26 @@ def validate_bbox(
         )
 
 
+class EvidenceFragment(_StrictModel):
+    """One located piece of a (possibly multi-page / multi-box) evidence span.
+
+    Fragments are the unit of precise location: a sequence that continues
+    across pages has one fragment per continuation, a table-anchored value
+    points at its cell. ``char_start``/``char_end`` are a Python/Unicode
+    half-open interval into ``raw_text`` of the referenced block.
+    """
+
+    page_number: PageNumber
+    bbox: BoundingBox | None = None
+    block_id: NonEmptyStr | None = None
+    table_id: NonEmptyStr | None = None
+    cell_id: NonEmptyStr | None = None
+    char_start: int | None = Field(default=None, ge=0)
+    char_end: int | None = Field(default=None, ge=0)
+    raw_text: str | None = None
+    source_artifact_id: NonEmptyStr | None = None
+
+
 class EvidenceSpan(_StrictModel):
     """A location reference for an extracted value or statement.
 
@@ -119,6 +144,13 @@ class EvidenceSpan(_StrictModel):
     OCR-only PDF, or a continuation cell without its own coordinates) only
     know the page. The contract distinguishes ``bbox is None`` from
     ``bbox is not None but page is None``.
+
+    Multi-page / multi-box evidence is expressed through ``fragments``;
+    legacy single-box payloads keep using ``page_number`` + ``bbox`` and
+    ``bio_pdf.contracts.compat`` maps them to a one-fragment span.
+
+    Page numbers are NEVER recovered from the evidence id: the id is an
+    opaque content-derived string (see extract/evidence.py).
     """
 
     evidence_id: NonEmptyStr
@@ -129,6 +161,11 @@ class EvidenceSpan(_StrictModel):
     char_end: int | None = Field(default=None, ge=0)
     raw_text: NonEmptyStr | None = None
 
+    source_parser: NonEmptyStr | None = None
+    source_locator: NonEmptyStr | None = None
+    fragments: list[EvidenceFragment] = Field(default_factory=list)
+    location_precision: Literal["character", "cell", "block", "page", "none"] = "none"
+
     def geometry_present(self) -> bool:
         """Return True if the span has at least one geometry anchor.
 
@@ -136,4 +173,6 @@ class EvidenceSpan(_StrictModel):
         page-level coordinate at all.
         """
 
-        return self.page_number is not None or self.bbox is not None
+        if self.page_number is not None or self.bbox is not None:
+            return True
+        return any(f.page_number >= 1 for f in self.fragments)
