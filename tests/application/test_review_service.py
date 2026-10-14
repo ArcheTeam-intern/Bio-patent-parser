@@ -119,10 +119,8 @@ def test_correct_updates_value_and_reruns_validation(reviewed_job) -> None:
     assert outcome.record["value"]["upper"] == "10"
 
     # The corrected record surfaces through the records API overlay.
-    import json as _json
-    data = _json.loads(
-        (svc.paths.artifact_root / f"jobs/{job_id}/validate/validation.json").read_text("utf-8")
-    )
+    from bio_pdf.storage.result_reader import ResultReader
+    data = ResultReader(svc.paths.artifact_root).read_json(job_id, "validation")
     baseline = next(m for m in data["measurements"] if m["measurement_id"] == item.record_id)
     assert baseline["value"]["kind"] != "range" or baseline is not None
     # baseline file untouched; head carries the correction

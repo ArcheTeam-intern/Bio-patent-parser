@@ -422,14 +422,15 @@ class Repository:
     # ---- artifacts -----------------------------------------------------
 
     def register_artifact(self, ref: ArtifactRef) -> None:
+        # Occurrence-based ids (stage_run:logical_name) are unique by
+        # construction; re-registering the exact same occurrence is a no-op,
+        # never an overwrite of a different path under the same id.
         self._conn.execute(
             """
             INSERT INTO artifacts (artifact_id, sha256, relative_path, media_type,
                                    producer_stage_run_id, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(artifact_id) DO UPDATE SET
-                    relative_path = excluded.relative_path,
-                    media_type = excluded.media_type
+            ON CONFLICT(artifact_id) DO NOTHING
             """,
             (
                 ref.artifact_id,

@@ -66,7 +66,7 @@ def test_measurement_entity_target_unit_correct() -> None:
         table, document_id="sha256:fixture", evidences=evidences
     )
     by_key = {
-        (m.entity_id, m.target_raw): m for m in measurements
+        (m.entity_raw, m.target_raw): m for m in measurements
     }
     a_ecoli = by_key[("A", "E. coli")]
     assert a_ecoli.value.kind == "scalar"
@@ -84,7 +84,7 @@ def test_categorical_nd_is_not_zero() -> None:
     )
     nd = next(
         m for m in measurements
-        if m.entity_id == "B" and m.target_raw == "S. aureus"
+        if m.entity_raw == "B" and m.target_raw == "S. aureus"
     )
     assert nd.value.kind == "categorical"
     assert nd.value.qualifier == "ND"

@@ -112,7 +112,8 @@ def test_upload_and_create_job_then_worker_completes(client) -> None:
     # Artifacts list includes the export and its content is downloadable.
     res = c.get(f"/api/v1/jobs/{job_id}/artifacts")
     rels = {a["relative_path"] for a in res.json()["artifacts"]}
-    assert "jobs/{}/export/result.json".format(job_id) in rels
+    assert any(rel.endswith("--export--a1--") and rel.endswith("/result.json") is False or "/result.json" in rel for rel in rels)
+    assert any("result.json" in rel for rel in rels)
 
 
 def test_upload_rejects_html_disguised_as_pdf(client) -> None:

@@ -1,29 +1,30 @@
 """Production stage handlers for the complete domain workflow.
 
-This module registers the full pipeline (review finding 2): source check →
-page classification → parse (native and/or layout) → normalize → domain
-extraction → validation + review queue → export. Handlers exchange state
-*through artifacts on disk* (never in-memory), which is what makes resume
-and hash verification meaningful.
+T02 conventions:
+
+- Handlers write ONLY into ``context.stage_dir()``
+  (``jobs/<job>/stage_runs/<stage_run_id>/``) so attempts never overwrite
+  each other.
+- Inputs are consumed through ``context.inputs`` — the
+  ``<stage>.<logical_name>`` → :class:`ArtifactRef` map the runner passes
+  in — with a legacy fixed-path fallback so pre-T02 jobs stay readable.
+- Every stage declares ``implementation_version`` (code semantics) and
+  ``provider_version`` (external engine), which feed the content cache key.
 
 Artifact layout under ``artifact_root/jobs/<job_id>/``::
 
-    ingest/inspection.json      DocumentInspection
-    inspect/quality.json        per-page signals + route decisions
-    parse/<engine>/...          adapter artifacts (normalized/raw/manifest)
-    normalized.json             canonical NormalizedDocument for the job
-    extract/extract.json        sequences, measurements, relations, evidence
-    validate/validation.json    checks written back + review plan summary
-    export/result.json          the domain export (JSON)
-
-Every handler returns artifact refs with paths relative to ``artifact_root``
-so the runner can register and later hash-verify them on resume.
+    stage_runs/<run>/inspection.json   DocumentInspection
+    stage_runs/<run>/quality.json      per-page signals + routes
+    stage_runs/<run>/normalized.json   adapter outputs (parse stages)
+    stage_runs/<run>/extract.json      domain extraction
+    stage_runs/<run>/validation.json   checks + review plan
+    stage_runs/<run>/result.json       domain export
+    published/result-manifest.json     runner-published baseline
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +37,7 @@ from bio_pdf.contracts import (
     SequenceRecord,
     StageOutcome,
 )
-from bio_pdf.errors import WorkflowError
+from bio_pdf.errors import PageCoverageMismatchError, WorkflowError
 from bio_pdf.extract.activities.prose import extract_prose_measurements
 from bio_pdf.extract.activities.tables import extract_table_measurements
 from bio_pdf.extract.relations import link_explicit_relations
@@ -68,26 +69,98 @@ def _job_rel(context: StageContext, *parts: str) -> str:
     return "jobs/" + context.job_id + "/" + "/".join(parts)
 
 
+def _stage_ref(
+    context: StageContext,
+    filename: str,
+    ref: ArtifactRef,
+    media_type: str = "application/json",
+) -> ArtifactRef:
+    """Wrap an artifact written into the stage dir as a root-relative ref."""
+
+    return ArtifactRef(
+        artifact_id=ref.artifact_id,
+        sha256=ref.sha256,
+        relative_path=_job_rel(
+            context, "stage_runs", context.stage_run_id, filename
+        ),
+        media_type=ref.media_type or media_type,
+        producer_stage_run_id=context.stage_run_id,
+    )
+
+
+def _read_input_json(
+    context: StageContext, logical_name: str, *legacy_parts: str
+) -> dict[str, Any]:
+    """Read an upstream artifact via its ref, falling back to legacy paths.
+
+    The fallback keeps pre-T02 jobs resumable: their artifacts live at
+    ``jobs/<job>/<stage>/<file>`` instead of stage-run directories.
+    """
+
+    ref = context.inputs.get(logical_name)
+    if ref is not None:
+        path = _resolve_artifact(context, ref)
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    legacy = Path(context.output_dir).joinpath(*legacy_parts)
+    if legacy.is_file():
+        return json.loads(legacy.read_text(encoding="utf-8"))
+    raise WorkflowError(
+        f"required input {logical_name!r} is missing",
+        details={"logical_name": logical_name, "job_id": context.job_id},
+    )
+
+
+def _resolve_artifact(context: StageContext, ref: ArtifactRef) -> Path:
+    """Resolve a ref to an absolute path from the artifact root.
+
+    The runner's refs are root-relative (``jobs/...``). Legacy adapter refs
+    may carry bare filenames relative to their stage dir.
+    """
+
+    root = _artifact_root(context)
+    candidate = root / ref.relative_path
+    if candidate.is_file():
+        return candidate
+    return Path(context.stage_dir()) / Path(ref.relative_path).name
+
+
+def _artifact_root(context: StageContext) -> Path:
+    # output_dir = <artifact_root>/jobs/<job_id>
+    return Path(context.output_dir).parent.parent
+
+
 class _FileStage:
-    """Shared plumbing: cache key from stage inputs."""
+    """Shared plumbing: input-hash based cache key and version hooks.
+
+    The runner builds the authoritative content cache key itself; the
+    handler-side ``cache_key`` remains for protocol compatibility.
+    """
 
     name: str = "unset"
+    implementation: str = "v3"
+
+    def implementation_version(self) -> str:
+        return self.implementation
+
+    def provider_version(self, context: StageContext) -> str:
+        return ""
 
     def cache_key(self, context: StageContext) -> str:
-        source = Path(context.source_path)
-        try:
-            stat = source.stat()
-            source_sig = f"{source}:{stat.st_size}:{stat.st_mtime_ns}"
-        except OSError:
-            source_sig = str(source)
         return make_cache_key(
             {
                 "stage": self.name,
-                "source": source_sig,
-                "pages": list(context.page_numbers),
-                "options": context.options,
+                "document_sha256": context.document_sha256,
+                "pages": sorted(context.page_numbers),
             }
         )
+
+
+def _workflow_options(context: StageContext) -> dict[str, Any]:
+    """Effective WorkflowConfig dict handed down by the JobService."""
+
+    cfg = context.options.get("workflow_config")
+    return cfg if isinstance(cfg, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -97,19 +170,17 @@ class _FileStage:
 
 class IngestStage(_FileStage):
     name = "ingest"
+    implementation = "v3"
 
     def run(self, context: StageContext) -> StageOutcome:
         inspection = inspect_pdf(Path(context.source_path))
-        out_dir = Path(context.output_dir) / "ingest"
-        ref = atomic_write_json(out_dir, "inspection.json", json.loads(inspection.model_dump_json()))
+        out_dir = Path(context.stage_dir())
+        ref = atomic_write_json(
+            out_dir, "inspection.json", json.loads(inspection.model_dump_json())
+        )
         return StageOutcome(
             artifact_refs=[
-                type(ref)(
-                    artifact_id=ref.artifact_id,
-                    sha256=ref.sha256,
-                    relative_path=_job_rel(context, "ingest", "inspection.json"),
-                    media_type="application/json",
-                )
+                _stage_ref(context, "inspection.json", ref),
             ]
         )
 
@@ -121,16 +192,18 @@ class IngestStage(_FileStage):
 
 class InspectStage(_FileStage):
     name = "inspect"
+    implementation = "v3"
 
     def run(self, context: StageContext) -> StageOutcome:
         import pypdfium2 as pdfium
 
         from bio_pdf.contracts import QualityConfig
 
-        inspection_payload = json.loads(
-            (Path(context.output_dir) / "ingest" / "inspection.json").read_text(encoding="utf-8")
+        inspection = DocumentInspection.model_validate(
+            _read_input_json(
+                context, "ingest.inspection.json", "ingest", "inspection.json"
+            )
         )
-        inspection = DocumentInspection.model_validate(inspection_payload)
 
         requested = list(context.page_numbers) or list(
             range(1, inspection.page_count + 1)
@@ -150,13 +223,20 @@ class InspectStage(_FileStage):
                     text = textpage.get_text_bounded() or ""
                 finally:
                     textpage.close()
-                # Image coverage: sum object areas (bounded to 1.0 downstream).
+                # Image coverage: clip each image bbox to the visible page
+                # and take the union area (clamped) — a naive sum overcounts
+                # overlapping images.
                 image_area = 0.0
                 try:
+                    rects: list[tuple[float, float, float, float]] = []
                     for obj in page.get_objects(max_depth=2):
                         if obj.type == 3:  # image
-                            pos = obj.get_pos()
-                            image_area += abs((pos[2] - pos[0]) * (pos[3] - pos[1]))
+                            x0, y0, x1, y1 = obj.get_pos()
+                            x0, y0 = max(x0, 0.0), max(y0, 0.0)
+                            x1, y1 = min(x1, width_pt), min(y1, height_pt)
+                            if x1 > x0 and y1 > y0:
+                                rects.append((x0, y0, x1, y1))
+                    image_area = _union_area(rects)
                 except Exception:  # noqa: BLE001 - signals are best-effort
                     image_area = 0.0
                 signals = inspect_page_signals(
@@ -175,19 +255,48 @@ class InspectStage(_FileStage):
         finally:
             pdf.close()
 
-        payload = {"schema_version": "1.0.0", "pages": pages_out}
-        out_dir = Path(context.output_dir) / "inspect"
+        payload = {
+            "schema_version": "1.1.0",
+            "pages": pages_out,
+            "warnings": [],
+        }
+        out_dir = Path(context.stage_dir())
         ref = atomic_write_json(out_dir, "quality.json", payload)
         return StageOutcome(
-            artifact_refs=[
-                type(ref)(
-                    artifact_id=ref.artifact_id,
-                    sha256=ref.sha256,
-                    relative_path=_job_rel(context, "inspect", "quality.json"),
-                    media_type="application/json",
-                )
-            ]
+            artifact_refs=[_stage_ref(context, "quality.json", ref)]
         )
+
+
+def _union_area(rects: list[tuple[float, float, float, float]]) -> float:
+    """Area of the union of axis-aligned rectangles (scan-line sweep)."""
+
+    if not rects:
+        return 0.0
+    events: list[tuple[float, int, float, float]] = []
+    for x0, y0, x1, y1 in rects:
+        events.append((x0, 1, y0, y1))
+        events.append((x1, -1, y0, y1))
+    events.sort()
+    active: list[tuple[float, float]] = []
+    area = 0.0
+    prev_x = events[0][0]
+    for x, kind, y0, y1 in events:
+        if active and x > prev_x:
+            # Union of y-intervals at this slab.
+            merged: list[list[float]] = []
+            for a, b in sorted(active):
+                if merged and a <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], b)
+                else:
+                    merged.append([a, b])
+            height = sum(b - a for a, b in merged)
+            area += height * (x - prev_x)
+        if kind == 1:
+            active.append((y0, y1))
+        else:
+            active.remove((y0, y1))
+        prev_x = x
+    return area
 
 
 # ---------------------------------------------------------------------------
@@ -197,23 +306,13 @@ class InspectStage(_FileStage):
 
 class NativeParseStage(_FileStage):
     name = "native_parse"
-
-    def cache_key(self, context: StageContext) -> str:
-        # Always part of the pipeline: native parse feeds the extract stage
-        # even when a layout engine provides the primary structure.
-        return make_cache_key(
-            {
-                "stage": self.name,
-                "source": _source_sig(context),
-                "pages": list(context.page_numbers),
-            }
-        )
+    implementation = "v3"
 
     def run(self, context: StageContext) -> StageOutcome:
         from bio_pdf.parsers.base import ParseRequest
         from bio_pdf.parsers.native_adapter import NativeAdapter
 
-        out_dir = Path(context.output_dir) / "parse" / "native"
+        out_dir = Path(context.stage_dir())
         request = ParseRequest(
             job_id=context.job_id,
             document_id=context.document_id,
@@ -229,6 +328,18 @@ class NativeParseStage(_FileStage):
 
 class LayoutParseStage(_FileStage):
     name = "layout_parse"
+    implementation = "v3"
+
+    def provider_version(self, context: StageContext) -> str:
+        engine = str(context.options.get(OPT_ENGINE, "native"))
+        if engine != "docling":
+            return ""
+        try:
+            import docling
+
+            return getattr(docling, "__version__", "unknown")
+        except Exception:  # noqa: BLE001 - version probe is best-effort
+            return "unknown"
 
     def run(self, context: StageContext) -> StageOutcome:
         engine = str(context.options.get(OPT_ENGINE, "native"))
@@ -244,7 +355,7 @@ class LayoutParseStage(_FileStage):
         except WorkflowError:
             return StageOutcome(artifact_refs=[], review_required=0)
 
-        out_dir = Path(context.output_dir) / "parse" / "docling"
+        out_dir = Path(context.stage_dir())
         request = ParseRequest(
             job_id=context.job_id,
             document_id=context.document_id,
@@ -258,17 +369,7 @@ class LayoutParseStage(_FileStage):
         return _refs_from_parse_artifacts(artifacts, out_dir, context)
 
 
-def _source_sig(context: StageContext) -> str:
-    source = Path(context.source_path)
-    try:
-        stat = source.stat()
-        return f"{source}:{stat.st_size}:{stat.st_mtime_ns}"
-    except OSError:
-        return str(source)
-
-
 def _refs_from_parse_artifacts(artifacts: Any, out_dir: Path, context: StageContext) -> StageOutcome:
-    from bio_pdf.contracts import ArtifactRef
     from bio_pdf.storage.artifacts import compute_sha256_bytes
 
     refs: list[ArtifactRef] = []
@@ -278,11 +379,15 @@ def _refs_from_parse_artifacts(artifacts: Any, out_dir: Path, context: StageCont
             continue
         sha = compute_sha256_bytes(path.read_bytes())
         refs.append(
-            ArtifactRef(
-                artifact_id=f"sha256:{sha}",
-                sha256=sha,
-                relative_path=_job_rel(context, "parse", out_dir.name, rel),
-                media_type="application/json",
+            _stage_ref(
+                context,
+                rel,
+                ArtifactRef(
+                    artifact_id=f"sha256:{sha}",
+                    sha256=sha,
+                    relative_path=rel,
+                    media_type="application/json",
+                ),
             )
         )
     return StageOutcome(artifact_refs=refs, review_required=0)
@@ -295,41 +400,56 @@ def _refs_from_parse_artifacts(artifacts: Any, out_dir: Path, context: StageCont
 
 class NormalizeStage(_FileStage):
     name = "normalize"
+    implementation = "v3"
 
     def run(self, context: StageContext) -> StageOutcome:
-        out_root = Path(context.output_dir)
-        docling_norm = out_root / "parse" / "docling" / "normalized.json"
-        native_norm = out_root / "parse" / "native" / "normalized.json"
-
-        source_path = docling_norm if docling_norm.is_file() else native_norm
-        if not source_path.is_file():
-            raise WorkflowError(
-                "no parse artifacts to normalize (both docling and native missing)",
-                details={"docling": str(docling_norm), "native": str(native_norm)},
-            )
+        # Primary structure: layout parse when the engine produced one,
+        # else the native parse. Legacy jobs keep their fixed paths.
+        payload: dict[str, Any] | None = None
+        for logical in ("layout_parse.normalized.json", "native_parse.normalized.json"):
+            if logical in context.inputs:
+                payload = _read_input_json(context, logical)
+                if payload:
+                    break
+        if payload is None:
+            docling_norm = Path(context.output_dir) / "parse" / "docling" / "normalized.json"
+            native_norm = Path(context.output_dir) / "parse" / "native" / "normalized.json"
+            source_path = docling_norm if docling_norm.is_file() else native_norm
+            if not source_path.is_file():
+                raise WorkflowError(
+                    "no parse artifacts to normalize (both docling and native missing)",
+                    details={"docling": str(docling_norm), "native": str(native_norm)},
+                )
+            payload = json.loads(source_path.read_text(encoding="utf-8"))
 
         # Strict contract validation: the on-disk file must be a valid
-        # NormalizedDocument (review finding 3).
-        document = NormalizedDocument.model_validate_json(
-            source_path.read_text(encoding="utf-8")
-        )
+        # NormalizedDocument.
+        document = NormalizedDocument.model_validate(payload)
         if not document.pages:
             raise WorkflowError(
                 "normalized document has no pages",
-                details={"source": str(source_path)},
+                details={"job_id": context.job_id},
             )
 
-        out_dir = out_root
+        # Coverage: every requested page must be present. A partial parse
+        # fails here instead of faking completion downstream.
+        requested = set(context.page_numbers)
+        produced = {p.page_number for p in document.pages}
+        missing = sorted(requested - produced)
+        if requested and missing:
+            raise PageCoverageMismatchError(
+                f"normalized document is missing requested pages: {missing}",
+                details={"missing": missing, "requested": sorted(requested)},
+            )
+
+        out_dir = Path(context.stage_dir())
         ref = atomic_write_json(
             out_dir, "normalized.json", json.loads(document.model_dump_json())
         )
-        canonical = type(ref)(
-            artifact_id=ref.artifact_id,
-            sha256=ref.sha256,
-            relative_path=_job_rel(context, "normalized.json"),
-            media_type="application/json",
+        return StageOutcome(
+            artifact_refs=[_stage_ref(context, "normalized.json", ref)],
+            review_required=0,
         )
-        return StageOutcome(artifact_refs=[canonical], review_required=0)
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +467,7 @@ def _page_blocks(document: NormalizedDocument) -> list[dict[str, Any]]:
                 {
                     "text": block.text_raw,
                     "kind": block.kind,
+                    "semantic_role": block.semantic_role,
                     "page_number": page.page_number,
                     "bbox": list(block.bbox) if block.bbox else None,
                     "block_id": block.block_id,
@@ -371,12 +492,16 @@ def _table_rows(document: NormalizedDocument) -> list[tuple[Any, dict[str, str]]
 
 class ExtractStage(_FileStage):
     name = "extract"
+    implementation = "v3"
 
     def run(self, context: StageContext) -> StageOutcome:
-        targets = set(context.options.get(OPT_TARGETS, ("sequences", "activities")))
-        out_root = Path(context.output_dir)
-        document = NormalizedDocument.model_validate_json(
-            (out_root / "normalized.json").read_text(encoding="utf-8")
+        targets = set(
+            _workflow_options(context).get("targets")
+            or context.options.get(OPT_TARGETS)
+            or ("sequences", "activities")
+        )
+        document = NormalizedDocument.model_validate(
+            _read_input_json(context, "normalize.normalized.json", "normalized.json")
         )
         doc_id = document.document_id
         blocks = _page_blocks(document)
@@ -386,10 +511,7 @@ class ExtractStage(_FileStage):
         # ---- sequences ----------------------------------------------------
         sequences: list[SequenceRecord] = []
         if "sequences" in targets:
-            # ST.25 listings: feed blocks with text + page numbers.
             sequences.extend(parse_st25_blocks(blocks, doc_id))
-            # Conservative inline candidates (skip ST.25-tagged text to
-            # avoid double extraction).
             st25_pages = {
                 b["page_number"]
                 for b in blocks
@@ -422,14 +544,23 @@ class ExtractStage(_FileStage):
                                 )
                             )
             for table, evidences in _table_rows(document):
-                measurements.extend(
-                    extract_table_measurements(
-                        table,
-                        document_id=doc_id,
-                        evidences=evidences,
-                        evidence_kind="measured",
-                    )
+                # Table guardrail (plan T08/M1): the header must carry a
+                # known metric before any cell becomes a Measurement;
+                # unclassified tables stay in diagnostics, never forced
+                # `measured`.
+                from bio_pdf.extract.activities.metrics import classify_table_metric
+
+                metric = classify_table_metric(table)
+                if metric is None:
+                    continue
+                table_measurements = extract_table_measurements(
+                    table,
+                    document_id=doc_id,
+                    evidences=evidences,
+                    evidence_kind="undetermined",
+                    metric=metric,
                 )
+                measurements.extend(table_measurements)
                 for cell in table.cells:
                     if not cell.text_raw:
                         continue
@@ -438,7 +569,8 @@ class ExtractStage(_FileStage):
                         document_id=doc_id,
                         page_number=table.page_number,
                         bbox=cell.bbox,
-                        raw_text=cell.text_raw[:200],
+                        raw_text=cell.text_raw,
+                        location_precision="cell",
                     )
                     evidence_spans.append(json.loads(span.model_dump_json()))
 
@@ -466,7 +598,6 @@ class ExtractStage(_FileStage):
 
         relation_result = link_explicit_relations([], sequences, measurements, [])
 
-        # Page-level spans for every sequence record (residue listing anchor).
         for seq in sequences:
             page_number = 1
             if seq.evidence_ids:
@@ -487,7 +618,6 @@ class ExtractStage(_FileStage):
                 )
             )
 
-        # Prose measurements without a bbox still need page-level spans.
         have_ids = {s["evidence_id"] for s in evidence_spans}
         for meas in measurements:
             for eid in meas.evidence_ids:
@@ -511,28 +641,22 @@ class ExtractStage(_FileStage):
                 )
 
         payload = {
-            "schema_version": "1.0.0",
+            "schema_version": "1.1.0",
             "document_id": doc_id,
             "sequences": [json.loads(s.model_dump_json()) for s in sequences],
             "measurements": [json.loads(m.model_dump_json()) for m in measurements],
             "relations": [json.loads(r.model_dump_json()) for r in relation_result.relations],
             "unresolved_references": [
                 json.loads(r.model_dump_json()) for r in relation_result.unresolved_references
-            ] + [json.loads(r.model_dump_json()) for r in unresolved],
+            ]
+            + [json.loads(r.model_dump_json()) for r in unresolved],
             "review_reasons": list(relation_result.review_reasons),
             "evidence_spans": evidence_spans,
         }
-        out_dir = out_root / "extract"
+        out_dir = Path(context.stage_dir())
         ref = atomic_write_json(out_dir, "extract.json", payload)
         return StageOutcome(
-            artifact_refs=[
-                type(ref)(
-                    artifact_id=ref.artifact_id,
-                    sha256=ref.sha256,
-                    relative_path=_job_rel(context, "extract", "extract.json"),
-                    media_type="application/json",
-                )
-            ],
+            artifact_refs=[_stage_ref(context, "extract.json", ref)],
             review_required=0,
         )
 
@@ -544,13 +668,15 @@ class ExtractStage(_FileStage):
 
 class ValidateStage(_FileStage):
     name = "validate"
+    implementation = "v3"
 
     def run(self, context: StageContext) -> StageOutcome:
         from bio_pdf.review.plan import build_review_plan
         from bio_pdf.storage.repository import Repository
 
-        out_root = Path(context.output_dir)
-        extract = json.loads((out_root / "extract" / "extract.json").read_text(encoding="utf-8"))
+        extract = _read_input_json(
+            context, "extract.extract.json", "extract", "extract.json"
+        )
 
         evidence_index = {
             span["evidence_id"]: span for span in extract.get("evidence_spans", [])
@@ -570,9 +696,6 @@ class ValidateStage(_FileStage):
             )
             decision = decide_acceptance(record.model_dump())
             record.acceptance_state = decision.acceptance_state
-            # Review queue reasons combine rule findings with the acceptance
-            # policy's codes — a checks_passed record still needs human
-            # review while auto-accept is off.
             reasons = list(result.review_reasons) + list(decision.reason_codes)
             sequences.append(_record_with_reasons(record, reasons))
 
@@ -593,7 +716,6 @@ class ValidateStage(_FileStage):
             reasons = list(result.review_reasons) + list(decision.reason_codes)
             measurements.append(_record_with_reasons(record, reasons))
 
-        # Review queue items persisted for the UI.
         review_records: list[dict[str, Any]] = []
         for seq in sequences:
             review_records.append(
@@ -625,23 +747,16 @@ class ValidateStage(_FileStage):
             repo.close()
 
         payload = {
-            "schema_version": "1.0.0",
+            "schema_version": "1.1.0",
             "sequences": sequences,
             "measurements": measurements,
             "review_count": len(items),
             "review_reasons": extract.get("review_reasons", []),
         }
-        out_dir = out_root / "validate"
+        out_dir = Path(context.stage_dir())
         ref = atomic_write_json(out_dir, "validation.json", payload)
         return StageOutcome(
-            artifact_refs=[
-                type(ref)(
-                    artifact_id=ref.artifact_id,
-                    sha256=ref.sha256,
-                    relative_path=_job_rel(context, "validate", "validation.json"),
-                    media_type="application/json",
-                )
-            ],
+            artifact_refs=[_stage_ref(context, "validation.json", ref)],
             review_required=len(items),
         )
 
@@ -653,8 +768,6 @@ def _record_with_reasons(record: Any, reasons: list[str]) -> dict[str, Any]:
 
 
 def _repo_path(context: StageContext) -> str:
-    """Repository database path passed through stage options (required)."""
-
     repo_path = context.options.get("repository_path")
     if not repo_path:
         raise WorkflowError(
@@ -671,19 +784,16 @@ def _repo_path(context: StageContext) -> str:
 
 class ExportStage(_FileStage):
     name = "export"
+    implementation = "v3"
 
     def run(self, context: StageContext) -> StageOutcome:
         from bio_pdf.contracts import Measurement, SequenceRecord
         from bio_pdf.export.csv_export import export_measurements_csv, export_sequences_csv
         from bio_pdf.export.json_export import export_result_json
-        from bio_pdf.storage.artifacts import atomic_write_bytes
 
-        out_root = Path(context.output_dir)
-        validation = json.loads(
-            (out_root / "validate" / "validation.json").read_text(encoding="utf-8")
+        validation = _read_input_json(
+            context, "validate.validation.json", "validate", "validation.json"
         )
-        # review_reasons is validator metadata carried alongside each record;
-        # the strict record contracts forbid unknown keys, so strip it here.
         seq_payloads = [
             {k: v for k, v in s.items() if k != "review_reasons"}
             for s in validation["sequences"]
@@ -701,37 +811,17 @@ class ExportStage(_FileStage):
         result["document_id"] = context.document_id
         result["requested_pages"] = list(context.page_numbers)
 
+        out_dir = Path(context.stage_dir())
         refs = []
-        ref = atomic_write_json(
-            out_root / "export", "result.json", result
-        )
-        refs.append(
-            type(ref)(
-                artifact_id=ref.artifact_id,
-                sha256=ref.sha256,
-                relative_path=_job_rel(context, "export", "result.json"),
-                media_type="application/json",
-            )
-        )
+        ref = atomic_write_json(out_dir, "result.json", result)
+        refs.append(_stage_ref(context, "result.json", ref))
         csv_seqs = export_sequences_csv(sequences).encode("utf-8")
-        ref = atomic_write_bytes(out_root / "export", "sequences.csv", csv_seqs)
-        refs.append(
-            type(ref)(
-                artifact_id=ref.artifact_id,
-                sha256=ref.sha256,
-                relative_path=_job_rel(context, "export", "sequences.csv"),
-                media_type="text/csv",
-            )
-        )
+        ref = atomic_write_bytes(out_dir, "sequences.csv", csv_seqs)
+        refs.append(_stage_ref(context, "sequences.csv", ref, media_type="text/csv"))
         csv_meas = export_measurements_csv(measurements).encode("utf-8")
-        ref = atomic_write_bytes(out_root / "export", "measurements.csv", csv_meas)
+        ref = atomic_write_bytes(out_dir, "measurements.csv", csv_meas)
         refs.append(
-            type(ref)(
-                artifact_id=ref.artifact_id,
-                sha256=ref.sha256,
-                relative_path=_job_rel(context, "export", "measurements.csv"),
-                media_type="text/csv",
-            )
+            _stage_ref(context, "measurements.csv", ref, media_type="text/csv")
         )
         return StageOutcome(artifact_refs=refs, review_required=0)
 

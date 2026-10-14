@@ -190,9 +190,9 @@ class JobService:
                 details={"document_id": job.document_id},
             )
 
-        runner = self._build_runner()
         config = self.job_config(job_id)
         effective = effective_workflow_config(config)
+        runner = self._build_runner(effective)
         self._repository.update_job_status(job_id, "running", current_stage=None)
         result = runner.run(
             job,
@@ -266,11 +266,12 @@ class JobService:
 
     # ---- internals -------------------------------------------------------
 
-    def _build_runner(self) -> WorkflowRunner:
+    def _build_runner(self, effective: WorkflowConfig | None = None) -> WorkflowRunner:
         runner = WorkflowRunner(
             self._repository,
             self.paths.artifact_root,
             required_stages=STAGE_ORDER,
+            workflow_config=effective,
         )
         for handler in build_production_handlers():
             runner.register(handler)

@@ -31,17 +31,26 @@ class _CountingHandler:
     def cache_key(self, context: StageContext) -> str:
         return f"{self.name}:{context.document_id}"
 
+    def implementation_version(self) -> str:
+        return "test"
+
+    def provider_version(self, context: StageContext) -> str:
+        return ""
+
     def run(self, context: StageContext) -> StageOutcome:
         self.calls += 1
         refs = []
         if self.artifact_rel is not None:
-            out_dir = Path(context.output_dir) / "native"
-            ref = atomic_write_bytes(out_dir, "out.bin", b"payload")
+            # T02 convention: artifacts land in this attempt's stage dir.
+            ref = atomic_write_bytes(Path(context.stage_dir()), "out.bin", b"payload")
             refs.append(
                 ArtifactRef(
                     artifact_id=ref.artifact_id,
                     sha256=ref.sha256,
-                    relative_path=f"jobs/{context.job_id}/native/out.bin",
+                    relative_path=(
+                        f"jobs/{context.job_id}/stage_runs/"
+                        f"{context.stage_run_id}/out.bin"
+                    ),
                     media_type="application/octet-stream",
                 )
             )
@@ -53,6 +62,12 @@ class _ExportNoop:
 
     def cache_key(self, context: StageContext) -> str:
         return f"export:{context.document_id}"
+
+    def implementation_version(self) -> str:
+        return "test"
+
+    def provider_version(self, context: StageContext) -> str:
+        return ""
 
     def run(self, context: StageContext) -> StageOutcome:
         return StageOutcome(artifact_refs=[], review_required=0)
@@ -115,7 +130,9 @@ def test_resume_reruns_stage_with_corrupted_artifact(
     assert handler.calls == 1
 
     # Corrupt the cached artifact behind the runner's back.
-    artifact_file = tmp_path / "jobs" / "job-1" / "native" / "out.bin"
+    artifact_file = next(
+        (tmp_path / "jobs" / "job-1" / "stage_runs").glob("*native_parse*/out.bin")
+    )
     artifact_file.write_bytes(b"tampered")
 
     resumed = WorkflowRunner(repo, tmp_path)

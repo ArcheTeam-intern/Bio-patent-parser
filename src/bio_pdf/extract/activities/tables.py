@@ -58,6 +58,7 @@ def extract_table_measurements(
     document_id: str,
     evidences: dict[str, str],
     evidence_kind: str = "undetermined",
+    metric: str | None = None,
 ) -> list[Measurement]:
     """Extract measurements from a :class:`Table`.
 
@@ -67,6 +68,12 @@ def extract_table_measurements(
         evidences: Mapping of ``cell_id → evidence_id`` used to anchor each
             value/unit/entity/target back to the source cell.
         evidence_kind: Initial :data:`EvidenceKind` for the measurements.
+            Callers pass "undetermined" — the handler never asserts
+            ``measured`` without method evidence (plan T09).
+        metric: Canonical metric name pre-validated by the caller via
+            :func:`bio_pdf.extract.activities.metrics.classify_table_metric`.
+            When given, it overrides per-column header metric guessing and
+            the source spelling is kept as ``metric_raw``.
 
     Returns:
         A list of :class:`Measurement`, one per data cell.
@@ -122,7 +129,20 @@ def extract_table_measurements(
                 continue
 
             header = column_headers.get(c, {"metric": None, "unit": None, "target": None})
-            metric = header.get("metric") or "value"
+            header_metric = header.get("metric")
+            if metric is not None:
+                # Caller-validated canonical metric wins; header spelling
+                # stays as metric_raw evidence.
+                canonical = metric
+                metric_raw = header_metric
+            else:
+                from bio_pdf.extract.activities.metrics import lookup_metric
+
+                hit = lookup_metric(header_metric or "") if header_metric else None
+                if hit is None:
+                    continue  # unclassified column: no fabricated Measurements
+                canonical, _ = hit
+                metric_raw = header_metric
             unit_raw = header.get("unit")
             target_raw = header.get("target")
 
@@ -148,10 +168,13 @@ def extract_table_measurements(
                 Measurement(
                     measurement_id=measurement_id,
                     document_id=document_id,
-                    entity_id=entity,
+                    # The row label is *surface text*, not a linked entity —
+                    # entity linking (plan T11) fills entity_id.
+                    entity_raw=entity,
                     sequence_ids=[],
                     assay_id=None,
-                    metric=metric,
+                    metric=canonical,
+                    metric_raw=metric_raw,
                     value=value,
                     unit_raw=unit_raw,
                     unit_normalized=unit_normalized,

@@ -57,6 +57,37 @@ def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def atomic_replace_json(target_dir: Path, name: str, payload: Mapping[str, Any]) -> None:
+    """Atomically REPLACE ``target_dir/name`` with new JSON content.
+
+    Unlike :func:`atomic_write_bytes` this is a *pointer* write: publishing
+    the current result manifest legitimately replaces the previous pointer.
+    The replaced content stays available through the stage-run artifacts it
+    pointed at. Crash-safe via tempfile + ``os.replace``.
+    """
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode(
+        "utf-8"
+    )
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=str(target_dir), delete=False, prefix=".tmp.", suffix=".json"
+        ) as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+            tmp_path = handle.name
+        os.replace(tmp_path, target_dir / name)
+    except OSError as exc:
+        if "tmp_path" in locals():
+            Path(tmp_path).unlink(missing_ok=True)
+        raise ArtifactWriteFailedError(
+            f"failed to replace {name}: {exc}",
+            details={"path": str(target_dir / name)},
+        ) from exc
+
+
 def atomic_write_bytes(
     target_dir: Path, rel_path: str, data: bytes
 ) -> ArtifactRef:

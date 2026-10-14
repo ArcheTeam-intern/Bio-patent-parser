@@ -15,6 +15,7 @@ from bio_pdf.api.contracts import (
     RecordsResponse,
 )
 from bio_pdf.api.dependencies import ServiceDep, SettingsDep
+from bio_pdf.storage.result_reader import ResultReader
 from bio_pdf.contracts import NormalizedDocument
 
 router = APIRouter(prefix="/jobs/{job_id}", tags=["results"])
@@ -53,7 +54,7 @@ def get_records(
     q: str | None = None,
 ) -> RecordsResponse:
     _job_or_404(service, job_id)
-    data = _load_json(_result_base(service, settings, job_id) / "validate" / "validation.json")
+    data = ResultReader(service.paths.artifact_root).read_json(job_id, "validation")
     sequences = data.get("sequences", [])
     measurements = data.get("measurements", [])
 
@@ -118,7 +119,7 @@ def get_page(
 ) -> PageResponse:
     _job_or_404(service, job_id)
     document = NormalizedDocument.model_validate(
-        _load_json(_result_base(service, settings, job_id) / "normalized.json")
+        ResultReader(service.paths.artifact_root).read_json(job_id, "normalized")
     )
     page = next((p for p in document.pages if p.page_number == page_number), None)
     if page is None:
@@ -147,7 +148,7 @@ def get_evidence(
     """Return one evidence span (page, bbox, raw text) from the extract index."""
 
     _job_or_404(service, job_id)
-    data = _load_json(_result_base(service, settings, job_id) / "extract" / "extract.json")
+    data = ResultReader(service.paths.artifact_root).read_json(job_id, "extract")
     for span in data.get("evidence_spans", []):
         if span.get("evidence_id") == evidence_id:
             return {"api_version": "v1", **span}

@@ -24,6 +24,7 @@ from typing import Any
 from bio_pdf.errors import WorkflowError
 from bio_pdf.storage.artifacts import atomic_write_bytes, atomic_write_json
 from bio_pdf.storage.repository import Repository
+from bio_pdf.storage.result_reader import ResultReader
 
 FORMATS = ("json", "csv", "fasta")
 
@@ -57,13 +58,8 @@ class ExportService:
             job = self.repository.get_job(job_id)
             if job is None:
                 raise WorkflowError(f"job not found: {job_id}", details={"job_id": job_id})
-            validation_path = self.artifact_root / f"jobs/{job_id}/validate/validation.json"
-            if not validation_path.is_file():
-                raise WorkflowError(
-                    "job has no validation results to export",
-                    details={"job_id": job_id},
-                )
-            data = json.loads(validation_path.read_text(encoding="utf-8"))
+            reader = ResultReader(self.artifact_root)
+            data = reader.read_json(job_id, "validation")
             sequences = data.get("sequences", [])
             measurements = data.get("measurements", [])
             heads = {row["record_id"]: row for row in self.repository.list_record_heads(job_id)}

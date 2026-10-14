@@ -68,9 +68,10 @@ def test_run_completes_full_pipeline(tmp_path: Path, domain_pdf: Path) -> None:
     for stage in ("ingest", "inspect", "native_parse", "normalize", "extract", "validate", "export"):
         assert stage in payload["stages_run"], (stage, payload)
 
-    result_json = Path(payload["export"])
-    assert result_json.is_file()
-    export = json.loads(result_json.read_text(encoding="utf-8"))
+    from bio_pdf.storage.result_reader import ResultReader
+
+    assert payload["published_manifest"]
+    export = ResultReader(Path(data_dir)).read_json(payload["job_id"], "result")
     assert export["summary"]["sequences_total"] >= 1
     assert export["summary"]["measurements_total"] >= 2
 

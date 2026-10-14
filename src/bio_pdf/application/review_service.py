@@ -27,6 +27,7 @@ from typing import Any
 from bio_pdf.contracts import Measurement, ReviewDecision, SequenceRecord
 from bio_pdf.errors import ReviewRevisionConflictError, WorkflowError
 from bio_pdf.storage.repository import Repository
+from bio_pdf.storage.result_reader import ResultReader
 from bio_pdf.validation.activities import validate_measurement
 from bio_pdf.validation.evidence import validate_evidence
 from bio_pdf.validation.sequences import validate_sequence
@@ -195,8 +196,9 @@ class ReviewService:
     ) -> tuple[int, dict[str, Any], str]:
         """Load the current record dict and its revision.
 
-        Reads through the head pointer when present, else from the validate
-        stage artifact (the baseline before any human decision).
+        Reads through the head pointer when present, else from the job's
+        published validation baseline via ResultReader (hash-verified when
+        published; legacy fixed paths stay readable for old jobs).
         """
 
         if head is not None:
@@ -204,13 +206,8 @@ class ReviewService:
             if version is not None:
                 return int(head["revision"]), json.loads(version["record_json"]), str(head["kind"])
 
-        path = self.artifact_root / f"jobs/{job_id}/validate/validation.json"
-        if not path.is_file():
-            raise WorkflowError(
-                "no validation baseline for this job",
-                details={"job_id": job_id},
-            )
-        data = json.loads(path.read_text(encoding="utf-8"))
+        reader = ResultReader(self.artifact_root)
+        data = reader.read_json(job_id, "validation")
         for seq in data.get("sequences", []):
             if seq["sequence_id"] == record_id:
                 return 1, seq, "sequence"
@@ -223,10 +220,8 @@ class ReviewService:
         )
 
     def _span_lookup(self, job_id: str) -> dict[str, dict[str, Any]]:
-        path = self.artifact_root / f"jobs/{job_id}/extract/extract.json"
-        if not path.is_file():
-            return {}
-        data = json.loads(path.read_text(encoding="utf-8"))
+        reader = ResultReader(self.artifact_root)
+        data = reader.read_json(job_id, "extract")
         return {span.get("evidence_id"): span for span in data.get("evidence_spans", [])}
 
     def _apply_patch(

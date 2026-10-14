@@ -224,6 +224,7 @@ def run_job(
         typer.echo(json.dumps({"job_id": job.job_id, "status": job.status, "pages": list(page_numbers)}, ensure_ascii=False))
 
         result = service.run_job(job.job_id, resume=resume)
+        published = (service.paths.artifact_root / "jobs" / job.job_id / "published" / "result-manifest.json")
         payload = {
             "job_id": result.job_id,
             "status": result.status,
@@ -231,7 +232,7 @@ def run_job(
             "stages_skipped": result.stages_skipped,
             "review_count": result.review_count,
             "failed_stage": result.failed_stage,
-            "export": str((service.paths.artifact_root / "jobs" / job.job_id / "export" / "result.json")),
+            "published_manifest": str(published) if published.is_file() else None,
         }
         typer.echo(json.dumps(payload, ensure_ascii=False))
         if result.status == "failed":

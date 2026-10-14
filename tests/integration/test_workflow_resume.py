@@ -23,6 +23,12 @@ class _NativeParseHandler:
     def cache_key(self, context: StageContext) -> str:
         return f"native:{context.document_id}"
 
+    def implementation_version(self) -> str:
+        return "test"
+
+    def provider_version(self, context: StageContext) -> str:
+        return ""
+
     def run(self, context: StageContext) -> StageOutcome:
         self.calls += 1
         return StageOutcome(artifact_refs=[], review_required=0, warnings=[])
@@ -37,6 +43,12 @@ class _LayoutParseHandler:
 
     def cache_key(self, context: StageContext) -> str:
         return f"layout:{context.document_id}"
+
+    def implementation_version(self) -> str:
+        return "test"
+
+    def provider_version(self, context: StageContext) -> str:
+        return ""
 
     def run(self, context: StageContext) -> StageOutcome:
         self.calls += 1
@@ -53,6 +65,12 @@ class _ExportHandler:
 
     def cache_key(self, context: StageContext) -> str:
         return f"export:{context.document_id}"
+
+    def implementation_version(self) -> str:
+        return "test"
+
+    def provider_version(self, context: StageContext) -> str:
+        return ""
 
     def run(self, context: StageContext) -> StageOutcome:
         self.calls += 1
