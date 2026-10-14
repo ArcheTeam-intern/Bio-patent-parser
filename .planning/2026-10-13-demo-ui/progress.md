@@ -27,3 +27,7 @@ docs/superpowers/plans/2026-10-14-bio-pdf-post-m1-remediation.md 执行。
 提交 1407e11(B01 前端证据导航)/6035161(B02 源ID+精度拆分+融合去重)/a34fa32(B03 fencing+发布事务)/
 4ffca0a(B04 逐页执行+配置生效)/277fc1e(B05 按mention判断活性)。384 tests。B06-B12 未开始。
 报告：reports/post_m1/round1_report.md。
+
+2026-10-14（post-M1 修复轮，第二轮）：B05(277fc1e 活性按mention)/B06(ec4303b 表格指标+层级表头+
+ParseIssue)/B07(0b41a5a 实体接线+片段可接受+修正一致性)/B08(7b1e3c0 固定快照导出+Range修复)。
+402 tests，vitest 4。报告 reports/post_m1/round2_report.md。第三轮 B09-B12 未开始。
