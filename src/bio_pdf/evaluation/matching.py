@@ -66,56 +66,147 @@ def _verified(gold: list[Annotation]) -> list[Annotation]:
 def match_sequences(
     gold: list[Annotation],
     candidates: list[Any],
+    *,
+    scope: list[str] | None = None,
+    evidence_index: dict[str, Any] | None = None,
 ) -> SequenceMatchResult:
     """Match gold sequence annotations against candidate sequence records.
 
-    A candidate is matched by ``(document_id, seq_id_no)``. Content equality
-    is then checked on ``normalized_sequence``. Candidates without a
-    ``seq_id_no`` cannot be matched by identifier and are skipped (they
-    cannot be asserted correct without an explicit evidence mapping).
+    Two match routes, both one-to-one (plan B10):
 
-    Matching is one-to-one: each gold consumes its candidate, and a second
-    gold with the same key cannot reuse it.
+    - **listing**: ``(document_id, seq_id_no)``, then residue comparison.
+      Same number with different content = exact miss + the candidate is
+      still a false positive (detected is counted separately).
+    - **inline**: gold WITHOUT a seq id matches a candidate by (page,
+      residues) — the same source position carrying the same sequence. A
+      residue-equal candidate on a different page does not silently match;
+      every unmatched candidate counts as a false positive, INCLUDING
+      candidates the rules did not identify (author names etc).
+
+    ``scope`` limits both gold and candidates to the listed documents
+    (CorpusScope); candidates outside a verified scope must not be scored
+    by the caller (see evaluation.corpus).
     """
 
     verified = _verified(gold)
-    seq_gold = [a for a in verified if a.kind == "sequence" and a.seq_id_no is not None]
+    if scope is not None:
+        in_scope = set(scope)
+        verified = [a for a in verified if a.document_id in in_scope]
+    seq_gold = [a for a in verified if a.kind == "sequence"]
 
-    # Group candidates by (document_id, seq_id_no); matching pops from the
-    # group so one gold can never consume two candidates or vice versa.
-    candidate_groups: dict[tuple[str, str], list[Any]] = {}
-    candidate_count = 0
-    for c in candidates:
+    scoped_candidates = [
+        c
+        for c in candidates
+        if scope is None or getattr(c, "document_id", "") in set(scope)
+    ]
+
+    # Group listing candidates by (document_id, seq_id_no).
+    listing_groups: dict[tuple[str, str], list[Any]] = {}
+    inline_candidates: list[Any] = []
+    for c in scoped_candidates:
         seq_no = getattr(c, "seq_id_no", None)
         if seq_no is None:
+            inline_candidates.append(c)
             continue
         key = (getattr(c, "document_id", ""), str(seq_no))
-        candidate_groups.setdefault(key, []).append(c)
-        candidate_count += 1
+        listing_groups.setdefault(key, []).append(c)
 
     result = SequenceMatchResult(total_gold=len(seq_gold))
-
     matched_candidates = 0
+
     for annotation in seq_gold:
-        key = (annotation.document_id, annotation.seq_id_no)
-        group = candidate_groups.get(key)
-        if not group:
-            result.missed += 1
+        cand_seq = annotation.sequence or ""
+        if annotation.seq_id_no is not None:
+            key = (annotation.document_id, annotation.seq_id_no)
+            group = listing_groups.get(key)
+            if not group:
+                result.missed += 1
+                continue
+            # An EXACT-content candidate wins; otherwise the number was
+            # detected but the content is wrong (plan B10): exact FN + the
+            # candidate stays unconsumed → exact FP.
+            exact_index = next(
+                (
+                    i
+                    for i, candidate in enumerate(group)
+                    if (getattr(candidate, "normalized_sequence", "") or "") == cand_seq
+                ),
+                None,
+            )
+            if exact_index is None:
+                result.detected += 1
+                result.missed += 1
+                actual = getattr(group[0], "normalized_sequence", "") or ""
+                result.char_errors.append(character_error_rate(cand_seq, actual))
+                continue
+            candidate = group.pop(exact_index)
+            matched_candidates += 1
+            result.detected += 1
+            result.exact_matches += 1
             continue
 
-        candidate = group.pop(0)
+        # Inline gold: match by page + residues (position edge). A
+        # candidate with NO page evidence cannot be asserted correct —
+        # residues alone are not a position edge (plan B10).
+        hit_index = None
+        for index, candidate in enumerate(inline_candidates):
+            if (getattr(candidate, "normalized_sequence", "") or "") != cand_seq:
+                continue
+            pages = _candidate_pages(candidate, evidence_index)
+            if annotation.page_number in pages:
+                hit_index = index
+                break
+        if hit_index is None:
+            result.missed += 1
+            continue
+        inline_candidates.pop(hit_index)
         matched_candidates += 1
         result.detected += 1
+        result.exact_matches += 1
 
-        gold_seq = annotation.sequence or ""
-        cand_seq = getattr(candidate, "normalized_sequence", "") or ""
-        if gold_seq == cand_seq:
-            result.exact_matches += 1
-        else:
-            result.char_errors.append(character_error_rate(gold_seq, cand_seq))
-
-    result.false_positives = candidate_count - matched_candidates
+    # Every unconsumed candidate — listing leftovers AND inline leftovers
+    # (including author/drug false positives) — counts as FP.
+    leftover_listing = sum(len(group) for group in listing_groups.values())
+    result.false_positives = leftover_listing + len(inline_candidates)
     return result
+
+
+def _candidate_pages(
+    candidate: Any, evidence_index: dict[str, Any] | None = None
+) -> list[int]:
+    """Pages a candidate is anchored to (from its evidence spans)."""
+
+    pages: list[int] = []
+    if evidence_index:
+        for evidence_id in getattr(candidate, "evidence_ids", None) or []:
+            span = evidence_index.get(evidence_id)
+            if span is None:
+                continue
+            page = (
+                span.get("page_number")
+                if isinstance(span, dict)
+                else getattr(span, "page_number", None)
+            )
+            if page is not None and page not in pages:
+                pages.append(int(page))
+            fragments = (
+                span.get("fragments") or []
+                if isinstance(span, dict)
+                else getattr(span, "fragments", None) or []
+            )
+            for fragment in fragments:
+                fpage = (
+                    fragment.get("page_number")
+                    if isinstance(fragment, dict)
+                    else getattr(fragment, "page_number", None)
+                )
+                if fpage is not None and int(fpage) not in pages:
+                    pages.append(int(fpage))
+    # A candidate object may itself expose pages (test doubles).
+    for page in getattr(candidate, "candidate_pages", None) or []:
+        if int(page) not in pages:
+            pages.append(int(page))
+    return pages
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +284,8 @@ def _values_agree(gold_value: str, gold_unit: str | None, candidate: Any) -> boo
 def match_measurements(
     gold: list[Annotation],
     candidates: list[Any],
+    *,
+    scope: list[str] | None = None,
 ) -> MeasurementMatchResult:
     """Match gold measurement annotations against candidate measurements.
 
@@ -203,6 +296,11 @@ def match_measurements(
     """
 
     verified = _verified(gold)
+    if scope is not None:
+        verified = [a for a in verified if a.document_id in set(scope)]
+        candidates = [
+            c for c in candidates if getattr(c, "document_id", "") in set(scope)
+        ]
     meas_gold = [a for a in verified if a.kind == "measurement"]
 
     def norm(text: str | None) -> str:

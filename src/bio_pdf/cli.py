@@ -240,6 +240,38 @@ def run_job(
         service.close()
 
 
+@app.command("evaluate")
+def evaluate(
+    gold: Path = typer.Option(..., "--gold", help="v2 gold manifest JSON."),
+    records: Path = typer.Option(..., "--records", help="Extract/records snapshot JSON."),
+    out: Path = typer.Option(Path("reports/evaluation"), "--out", help="Report directory."),
+) -> None:
+    """Evaluate candidates against the gold manifest (plan B10).
+
+    No verified gold → the report is explicitly not_evaluated with coverage
+    and candidate counts; never an accuracy percentage.
+    """
+
+    from bio_pdf.evaluation.evaluator import evaluate_corpus, write_report
+
+    if not gold.is_file() or not records.is_file():
+        typer.echo(json.dumps({"error": "INPUT_NOT_FOUND", "gold": str(gold), "records": str(records)}, ensure_ascii=False))
+        raise typer.Exit(code=2)
+
+    metrics = evaluate_corpus(gold_path=gold, records_path=records)
+    metrics_path, report_path = write_report(metrics, out)
+    typer.echo(
+        json.dumps(
+            {
+                "status": metrics["status"],
+                "metrics": str(metrics_path),
+                "report": str(report_path),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 @app.command("serve")
 def serve_api(
     host: str = typer.Option("127.0.0.1", "--host"),

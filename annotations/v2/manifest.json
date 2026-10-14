@@ -1,0 +1,8 @@
+{
+  "schema_version": "v2",
+  "status": "pending_human_annotation",
+  "scopes": [],
+  "annotations": [],
+  "guidelines": "annotation_guidelines.md",
+  "note": "生产 manifest 的 human_verified/status 必须由人工填写；执行模型不得批量设为 true。"
+}

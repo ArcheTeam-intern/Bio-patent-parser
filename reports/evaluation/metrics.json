@@ -1,0 +1,11 @@
+{
+  "coverage": {
+    "annotated_documents": 0,
+    "candidate_measurements": 0,
+    "candidate_sequences": 2,
+    "verified_scopes": 0
+  },
+  "note": "not_evaluated: no verified corpus scope — coverage and diagnostics only, never an accuracy claim",
+  "scopes": [],
+  "status": "not_evaluated"
+}
