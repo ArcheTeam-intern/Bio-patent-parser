@@ -21,10 +21,26 @@ const STAGE_GROUPS: StageDef[] = [
 const SEVERITY: Record<string, number> = { pending: 0, skipped: 0, succeeded: 1, running: 2, failed: 3 };
 
 export function StageStrip({ stages }: { stages: StageRun[] }) {
+  // Only the latest run per stage counts: a resumed job keeps the failed
+  // attempts of earlier runs as history, which must not paint the strip red
+  // after a successful re-run.
+  const latest = new Map<string, StageRun>();
+  for (const s of stages) {
+    const prev = latest.get(s.stage_name);
+    if (
+      !prev ||
+      (s.ended_at ?? "") >= (prev.ended_at ?? "") && s.attempt >= prev.attempt
+    ) {
+      latest.set(s.stage_name, s);
+    }
+  }
+
   return (
     <div className="stage-strip">
       {STAGE_GROUPS.map((group, idx) => {
-        const runs = stages.filter((s) => group.members.includes(s.stage_name));
+        const runs = group.members
+          .map((name) => latest.get(name))
+          .filter((s): s is StageRun => s !== undefined);
         const state = aggregate(runs);
         const failedRun = runs.find((r) => r.status === "failed");
         return (
