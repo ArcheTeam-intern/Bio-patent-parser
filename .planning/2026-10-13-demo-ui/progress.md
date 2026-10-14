@@ -14,3 +14,10 @@ D2 React 工作台（浏览器验证 PDF 渲染与证据降级）。D3 原子审
 拒绝留痕）。D4 固定 revision 导出（CSV 独立列、FASTA 拒绝空导出）。298 passed, 4 skipped。
 D5 对比页实现"不可比较"提示，完整对比按设计待人工 gold 后交付。未实现：跨页序列证据
 1/N 遍历、表格视图完整 UI、原文双栏对比视图——工作台对应标签为占位说明。
+
+2026-10-14（精度优化轮）：按 docs/superpowers/plans/2026-10-14-bio-pdf-accuracy-optimization.md
+执行 M0（T01–T03）与 M1（T04–T08），7 个提交（8a2740b…c9b5fd7）。351 tests 全绿。
+真实论文验证：待审核 95→25、序列 12→5（两段真实短片段从漏提变为找到）、活性 83→20；
+证据全部字符精度。报告见 reports/2026-10-14_m1_sample_before_after.md 与
+reports/2026-10-14_optimization_execution.md。T09–T17 未执行（原因见执行报告第 3 节：
+专利样本缺失、人工 gold 缺失、前端轮次、依赖链）。
