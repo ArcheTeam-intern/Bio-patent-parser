@@ -31,17 +31,37 @@ def _record_kind(record_id: str) -> str:
 def list_reviews(
     service: ServiceDep,
     job_id: str | None = None,
+    record_id: str | None = None,
     status: str = "open",
-    limit: int = 50,
+    limit: int = 100,
+    offset: int = 0,
 ) -> ReviewsResponse:
-    limit = max(1, min(limit, 200))
+    """Paged queue listing whose ``total`` is the TRUE matching count.
+
+    Queues can have hundreds of entries (every cell of a reconstructed
+    susceptibility matrix is one review item); a truncated page must never
+    masquerade as the whole queue. ``record_id`` narrows to the review item
+    of one record — the workbench panel relies on it so a record beyond the
+    first page is still found.
+    """
+
+    limit = max(1, min(limit, 1000))
+    offset = max(0, offset)
     clauses = ["status = ?"]
     params: list[object] = [status]
     if job_id:
         clauses.append("job_id = ?")
         params.append(job_id)
+    if record_id:
+        clauses.append("record_id = ?")
+        params.append(record_id)
+    where = " AND ".join(clauses)
+    total_row = service.repository.connection.execute(
+        f"SELECT COUNT(*) AS n FROM review_items WHERE {where}", params
+    ).fetchone()
+    total = int(total_row["n"]) if total_row is not None else 0
     rows = service.repository.connection.execute(
-        f"SELECT * FROM review_items WHERE {' AND '.join(clauses)} LIMIT {limit}",
+        f"SELECT * FROM review_items WHERE {where} ORDER BY rowid DESC LIMIT {limit} OFFSET {offset}",
         params,
     ).fetchall()
     items = [
@@ -57,7 +77,7 @@ def list_reviews(
         )
         for row in rows
     ]
-    return ReviewsResponse(reviews=items, total=len(items))
+    return ReviewsResponse(reviews=items, total=total)
 
 
 @router.get("/{review_id}/decisions")
