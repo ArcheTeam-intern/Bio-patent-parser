@@ -209,3 +209,11 @@
 - 右栏详情：序列/原始序列放入浅色代码框，检查结果行分隔线，字段标签统一 .section-label/细化 .detail-grid。
 - 对话框：投影+标题/操作区底色+入场动画+毛玻璃遮罩；文件选择按钮样式统一；状态胶囊加描边；横幅加左侧强调条；自定义滚动条与 focus ring。
 - 仅样式与分类型名调整，行为不变；vitest 14 通过、构建通过。
+
+### 用户反馈四项 + 停止解析（提交 d7845d0 / 56cb406 / 53d76cb）
+- 导出弹窗被 PDF 覆盖：改用原生 showModal() 顶层弹窗（共享 Modal，Esc/遮罩关闭同步状态）。
+- 停止解析：POST /jobs/{id}/cancel 单事务标记 cancelled+删租约；worker 每阶段边界重验租约行（不等心跳）；阶段完成/进度写入带租约围栏，取消后不可能复活或发布；cancelled 可 resume（复用缓存）。真实验证：40页 docling 任务中途点停止→立即已取消、worker 存活；resume 后缓存跳过、最终成功。
+- 解析进度：runner 每阶段前（带围栏）写 current_stage；工作台横幅显示“解析中：结构解析（第 3/7 步）”。
+- 结果分布总览：序列/活性 tab 顶部 PageDistribution——每页计数+比例条、当前页高亮、点击跳页；无页码记录如实计数不猜测。
+- 顺带修复两个真实崩溃（EP3027649B1 首次暴露）：docling 空文本组违反 TextBlock 合同（跳过，不造占位）；OCR "10-8" 区间 lower>upper 违反 ActivityValue（降级 unparsed 保留原文）。
+- 454 passed、vitest 18、build 通过；40页任务最终 succeeded_with_review（16序列+24活性+40待审核，第12页最密集）。
