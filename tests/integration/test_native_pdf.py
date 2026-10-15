@@ -179,3 +179,24 @@ def test_inventory_native_pdf_pages_match_inspector(fixture_two_columns: Path) -
     # independent hash so downstream stages can rely on it.
     raw_sha = hashlib.sha256(fixture_two_columns.read_bytes()).hexdigest()
     assert document.document_id == f"sha256:{raw_sha}"
+
+def test_concurrent_renders_are_serialized(tmp_path) -> None:
+    """Regression: parallel figure-thumbnail requests used to corrupt the
+    process-global PDFium state (every later open failed with 'Data format
+    error'). Rendering must survive concurrent callers."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from bio_pdf.pdf.render import render_page_png
+
+    source = _build_fixture_pdf(
+        tmp_path / "doc.pdf",
+        page_specs=[("a", [(72, 720, "Page one")]), ("b", [(72, 720, "Page two")])],
+    )
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [
+            pool.submit(render_page_png, source, i % 2, dpi=100)
+            for i in range(16)
+        ]
+        images = [f.result()[0] for f in futures]
+    assert len(images) == 16
+    assert all(img.width > 0 and img.height > 0 for img in images)

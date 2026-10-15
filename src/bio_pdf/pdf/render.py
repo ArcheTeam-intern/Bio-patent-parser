@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pypdfium2 as pdfium
@@ -14,6 +15,12 @@ from bio_pdf.pdf.geometry import (
     identity_transform,
     top_left_to_pdfium_bbox,
 )
+
+#: pypdfium2's library init/close is process-global and not thread-safe:
+#: concurrent first-uses (e.g. a page of figure thumbnails firing parallel
+#: requests) corrupt the global state and every later open fails with
+#: "Data format error". Serialize all PDFium work in this process.
+_PDFIUM_LOCK = threading.RLock()
 
 
 def _scale_for_dpi(dpi: int) -> float:
@@ -37,14 +44,15 @@ def render_page_png(
         raise ValueError(f"dpi must be at least 72, got {dpi}")
     scale = _scale_for_dpi(dpi)
 
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    try:
-        page = pdf[page_index]
-        width_pt, height_pt = page.get_size()
-        bitmap = page.render(scale=scale)
-        pil_image = bitmap.to_pil()
-    finally:
-        pdf.close()
+    with _PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        try:
+            page = pdf[page_index]
+            width_pt, height_pt = page.get_size()
+            bitmap = page.render(scale=scale)
+            pil_image = bitmap.to_pil()
+        finally:
+            pdf.close()
 
     transform = PageTransform(
         scale_x=scale,
@@ -80,26 +88,27 @@ def render_evidence_crop(
     if page_number < 1:
         raise ValueError(f"page_number must be 1-based, got {page_number}")
 
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    try:
-        page = pdf[page_number - 1]
-        width_pt, height_pt = page.get_size()
-        scale = _scale_for_dpi(dpi)
+    with _PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        try:
+            page = pdf[page_number - 1]
+            width_pt, height_pt = page.get_size()
+            scale = _scale_for_dpi(dpi)
 
-        # pypdfium2 ``crop`` is the amount to cut off each side
-        # ``(left, bottom, right, top)`` in PDF user space. We convert the
-        # top-left bbox to bottom-left and express the crop that way.
-        bl_bbox = top_left_to_pdfium_bbox(bbox, page_height_pt=float(height_pt))
-        crop = (
-            float(bl_bbox[0]),
-            float(bl_bbox[1]),
-            float(width_pt - bl_bbox[2]),
-            float(height_pt - bl_bbox[3]),
-        )
-        bitmap = page.render(scale=scale, crop=crop)
-        pil_image = bitmap.to_pil()
-    finally:
-        pdf.close()
+            # pypdfium2 ``crop`` is the amount to cut off each side
+            # ``(left, bottom, right, top)`` in PDF user space. We convert the
+            # top-left bbox to bottom-left and express the crop that way.
+            bl_bbox = top_left_to_pdfium_bbox(bbox, page_height_pt=float(height_pt))
+            crop = (
+                float(bl_bbox[0]),
+                float(bl_bbox[1]),
+                float(width_pt - bl_bbox[2]),
+                float(height_pt - bl_bbox[3]),
+            )
+            bitmap = page.render(scale=scale, crop=crop)
+            pil_image = bitmap.to_pil()
+        finally:
+            pdf.close()
 
     # Build the affine mapping page top-left points to image pixels.
     pixel_x0 = (bbox[0]) * scale
