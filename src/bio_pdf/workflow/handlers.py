@@ -354,7 +354,8 @@ class LayoutParseStage(_FileStage):
     name = "layout_parse"
     # v6: the child now forwards docling `pictures` and the normaliser emits
     # figure regions (bbox + resolved caption) so charts can be exported.
-    implementation = "v6-figures"
+    # v7: figure filter (logos/table-covered/text-covered regions dropped).
+    implementation = "v7-figure-filter"
 
     def provider_version(self, context: StageContext) -> str:
         engine = str(context.options.get(OPT_ENGINE, "native"))
@@ -594,7 +595,8 @@ class NormalizeStage(_FileStage):
     # (susceptibility heat tables without grid lines). Bumping invalidates
     # cached normalize/extract chains so existing jobs can resume into the
     # new behaviour.
-    implementation = "v5"
+    # v6: re-filters figure regions against reconstructed tables.
+    implementation = "v6"
 
     def run(self, context: StageContext) -> StageOutcome:
         # Primary structure: layout parse when the engine produced one,
@@ -662,8 +664,11 @@ class NormalizeStage(_FileStage):
         # Parser-missed call matrices (susceptibility heat tables without
         # drawn grid lines): rebuild the structure purely from block
         # geometry, marked geometry_reconstructed — a candidate structure
-        # for human review, never parser truth.
+        # for human review, never parser truth. Figure regions covered by
+        # a (re)constructed table lose their "picture" status: their
+        # content is data now, so 图表 only shows what is not text/table.
         from bio_pdf.parsers.grid_matrix import reconstruct_call_matrices
+        from bio_pdf.parsers.normalize_docling import filter_exportable_figures
 
         for page in document.pages:
             occupied = [tuple(t.bbox) for t in page.tables if t.bbox]
@@ -676,7 +681,18 @@ class NormalizeStage(_FileStage):
                 document = document.model_copy(
                     update={
                         "pages": [
-                            p.model_copy(update={"tables": list(p.tables) + extra})
+                            p.model_copy(
+                                update={
+                                    "tables": list(p.tables) + extra,
+                                    "figures": filter_exportable_figures(
+                                        list(p.figures),
+                                        list(p.tables) + extra,
+                                        p.blocks,
+                                        width_pt=p.width_pt,
+                                        height_pt=p.height_pt,
+                                    ),
+                                }
+                            )
                             if p.page_number == page.page_number
                             else p
                             for p in document.pages

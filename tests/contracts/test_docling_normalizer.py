@@ -296,3 +296,43 @@ def test_normalize_extracts_figures_with_resolved_captions() -> None:
     assert other.caption is None  # unresolved $ref never invents a caption
     assert other.kind == "picture"
     assert [f.figure_id for f in figs] == ["2:fig0", "2:fig1"]
+
+
+def _fig(fid: str, page: int, bbox: list[float]) -> "object":
+    from bio_pdf.contracts import Figure
+
+    return Figure(figure_id=fid, page_number=page, bbox=bbox)
+
+
+def test_filter_drops_logos_table_covered_and_text_dominated_regions() -> None:
+    from bio_pdf.contracts import Table, TableCell, TextBlock, Provenance
+    from bio_pdf.parsers.normalize_docling import filter_exportable_figures
+
+    prov = [Provenance(source_type="docling", artifact_ref="a", provider_locator="page=1")]
+    w, h = 595.0, 792.0
+    logo = _fig("1:figL", 1, [44, 25, 159, 60])              # 0.85% 页面 → 徽标
+    chart = _fig("1:figC", 1, [44, 424, 551, 667])           # 大面积真实曲线图
+    matrix_pic = _fig("1:figM", 1, [50, 60, 370, 720])       # 与热矩阵表几乎重合
+    words = _fig("1:figW", 1, [60, 100, 540, 400])           # 整页都是已提取文字
+    table = Table(
+        table_id="1:t0", page_number=1, row_count=2, column_count=2,
+        cells=[TableCell(cell_id="c0", row_index=0, column_index=0, text_raw="x")],
+        bbox=(51, 61, 369, 410),
+    )
+    blocks = [
+        TextBlock(
+            block_id=f"b{i}", kind="text", semantic_role="body",
+            text_raw="word", bbox=(60 + (i % 10) * 48, 100 + (i // 10) * 30,
+                                   104 + (i % 10) * 48, 124 + (i // 10) * 30),
+            provenance=prov,
+        )
+        for i in range(40)
+    ]
+    kept = filter_exportable_figures(
+        [logo, chart, matrix_pic, words], [table], blocks, width_pt=w, height_pt=h
+    )
+    ids = [f.figure_id for f in kept]
+    assert "1:figL" not in ids      # 徽标太小
+    assert "1:figC" in ids          # 真实图区保留
+    assert "1:figM" not in ids      # 已被表格结构覆盖
+    assert "1:figW" not in ids      # 内容就是已提取文字

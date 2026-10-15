@@ -253,6 +253,63 @@ def _iter_text_items(
                     yield item
 
 
+def _rect_intersection_area(a: Any, b: Any) -> float:
+    ax0, ay0, ax1, ay1 = (float(v) for v in a)
+    bx0, by0, bx1, by1 = (float(v) for v in b)
+    w = min(ax1, bx1) - max(ax0, bx0)
+    h = min(ay1, by1) - max(ay0, by0)
+    return w * h if w > 0 and h > 0 else 0.0
+
+
+def filter_exportable_figures(
+    figures: list[Figure],
+    tables: list[Table],
+    blocks: list[TextBlock],
+    *,
+    width_pt: float,
+    height_pt: float,
+) -> list[Figure]:
+    """Keep only regions whose content is NOT already machine-extracted.
+
+    The 图表 tab exists for what text extraction cannot carry: charts,
+    curves, photos. Dropped deterministically:
+    - tiny regions (journal logos / badges) below 2.5% of the page;
+    - regions already covered (>=50%) by a table — parser-detected or
+      geometry-reconstructed: their content is data/structure already;
+    - regions dominated (>=60%) by extracted text-block area: words, not
+      pictures.
+    """
+
+    page_area = max(1.0, float(width_pt) * float(height_pt))
+    kept: list[Figure] = []
+    for fig in figures:
+        fx0, fy0, fx1, fy1 = (float(v) for v in fig.bbox)
+        area = max(0.0, fx1 - fx0) * max(0.0, fy1 - fy0)
+        if area <= 0 or area < 0.025 * page_area:
+            continue
+        covered = False
+        for table in tables:
+            if table.bbox is None:
+                continue
+            if _rect_intersection_area(fig.bbox, table.bbox) / area >= 0.5:
+                covered = True
+                break
+        if covered:
+            continue
+        text_cov = 0.0
+        for block in blocks:
+            if block.bbox is None or not str(block.text_raw).strip():
+                continue
+            text_cov += _rect_intersection_area(fig.bbox, block.bbox)
+            if text_cov / area >= 0.6:
+                covered = True
+                break
+        if covered:
+            continue
+        kept.append(fig)
+    return kept
+
+
 def normalize_page(
     page_dict: dict[str, Any],
     *,
@@ -354,7 +411,9 @@ def normalize_page(
         route="layout_native",
         blocks=blocks,
         tables=tables,
-        figures=figures,
+        figures=filter_exportable_figures(
+            figures, tables, blocks, width_pt=width_pt, height_pt=height_pt
+        ),
     )
 
 
@@ -856,7 +915,13 @@ def _expand_top_level_pages(
         meta = pages_dict[key]
         # Attach any tables that belong to this page.
         page_tables = [t for t in tables_out if t.page_number == meta["page_number"]]
-        page_figures = [f for f in figures_out if f.page_number == meta["page_number"]]
+        page_figures = filter_exportable_figures(
+            [f for f in figures_out if f.page_number == meta["page_number"]],
+            page_tables,
+            meta["blocks"],
+            width_pt=meta["width"],
+            height_pt=meta["height"],
+        )
         out.append(
             NormalizedPage(
                 page_number=meta["page_number"],
