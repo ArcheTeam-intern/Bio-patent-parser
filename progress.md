@@ -231,3 +231,10 @@
 - 实现 b+c:normalize 用块几何确定性重建(call-cell 聚类、中位单元格尺寸容差、稀疏行列裁剪+报告、被解析表区域排除),Table.source=geometry_reconstructed,extract 挂 TABLE_GEOMETRY_RECONSTRUCTED issue;_extract_susceptibility 按药名/菌株词表判轴(药在行=翻转,证据不足不翻转),指标 antimicrobial_susceptibility 走 categorical,全部 needs_review。
 - 真实验证(job-1f9fd9ee5386):143 条药敏记录(59@第9页,84@第8页),0 条证据不匹配,0 条无页码;表格 tab 分布含"表格 N"列。
 - 踩坑修复:固定12pt容差把11.7pt密列合并→整表被拒;噪声单格行使规整性检查否决全表。各补回归测试。
+
+### 热图导出一张图 + CLSI 判读按惯例落地（提交 df05d4a）
+- 调研实证:论文第8页图例原文与 CLSI/Kirby-Bauer 一致(S绿=敏感/I黄=部分耐药/R橙=完全耐药/空格=未测);现有 categorical 提取语义正确,颜色是字母的视觉冗余。
+- 新增 GET /jobs/{id}/pages/{n}/figure.png?bbox=…:用 render_evidence_crop 把源PDF该区域裁成独立PNG(颜色全貌保真);表格tab每表加"导出图像"链接。真实目检:第8页TABLE 2整张热图(30行×16列+旋转菌株表头)一张图完整导出。
+- 重建器捕获图例→footnote_refs,表格面板底部显示"图例：…";重建表加"几何重建"标记(候选结构,需人工确认)。
+- 原文阅读视图不再把被表格吸收的块吐成字母气泡(实测第8页隐藏121块并提示去向);R/S/I显示词(耐药/敏感/中介)仅前端注释,存储保持证据原字母。
+- 端到端测试:合成矩阵PDF→全管线→16条记录+图例footnote+PNG有效+issue;469 passed、24 vitest。
