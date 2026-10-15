@@ -222,6 +222,11 @@ class Table(_StrictModel):
     bbox: BoundingBox | None = None
     continuation_group: NonEmptyStr | None = None
     structure_issues: list[NonEmptyStr] = Field(default_factory=list)
+    #: How the table structure was obtained. ``geometry_reconstructed``
+    #: means the parser produced no table object for this region and the
+    #: grid was rebuilt from text-block geometry — downstream consumers
+    #: must treat such tables as review-required, never parser truth.
+    source: Literal["parser", "geometry_reconstructed"] = "parser"
 
 
 class NormalizedPage(_StrictModel):

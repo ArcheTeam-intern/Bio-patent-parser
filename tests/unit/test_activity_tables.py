@@ -108,3 +108,72 @@ def test_metric_is_consistent_across_columns() -> None:
         table, document_id="sha256:fixture", evidences=evidences
     )
     assert all(m.metric == "MIC" for m in measurements)
+
+def _axis_table(*, drugs_on_rows: bool) -> "tuple[Table, dict[str, str]]":
+    """2x2 S/R matrix + labels; either orientation, caption says sensitivity."""
+    drugs = ["Tobramycin", "Meropenem"]
+    strains = ["17 0129 1317", "S. aureus 17 0042"]
+    calls = [["R", "S"], ["S", "R"]]
+    cells = []
+    header_ids = []
+
+    def add(row, col, text, role):
+        cid = f"t:r{row}c{col}"
+        cells.append(TableCell(
+            cell_id=cid, row_index=row, column_index=col,
+            text_raw=text, header_role=role,
+        ))
+        if role != "data":
+            header_ids.append(cid)
+
+    add(0, 0, "corner", "both")
+    for j in range(2):
+        # row 0 holds the COLUMN headers: classic → drugs, flipped → strains
+        add(0, j + 1, strains[j] if drugs_on_rows else drugs[j], "column")
+    for i in range(2):
+        # column 0 holds the ROW headers: classic → strains, flipped → drugs
+        add(i + 1, 0, drugs[i] if drugs_on_rows else strains[i], "row")
+        for j in range(2):
+            add(i + 1, j + 1, calls[i][j], "data")
+    table = Table(
+        table_id="t", page_number=9, row_count=3, column_count=3,
+        cells=cells, header_cell_ids=header_ids,
+        caption="TABLE 3 | Antibiotic sensitivity data",
+    )
+    evidences = {c.cell_id: f"ev-{c.cell_id}" for c in table.cells}
+    return table, evidences
+
+
+def test_susceptibility_classic_axis_drugs_in_columns() -> None:
+    table, evidences = _axis_table(drugs_on_rows=False)
+    measurements = extract_table_measurements(
+        table, document_id="sha256:fixture", evidences=evidences
+    )
+    assert len(measurements) == 4
+    m = measurements[0]
+    assert m.metric == "antimicrobial_susceptibility"
+    assert m.entity_raw == "Tobramycin"
+    assert m.target_raw == "17 0129 1317"
+    assert m.value.kind == "categorical"
+    assert m.value.qualifier == "R"
+
+
+def test_susceptibility_flipped_axis_drugs_in_rows() -> None:
+    """Heat-matrix layout (geometry-reconstructed paper tables): drug names
+    row-side with organism/isolate headers on columns must still bind
+    entity=drug and target=strain via vocabulary evidence."""
+    table, evidences = _axis_table(drugs_on_rows=True)
+    measurements = extract_table_measurements(
+        table, document_id="sha256:fixture", evidences=evidences
+    )
+    assert len(measurements) == 4
+    for m in measurements:
+        assert m.metric == "antimicrobial_susceptibility"
+        # entity is ALWAYS the drug, whichever axis carries it
+        assert m.entity_raw in ("Tobramycin", "Meropenem")
+        assert m.target_raw in ("17 0129 1317", "S. aureus 17 0042")
+    assert {m.entity_raw for m in measurements} == {"Tobramycin", "Meropenem"}
+    # field evidence still points at the REAL source cells of each axis
+    m0 = measurements[0]
+    assert len(m0.field_evidence["value"]) == 1
+    assert m0.field_evidence.get("entity_raw") and m0.field_evidence.get("target_raw")

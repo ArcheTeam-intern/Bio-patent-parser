@@ -39,6 +39,28 @@ _ROW_LABEL_HEADERS = {"peptide", "compound", "antibody", "entity", "variant", "c
 _SRI_VALUE = re.compile(r"^\s*(S|R|I|SDD)\s*$")
 _NUMERICISH = re.compile(r"^\s*(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*$")
 
+#: Vocabulary evidence for the susceptibility-matrix axis decision: an
+#: antibiotic-name side vs an organism/isolate-label side. Suffix-driven so
+#: the same paper's drug families match without a maintained drug list.
+_DRUG_HINT = re.compile(
+    r"(mycin|micin|cillin|cycline|floxacin|penem|bactam|clavulanate|azole|"
+    r"colistin|polymyxin|daptomycin|linezolid|vancomy|bacitracin|"
+    r"chloramphen|clindamy|trimethoprim|methoxazole|aztreonam|cef[a-z]+|"
+    r"ceph[a-z]+|quinupristin|nitrofurantoin|rifamp|tetracyclin|glycyclin)",
+    re.IGNORECASE,
+)
+_STRAIN_HINT = re.compile(
+    r"(coccus|bacill|aureus|coli\b|baumanii|pneumoniae|aeruginosa|faecalis|"
+    r"faecium|klebsiell|enterobact|proteus|serratia|staphylococc|streptococc|"
+    r"enterococc|neisseri|haemophil|acinetobact|pseudomonad|salmonell|"
+    r"shigell|candida|aspergill|trichophyt|malassez|mycoplasma|ureaplasma|"
+    r"acholeplasma|spiroplasma|escherich|listeria|clostrid|lactobacill|"
+    r"bacteroid|prevotella|porphyromon|vulgaris|typhimurium)",
+    re.IGNORECASE,
+)
+#: Isolate accession labels such as "17 0129 1317".
+_ISOLATE_RE = re.compile(r"^\d{1,4}(?:\s+\d{2,6}){1,4}$")
+
 
 def parse_table_header(text: str) -> dict[str, str | None]:
     """Parse a column header into ``{metric, unit, target}``.
@@ -257,13 +279,32 @@ def _extract_susceptibility(
     evidences: dict[str, str],
     evidence_kind: str,
 ) -> list[Measurement]:
-    """S/R/I matrix: entity = DRUG (column header), target = STRAIN (row)."""
+    """S/R/I matrix: entity = DRUG, target = STRAIN/isolate.
+
+    The classic layout puts drugs on the column headers; many papers (a
+    rotated-header heat matrix, often geometry-reconstructed) put drugs on
+    the row labels instead. The axis is decided by vocabulary evidence —
+    antibiotic-name suffixes vs organism/isolate patterns — and flipped
+    only when the row side is decisively drug-like (>=2 matches and more
+    than the column side). No evidence, no flip: nothing is guessed.
+    """
 
     def _ev(cell: TableCell | None) -> list[str]:
         if cell is None:
             return []
         eid = evidences.get(cell.cell_id)
         return [eid] if eid else []
+
+    def _drug_score(labels: list[str]) -> int:
+        return sum(1 for t in labels if _DRUG_HINT.search(t))
+
+    flipped = _drug_score(
+        [c.text_raw for c in table.cells if c.header_role == "row"]
+    ) >= 2 and _drug_score(
+        [c.text_raw for c in table.cells if c.header_role == "row"]
+    ) > _drug_score(
+        [c.text_raw for c in table.cells if c.header_role == "column"]
+    )
 
     measurements: list[Measurement] = []
     for path in build_header_paths(table):
@@ -272,8 +313,12 @@ def _extract_susceptibility(
         if match is None:
             continue
         qualifier = match.group(1).upper()
-        drug_cell = path.column_headers[-1] if path.column_headers else None
-        strain_cell = path.row_headers[-1] if path.row_headers else None
+        if flipped:
+            drug_cell = path.row_headers[-1] if path.row_headers else None
+            strain_cell = path.column_headers[-1] if path.column_headers else None
+        else:
+            drug_cell = path.column_headers[-1] if path.column_headers else None
+            strain_cell = path.row_headers[-1] if path.row_headers else None
         if drug_cell is None or strain_cell is None:
             continue  # axes unknown → do not transpose or guess
 

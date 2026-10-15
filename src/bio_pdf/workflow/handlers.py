@@ -588,7 +588,11 @@ def _refs_from_parse_artifacts(artifacts: Any, out_dir: Path, context: StageCont
 
 class NormalizeStage(_FileStage):
     name = "normalize"
-    implementation = "v4"
+    # v5: reconstructs parser-missed call matrices from block geometry
+    # (susceptibility heat tables without grid lines). Bumping invalidates
+    # cached normalize/extract chains so existing jobs can resume into the
+    # new behaviour.
+    implementation = "v5"
 
     def run(self, context: StageContext) -> StageOutcome:
         # Primary structure: layout parse when the engine produced one,
@@ -651,6 +655,34 @@ class NormalizeStage(_FileStage):
                         "errors": list(document.errors)
                         + [f"TEXT_CONFLICT page={c['page']} block={c['block_id']}" for c in fused.conflicts[:10]]
                     }
+                )
+
+        # Parser-missed call matrices (susceptibility heat tables without
+        # drawn grid lines): rebuild the structure purely from block
+        # geometry, marked geometry_reconstructed — a candidate structure
+        # for human review, never parser truth.
+        from bio_pdf.parsers.grid_matrix import reconstruct_call_matrices
+
+        for page in document.pages:
+            occupied = [tuple(t.bbox) for t in page.tables if t.bbox]
+            extra = reconstruct_call_matrices(
+                [b.model_dump(mode="json") for b in page.blocks],
+                page_number=page.page_number,
+                occupied_regions=occupied,
+            )
+            if extra:
+                document = document.model_copy(
+                    update={
+                        "pages": [
+                            p.model_copy(update={"tables": list(p.tables) + extra})
+                            if p.page_number == page.page_number
+                            else p
+                            for p in document.pages
+                        ]
+                    }
+                )
+                fusion_warnings.append(
+                    f"GRID_RECONSTRUCTED page={page.page_number} tables={len(extra)}"
                 )
 
         # Coverage: every requested page must be present. A partial parse
@@ -864,6 +896,16 @@ class ExtractStage(_FileStage):
                     cell_evidence[cell.cell_id] = span.evidence_id
 
                 kind = classify_table(table)
+                if getattr(table, "source", "parser") == "geometry_reconstructed":
+                    # The structure itself is a candidate (parser missed the
+                    # table entirely): flag it for human review regardless
+                    # of which extraction path the classification chose.
+                    _issue(
+                        "table",
+                        "TABLE_GEOMETRY_RECONSTRUCTED",
+                        [table.table_id],
+                        f"page {table.page_number}: call matrix rebuilt from text geometry; structure and axes need human review",
+                    )
                 if kind in (
                     TableKind.INVENTORY,
                     TableKind.SCORING,
