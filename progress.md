@@ -238,3 +238,11 @@
 - 重建器捕获图例→footnote_refs,表格面板底部显示"图例：…";重建表加"几何重建"标记(候选结构,需人工确认)。
 - 原文阅读视图不再把被表格吸收的块吐成字母气泡(实测第8页隐藏121块并提示去向);R/S/I显示词(耐药/敏感/中介)仅前端注释,存储保持证据原字母。
 - 端到端测试:合成矩阵PDF→全管线→16条记录+图例footnote+PNG有效+issue;469 passed、24 vitest。
+
+### 统计图/曲线图作为独立图片提取（提交 d706f75 / e52ce88）
+- 用户澄清:要的是论文里的统计图/曲线图(Figure),不是热矩阵表格。查管线发现 docling 把这些当 pictures 导出,但子进程只保留 texts/tables,把 pictures 整个丢弃→所以从未有图可导。
+- 修:子进程透传 pictures;normalize 新增 Figure(区域bbox BOTTOMLEFT→左上、caption 经 $ref 从正文解析、kind 由图题关键词优先于标签判定,如"Growth curve"归 plot),NormalizedPage.figures;layout 阶段实现 v6-figures 失效旧缓存。
+- API:/pages 带 figures;GET /jobs/{id}/figures 汇总并在空结果时如实区分"原生引擎无检测"vs"未检出";figure.png 支持 ?figure=服务端解析bbox。
+- 前端:新「图表」tab 按页分组真实裁切缩略图+类别胶囊+图题,点开全分辨率PNG,页头可跳页;原生引擎无图如实说明。
+- 真实验证(docling 论文 job-878e3a8443b7):检出11图区(7带FIGURE图题,2曲线图判为plot),FIGURE 2 八联生长抑制曲线干净裁出1443x706;浏览器缩略图确认。
+- 470 passed、24 vitest、build 通过、服务已重启。
