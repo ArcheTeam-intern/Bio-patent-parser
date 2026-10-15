@@ -225,3 +225,9 @@
 - 运行详情失败原因：新失败保存 WorkflowError details（含引擎 stderr 尾部），可展开"详细诊断"；旧失败只有标题行时如实不显示展开（单测锁定）。EP 专利的真实根因（OCR 空文本组违反 TextBlock 合同）已在 56cb406 修复。
 - 原文 tab 从逐行块表改为阅读视图：连续同角色文本合并成段落、表格碎片（R/S/编号）渲染为胶囊、可切回逐块查看；第 9 页实测 3 段正文 + 119 个单元格胶囊。
 - 458 passed、vitest 24、build 通过、服务已重启并逐项浏览器验证。
+
+### 第9页左半表：药敏矩阵几何重建（提交 96c106b + 后续修复）
+- 用户问:第9页左半边(Table 3 药敏热图)是什么、为何没提取。确认:13行抗生素×菌株列的 R/S/I 矩阵,无框线+旋转表头,docling不识别为表;文本块齐全但规则禁止从散块猜结构→0记录是如实的。
+- 实现 b+c:normalize 用块几何确定性重建(call-cell 聚类、中位单元格尺寸容差、稀疏行列裁剪+报告、被解析表区域排除),Table.source=geometry_reconstructed,extract 挂 TABLE_GEOMETRY_RECONSTRUCTED issue;_extract_susceptibility 按药名/菌株词表判轴(药在行=翻转,证据不足不翻转),指标 antimicrobial_susceptibility 走 categorical,全部 needs_review。
+- 真实验证(job-1f9fd9ee5386):143 条药敏记录(59@第9页,84@第8页),0 条证据不匹配,0 条无页码;表格 tab 分布含"表格 N"列。
+- 踩坑修复:固定12pt容差把11.7pt密列合并→整表被拒;噪声单格行使规整性检查否决全表。各补回归测试。
