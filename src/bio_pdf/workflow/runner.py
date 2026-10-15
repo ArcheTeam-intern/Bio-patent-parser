@@ -472,9 +472,16 @@ class WorkflowRunner:
             except _FencedError:
                 raise
             except WorkflowError as exc:
+                # Details (e.g. the engine's stderr tail) are stored so the
+                # run-details view can answer "why did this fail".
+                error_json: dict[str, str] = {"code": exc.code, "message": exc.message}
+                if exc.details:
+                    error_json.update(
+                        {str(k): str(v) for k, v in exc.details.items()}
+                    )
                 self.repository.fail_stage(
                     stage.stage_run_id,
-                    error_json={"code": exc.code, "message": exc.message},
+                    error_json=error_json,
                 )
                 if attempt >= self.max_attempts:
                     return None, {}, stage_run_id, False

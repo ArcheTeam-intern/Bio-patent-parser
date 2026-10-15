@@ -99,7 +99,32 @@ def get_records(
             record_id: pages for record_id, pages in snapshot.get("record_pages", {}).items()
             if record_id in visible_ids
         },
+        table_pages=_table_pages(service, job_id),
     )
+
+
+def _table_pages(service, job_id: str) -> dict[int, int]:
+    """Tables per page from the normalized artifact (tables tab overview).
+
+    Missing or unreadable normalized output degrades to an empty map —
+    the overview is a convenience, never a hard dependency.
+    """
+
+    from bio_pdf.errors import WorkflowError
+
+    try:
+        data = ResultReader(service.paths.artifact_root).read_json(job_id, "normalized")
+    except WorkflowError:
+        return {}
+    out: dict[int, int] = {}
+    for page in data.get("pages", []) or []:
+        if not isinstance(page, dict):
+            continue
+        page_no = page.get("page_number")
+        count = len(page.get("tables") or [])
+        if count and isinstance(page_no, int) and not isinstance(page_no, bool):
+            out[page_no] = count
+    return out
 
 
 @router.get("/pages/{page_number}", response_model=PageResponse)

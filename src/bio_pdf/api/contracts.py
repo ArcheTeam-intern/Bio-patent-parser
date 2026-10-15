@@ -151,6 +151,9 @@ class RecordsResponse(ApiEnvelope):
     sequences: list[dict[str, Any]] = Field(default_factory=list)
     measurements: list[dict[str, Any]] = Field(default_factory=list)
     record_pages: dict[str, list[int]] = Field(default_factory=dict)
+    #: Tables per page for the tables-tab overview; empty when the job has
+    #: no normalized output yet.
+    table_pages: dict[int, int] = Field(default_factory=dict)
 
 
 class PageResponse(ApiEnvelope):

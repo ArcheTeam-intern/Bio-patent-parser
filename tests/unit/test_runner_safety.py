@@ -161,3 +161,64 @@ def test_resume_trusts_intact_artifact(repo: Repository, tmp_path: Path) -> None
     )
     assert result.status == "succeeded"
     assert handler.calls == 1  # cache verified intact — not re-run
+
+
+class _FailingHandler:
+    name = "native_parse"
+
+    def __init__(self, details: dict[str, str] | None = None) -> None:
+        self.details = details or {}
+
+    def cache_key(self, context: StageContext) -> str:
+        return "failing"
+
+    def implementation_version(self) -> str:
+        return "test"
+
+    def provider_version(self, context: StageContext) -> str:
+        return ""
+
+    def run(self, context: StageContext) -> StageOutcome:
+        raise WorkflowError("engine exploded", details=dict(self.details))
+
+
+def test_stage_failure_stores_error_details(repo: Repository, tmp_path: Path) -> None:
+    """Run-details answer “why did it fail”: the WorkflowError details (e.g.
+    the engine stderr tail) are persisted with the stage error, not only the
+    message."""
+
+    runner = WorkflowRunner(repo, tmp_path)
+    runner.register(_FailingHandler({"returncode": "1", "stderr_tail": "Traceback …"}))
+    runner.register(_ExportNoop())
+    result = runner.run(_job(), source_path="/tmp/x.pdf", page_numbers=(1,))
+    assert result.status == "failed"
+    stages = repo.list_stages("job-1")
+    failed = [s for s in stages if s.status == "failed"]
+    assert failed, [s.status for s in stages]
+    error = failed[-1].error_json
+    assert error["code"] == "WORKFLOW_ERROR"
+    assert error["message"] == "engine exploded"
+    assert error["stderr_tail"] == "Traceback …"
+    assert error["returncode"] == "1"
+
+
+class _ObserverHandler(_CountingHandler):
+    def __init__(self, repo: Repository) -> None:
+        super().__init__(artifact_rel="native/out.bin")
+        self.seen_stage: list[str | None] = []
+        self._repo = repo
+
+    def run(self, context: StageContext) -> StageOutcome:
+        job = self._repo.get_job("job-1")
+        self.seen_stage.append(job.current_stage if job else None)
+        return super().run(context)
+
+
+def test_running_stage_is_named_on_the_job_row(repo: Repository, tmp_path: Path) -> None:
+    handler = _ObserverHandler(repo)
+    runner = WorkflowRunner(repo, tmp_path)
+    runner.register(handler)
+    runner.register(_ExportNoop())
+    runner.run(_job(), source_path="/tmp/x.pdf", page_numbers=(1,))
+    # Before executing native_parse the row names the stage (UI progress).
+    assert handler.seen_stage == ["native_parse"]

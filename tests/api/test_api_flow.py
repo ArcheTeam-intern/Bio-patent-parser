@@ -189,6 +189,8 @@ def test_records_record_pages_consistent_with_kind_and_query(client) -> None:
     assert set(records["record_pages"]) == seq_ids | meas_ids
     for pages in records["record_pages"].values():
         assert all(isinstance(p, int) and p >= 1 for p in pages)
+    # Tables overview present (native-only paper has no tables).
+    assert isinstance(records["table_pages"], dict)
 
     only_seq = c.get(f"/api/v1/jobs/{job_id}/records?kind=sequence").json()
     assert only_seq["measurements"] == []
