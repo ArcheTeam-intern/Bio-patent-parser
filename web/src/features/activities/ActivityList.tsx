@@ -1,5 +1,6 @@
 import { MeasurementData } from "../../api/client";
 import { formatValueBase } from "./ValueFormatter";
+import { checkLabel, translateCheckMessage, translateReason } from "./checkLabels";
 
 export { formatValue } from "../sequences/SequenceList";
 
@@ -58,17 +59,25 @@ export function CheckList({ checks, reasons }: { checks: { check_id: string; out
   return (
     <div style={{ padding: "0 14px 14px" }}>
       <div className="section-label">检查结果</div>
-      {checks.map((c, i) => (
-        <div key={i} className="check-row">
-          <span className={`status ${c.outcome === "pass" ? "ok" : c.outcome === "fail" ? "conflict" : "muted"}`}>
-            {c.outcome === "pass" ? "通过" : c.outcome === "fail" ? "未通过" : "未知"}
-          </span>{" "}
-          <span className="mono dim">{c.check_id}</span>{" "}
-          <span className="dim">{c.details["message"] ?? ""}</span>
-        </div>
-      ))}
+      {checks.map((c, i) => {
+        const raw = c.details["message"] ?? "";
+        const translated = translateCheckMessage(raw);
+        return (
+          <div key={i} className="check-row">
+            <span className={`status ${c.outcome === "pass" ? "ok" : c.outcome === "fail" ? "conflict" : "muted"}`}>
+              {c.outcome === "pass" ? "通过" : c.outcome === "fail" ? "未通过" : "未知"}
+            </span>{" "}
+            <span className="dim" title={raw ? `${c.check_id} · ${raw}` : c.check_id}>
+              <span style={{ fontWeight: 600 }}>{checkLabel(c.check_id)}</span>
+              {translated && <span> — {translated}</span>}
+            </span>
+          </div>
+        );
+      })}
       {reasons.map((r, i) => (
-        <div key={`r${i}`} className="dim" style={{ lineHeight: 1.9 }}>· {r}</div>
+        <div key={`r${i}`} className="dim" style={{ lineHeight: 1.9 }} title={r}>
+          · {translateReason(r)}
+        </div>
       ))}
     </div>
   );
