@@ -278,3 +278,8 @@
 - 磁盘口径澄清：满血 ≈40GB 就是磁盘占用（Docling 整仓拉取，下载量=磁盘量）。本地实占：模型 0.56GB（HF 缓存 530MB=TableFormer 342MiB+heron 164MiB，RapidOCR 33MB）+ 后端运行时（.venv）1.35GB（torch 506MiB 等）≈ 合计 1.9GB；另 data/ 约 186MB、node_modules 约 184MB。
 - 运行内存实测（scripts/docling_mem_probe.py，按线上同款 options：heron+TableFormer ACCURATE、force_backend_text）：空闲常驻 API 33MiB + worker 7MiB；解析子进程导入后 331MiB、模型加载完 0.7–0.8GiB、12 页论文全跑峰值 1.5GiB（22.5s）、扫描页+RapidOCR 2 页峰值 1.4GiB（12.1s）→ 最坏 ≈2GiB，15GiB 内存余量充足、无需 GPU。
 - 桌面文档"满血资源清单"子节已补齐：表头改为"下载量（=磁盘占用）"、新增"本地已下载磁盘"与"运行内存（实测）"两块；口径备注指向两个可复跑脚本。
+
+### 轻量性对照：Docling 主链路 vs MinerU 本地部署（用户提问引出）
+- 主链路为什么轻：角色拆分——版面=RT-DETRv2 小检测器（本机 config 核实，~43M 参数/172MB，判别式不出文本）；文本=字形层零模型（pypdfium2）；OCR 仅扫描页且 small 档（32MB）；表格=TableFormer（213MB 判别式）；提取=规则。全链路 0.55GB、纯 CPU、峰值 1.5GiB、~2s/页。
+- MinerU 本地（HF 镜像 API 实测）：VLM 路线（2.5 主推）单模型 ≈2.3GB（MinerU2.5-Pro/2509-1.2B 均 ~2.32GB），强依赖 GPU（生成式逐页解码）；pipeline 路线模型包 PDF-Extract-Kit-1.0 整包 15.1GB（含 UniMERNet/StructEqTable 等多种备选，按需子集量级几 GB）。
+- 已补进桌面文档第六节 MinerU 待办条目（作为对测的成本侧对照），供主引擎选型参考。
