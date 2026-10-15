@@ -267,8 +267,16 @@ export function listFigures(
   return request(`/jobs/${encodeURIComponent(jobId)}/figures`);
 }
 
-export function getReviews(jobId?: string): Promise<{ reviews: ReviewItem[]; total: number }> {
-  const suffix = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+export function getReviews(
+  jobId?: string,
+  options?: { recordId?: string; limit?: number; offset?: number },
+): Promise<{ reviews: ReviewItem[]; total: number }> {
+  const params = new URLSearchParams();
+  if (jobId) params.set("job_id", jobId);
+  if (options?.recordId) params.set("record_id", options.recordId);
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.offset !== undefined) params.set("offset", String(options.offset));
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   return request(`/reviews${suffix}`);
 }
 

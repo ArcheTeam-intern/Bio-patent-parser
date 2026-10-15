@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cancelJob, getJob, getRecords, MeasurementData, resumeJob, SequenceRecordData } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
@@ -25,6 +25,7 @@ type Tab = "sequences" | "activities" | "tables" | "figures" | "text" | "issues"
 export function WorkbenchPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const tab = (params.get("tab") as Tab) ?? "sequences";
   const recordId = params.get("record");
   const rawPage = Number(params.get("page") ?? 1);
@@ -150,7 +151,18 @@ export function WorkbenchPage() {
             <span className="mono dim">{jobId}</span>
             <StatusLabel value={job.data?.status} kind="job" openReviews={job.data?.open_reviews} />
             {job.data && job.data.open_reviews > 0 && (
-              <span className="status review">{job.data.open_reviews} 条待审核</span>
+              <a
+                href={`/reviews?job_id=${encodeURIComponent(jobId)}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate(`/reviews?job_id=${encodeURIComponent(jobId)}`);
+                }}
+                title="在审核队列中查看本任务的全部待审核记录"
+              >
+                <span className="status review" style={{ cursor: "pointer" }}>
+                  {job.data.open_reviews} 条待审核 ›
+                </span>
+              </a>
             )}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

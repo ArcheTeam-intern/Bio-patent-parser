@@ -281,9 +281,12 @@ function PatchFields({
 }
 
 function useOpenReview(jobId: string, recordId: string) {
+  // Query the review item for THIS record directly (server-side filter):
+  // queues with hundreds of entries would otherwise hide records beyond
+  // the first page and the panel would wrongly claim "no review item".
   const query = useQuery({
-    queryKey: ["reviews", jobId],
-    queryFn: () => getReviews(jobId),
+    queryKey: ["reviews", jobId, recordId],
+    queryFn: () => getReviews(jobId, { recordId }),
   });
   const [version, setVersion] = useState<{ reviewId: string | null; recordRevision: number }>({
     reviewId: null,
