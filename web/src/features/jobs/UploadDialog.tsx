@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, createJob, uploadDocument } from "../../api/client";
+import { Modal } from "../../components/Modal";
 
 interface Props {
   open: boolean;
@@ -51,15 +52,25 @@ export function UploadDialog({ open, onClose, onCreated }: Props) {
   if (!open) return null;
 
   return (
-    <dialog open style={{ display: "block" }}>
-      <div className="dialog-title">添加 PDF 并创建解析任务</div>
-      <div className="dialog-body">
-        {error && (
-          <div className="banner error">
-            上传失败：{String(error.details.file_name ?? file?.name ?? "")} — {error.message}
-            {error.code !== "HTTP_ERROR" && <span className="dim"> ({error.code})</span>}
-          </div>
-        )}
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="添加 PDF 并创建解析任务"
+      footer={
+        <>
+          <button onClick={onClose}>取消</button>
+          <button className="primary" disabled={!file || uploadAndCreate.isPending} onClick={() => uploadAndCreate.mutate()}>
+            {uploadAndCreate.isPending ? "创建中…" : "创建任务"}
+          </button>
+        </>
+      }
+    >
+      {error && (
+        <div className="banner error">
+          上传失败：{String(error.details.file_name ?? file?.name ?? "")} — {error.message}
+          {error.code !== "HTTP_ERROR" && <span className="dim"> ({error.code})</span>}
+        </div>
+      )}
 
         <div style={{ display: "grid", gap: 10 }}>
           <label>
@@ -104,14 +115,7 @@ export function UploadDialog({ open, onClose, onCreated }: Props) {
             </select>
           </label>
         </div>
-      </div>
-      <div className="dialog-actions">
-        <button onClick={onClose}>取消</button>
-        <button className="primary" disabled={!file || uploadAndCreate.isPending} onClick={() => uploadAndCreate.mutate()}>
-          {uploadAndCreate.isPending ? "创建中…" : "创建任务"}
-        </button>
-      </div>
-    </dialog>
+    </Modal>
   );
 }
 

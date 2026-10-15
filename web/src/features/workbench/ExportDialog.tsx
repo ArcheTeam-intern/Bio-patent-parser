@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createExport, exportDownloadUrl, getExport, getJob, getRecords } from "../../api/client";
+import { Modal } from "../../components/Modal";
 import { useQuery } from "@tanstack/react-query";
 
 /**
@@ -75,55 +76,58 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
   };
 
   return (
-    <dialog open style={{ display: "block" }}>
-      <div className="dialog-title">导出结果</div>
-      <div className="dialog-body">
-        {error && <div className="banner error">{error}</div>}
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="导出结果"
+      footer={
+        <>
+          {done && (
+            <a href={exportDownloadUrl(exportInfo.data!.export_id)} target="_blank" rel="noreferrer">
+              <button className="primary">下载</button>
+            </a>
+          )}
+          {!exportId && (
+            <button className="primary" onClick={start}>
+              开始导出
+            </button>
+          )}
+          <button onClick={onClose}>关闭</button>
+        </>
+      }
+    >
+      {error && <div className="banner error">{error}</div>}
 
-        <dl className="detail-grid">
-          <dt>结果版本</dt>
-          <dd>r{revision}（快照固定，不受后续审核影响）</dd>
-          <dt>预计记录</dt>
-          <dd>
-            序列 {seqCount} 条 · 活性 {measCount} 条
-            {acceptedOnly && "（仅已接受）"}
-          </dd>
-        </dl>
+      <dl className="detail-grid">
+        <dt>结果版本</dt>
+        <dd>r{revision}（快照固定，不受后续审核影响）</dd>
+        <dt>预计记录</dt>
+        <dd>
+          序列 {seqCount} 条 · 活性 {measCount} 条
+          {acceptedOnly && "（仅已接受）"}
+        </dd>
+      </dl>
 
-        <label>
-          <div className="dim">格式</div>
-          <select value={format} onChange={(e) => setFormat(e.target.value as typeof format)}>
-            <option value="json">JSON（完整记录 + 检查 + 证据引用）</option>
-            <option value="csv">CSV（区间/误差/比较符独立列）</option>
-            <option value="fasta">FASTA（仅已接受且完整、可确定的序列）</option>
-          </select>
-        </label>
-        <label style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
-          <input type="checkbox" checked={acceptedOnly} onChange={(e) => setAcceptedOnly(e.target.checked)} />
-          <span className="dim">仅导出已接受的记录</span>
-        </label>
+      <label>
+        <div className="dim">格式</div>
+        <select value={format} onChange={(e) => setFormat(e.target.value as typeof format)}>
+          <option value="json">JSON（完整记录 + 检查 + 证据引用）</option>
+          <option value="csv">CSV（区间/误差/比较符独立列）</option>
+          <option value="fasta">FASTA（仅已接受且完整、可确定的序列）</option>
+        </select>
+      </label>
+      <label style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+        <input type="checkbox" checked={acceptedOnly} onChange={(e) => setAcceptedOnly(e.target.checked)} />
+        <span className="dim">仅导出已接受的记录</span>
+      </label>
 
-        {exportInfo.data && (
-          <div className={`banner ${failed ? "error" : done ? "ok" : "info"}`} style={{ marginTop: 12 }}>
-            {failed && `导出失败：${exportInfo.data.error ?? "未知原因"}`}
-            {done && `导出完成，共 ${exportInfo.data.record_count} 条记录（r${exportInfo.data.result_revision}）。`}
-            {!done && !failed && "导出中…"}
-          </div>
-        )}
-      </div>
-      <div className="dialog-actions">
-        {done && (
-          <a href={exportDownloadUrl(exportInfo.data!.export_id)} target="_blank" rel="noreferrer">
-            <button className="primary">下载</button>
-          </a>
-        )}
-        {!exportId && (
-          <button className="primary" onClick={start}>
-            开始导出
-          </button>
-        )}
-        <button onClick={onClose}>关闭</button>
-      </div>
-    </dialog>
+      {exportInfo.data && (
+        <div className={`banner ${failed ? "error" : done ? "ok" : "info"}`} style={{ marginTop: 12 }}>
+          {failed && `导出失败：${exportInfo.data.error ?? "未知原因"}`}
+          {done && `导出完成，共 ${exportInfo.data.record_count} 条记录（r${exportInfo.data.result_revision}）。`}
+          {!done && !failed && "导出中…"}
+        </div>
+      )}
+    </Modal>
   );
 }

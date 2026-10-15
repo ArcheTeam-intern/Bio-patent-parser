@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getJob, getRecords, MeasurementData, SequenceRecordData } from "../../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cancelJob, getJob, getRecords, MeasurementData, resumeJob, SequenceRecordData } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
 import { WorkerHint } from "../../components/WorkerHint";
-import { StageStrip } from "./StageStrip";
+import { StageStrip, STAGE_GROUP_ORDER, stageGroup } from "./StageStrip";
+import { PageDistribution } from "./PageDistribution";
 import { PdfViewer } from "../pdf/PdfViewer";
 import { SequenceDetail } from "../sequences/SequenceList";
 import { MeasurementDetail, CheckList } from "../activities/ActivityList";
@@ -38,7 +39,12 @@ export function WorkbenchPage() {
   const records = useQuery({
     queryKey: ["records", jobId, job.data?.result_revision, job.data?.status],
     queryFn: () => getRecords(jobId!),
-    enabled: !!jobId && !!job.data && !isActive(job.data.status),
+    // Records exist only once a run published results; querying earlier
+    // (queued/running/cancelled/failed-before-publish) is a guaranteed 400.
+    enabled:
+      !!jobId &&
+      (job.data?.status === "succeeded" ||
+        job.data?.status === "succeeded_with_review"),
   });
 
   const selected = useMemo(() => {
@@ -51,6 +57,19 @@ export function WorkbenchPage() {
   }, [records.data, recordId]);
 
   const [exportOpen, setExportOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => cancelJob(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["job", jobId] }),
+    onError: () => queryClient.invalidateQueries({ queryKey: ["job", jobId] }),
+  });
+  const resumeMutation = useMutation({
+    mutationFn: (id: string) => resumeJob(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["job", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
 
   // B01: location comes from the evidence API, never from id parsing.
   const selectedEvidenceIds = useMemo(() => {
@@ -84,6 +103,12 @@ export function WorkbenchPage() {
   }, [evidenceState.target, evidenceState.evidence, selected, selectedEvidenceIds, setParams]);
 
   const pagesFor = (id: string) => records.data?.record_pages?.[id] ?? [];
+  const kindsById = useMemo(() => {
+    const out: Record<string, "sequence" | "measurement"> = {};
+    for (const s of records.data?.sequences ?? []) out[s.sequence_id] = "sequence";
+    for (const m of records.data?.measurements ?? []) out[m.measurement_id] = "measurement";
+    return out;
+  }, [records.data]);
   const allSequences = records.data?.sequences ?? [];
   const allMeasurements = records.data?.measurements ?? [];
   const visibleSequences = scope === "all" ? allSequences : allSequences.filter(s => pagesFor(s.sequence_id).includes(currentPage));
@@ -131,6 +156,25 @@ export function WorkbenchPage() {
             <span className="dim">
               尚无人工准确率基线；本页展示真实解析结果与审核状态。
             </span>
+            {isActive(job.data?.status) && (
+              <button
+                disabled={cancelMutation.isPending}
+                style={{ borderColor: "var(--red)", color: "var(--red)" }}
+                title="取消本次解析（已完成阶段的结果保留在缓存中，重新解析会复用）"
+                onClick={() => cancelMutation.mutate(jobId)}
+              >
+                {cancelMutation.isPending ? "停止中…" : "停止解析"}
+              </button>
+            )}
+            {(job.data?.status === "failed" || job.data?.status === "cancelled") && (
+              <button
+                disabled={resumeMutation.isPending}
+                title="从已完成的阶段缓存继续解析"
+                onClick={() => resumeMutation.mutate(jobId)}
+              >
+                {resumeMutation.isPending ? "排队中…" : "重新解析"}
+              </button>
+            )}
             <button onClick={() => setExportOpen(true)}>导出</button>
           </div>
         </div>
@@ -195,8 +239,53 @@ export function WorkbenchPage() {
           </div>
           <div className="panel-scroll">
             {records.error && (tab === "sequences" || tab === "activities") && <div className="banner error">记录读取失败：{String(records.error)}</div>}
-            {isActive(job.data?.status) && <div className="banner info">解析进行中，结果将在完成后更新。</div>}
-            {tab === "sequences" && (
+            {isActive(job.data?.status) && (
+              <div className="banner info">
+                {job.data?.status === "running" && job.data?.current_stage ? (
+                  <>
+                    解析中：
+                    {stageGroup(job.data.current_stage)?.label ?? job.data.current_stage}
+                    （第{" "}
+                    {STAGE_GROUP_ORDER.indexOf(stageGroup(job.data.current_stage)?.key ?? "") + 1}
+                    /{STAGE_GROUP_ORDER.length} 步）—— 完成后结果自动更新；点右上“停止解析”可取消。
+                  </>
+                ) : job.data?.status === "running" ? (
+                  "解析进行中，结果将在完成后更新。"
+                ) : (
+                  "排队中，等待解析进程（worker）领取。"
+                )}
+              </div>
+            )}
+            {(tab === "sequences" || tab === "activities") &&
+              records.data &&
+              !isActive(job.data?.status) && (
+                <div style={{ padding: "12px 14px 6px", borderBottom: "1px solid var(--border-soft)" }}>
+                  <PageDistribution
+                    pageCount={0}
+                    recordPages={records.data.record_pages ?? {}}
+                    kinds={kindsById}
+                    currentPage={currentPage}
+                    onJump={changePage}
+                  />
+                </div>
+              )}
+            {(tab === "sequences" || tab === "activities") && !records.data && (
+              <div className="empty-state">
+                <div>
+                  该任务
+                  {job.data?.status === "cancelled"
+                    ? "已取消"
+                    : job.data?.status === "failed"
+                      ? "解析失败"
+                      : "尚未完成"}
+                  ，还没有可展示的结果。
+                </div>
+                {(job.data?.status === "cancelled" || job.data?.status === "failed") && (
+                  <div className="dim">点右上“重新解析”可从已完成的阶段缓存继续。</div>
+                )}
+              </div>
+            )}
+            {tab === "sequences" && records.data && (
               <SequenceTab
                 records={visibleSequences}
                 emptyMessage={scope === "page" ? `第 ${currentPage} 页没有序列候选。可切换“全部文档”查看其他页。` : "全文尚未提取到序列候选。"}
@@ -205,7 +294,7 @@ export function WorkbenchPage() {
                 loading={records.isLoading}
               />
             )}
-            {tab === "activities" && (
+            {tab === "activities" && records.data && (
               <ActivityTab
                 records={visibleMeasurements}
                 emptyMessage={scope === "page" ? `第 ${currentPage} 页没有活性候选。可切换“全部文档”查看其他页。` : "全文尚未提取到活性候选。"}

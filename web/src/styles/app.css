@@ -639,6 +639,87 @@ dialog::backdrop {
 
 /* ---- record detail ------------------------------------------------------ */
 
+/* Result distribution overview (sequences/activities per page) */
+.pd-list {
+  display: grid;
+  gap: 2px;
+}
+
+.pd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+}
+
+.pd-row:hover {
+  background: #f1f4f6;
+  border-color: var(--border-soft);
+}
+
+.pd-row.current {
+  background: var(--accent-soft);
+  border-color: rgba(15, 118, 110, 0.25);
+}
+
+.pd-page {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 34px;
+}
+
+.pd-row.current .pd-page {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pd-bar {
+  flex: 1;
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #eef1f4;
+}
+
+.pd-bar .pd-seq {
+  background: var(--accent);
+}
+
+.pd-bar .pd-meas {
+  background: var(--amber);
+}
+
+.pd-counts {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pd-chip {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 0 8px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.pd-chip.seq {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.pd-chip.meas {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: 96px 1fr;

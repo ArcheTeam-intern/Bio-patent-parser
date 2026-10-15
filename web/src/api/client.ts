@@ -252,6 +252,10 @@ export function resumeJob(jobId: string): Promise<Job> {
   return request(`/jobs/${encodeURIComponent(jobId)}/resume`, { method: "POST" });
 }
 
+export function cancelJob(jobId: string): Promise<Job> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+}
+
 export function artifactContentUrl(jobId: string, artifactId: string): string {
   return `${API_PREFIX}/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
 }

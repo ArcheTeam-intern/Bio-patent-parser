@@ -1,0 +1,81 @@
+/**
+ * 结果分布总览（用户需求）：序列/活性这些重要结果出现在哪些页。
+ * 页码与计数完全来自 records API 的 record_pages（真实证据位置），
+ * 不做任何推断；点击一行跳转到该页。无页码定位的记录单独、如实地
+ * 标注出来，绝不猜一个页码。
+ */
+
+export interface PageDistributionProps {
+  pageCount: number;
+  recordPages: Record<string, number[]>;
+  kinds: Record<string, "sequence" | "measurement">;
+  currentPage: number;
+  onJump: (page: number) => void;
+}
+
+export function PageDistribution({
+  pageCount,
+  recordPages,
+  kinds,
+  currentPage,
+  onJump,
+}: PageDistributionProps) {
+  const perPage = new Map<number, { seq: number; meas: number }>();
+  let unlocatedSeq = 0;
+  let unlocatedMeas = 0;
+  for (const [id, pages] of Object.entries(recordPages)) {
+    if (!pages || pages.length === 0) {
+      if (kinds[id] === "measurement") unlocatedMeas += 1;
+      else unlocatedSeq += 1;
+      continue;
+    }
+    for (const page of new Set(pages)) {
+      const entry = perPage.get(page) ?? { seq: 0, meas: 0 };
+      if (kinds[id] === "measurement") entry.meas += 1;
+      else entry.seq += 1;
+      perPage.set(page, entry);
+    }
+  }
+
+  const pages = [...perPage.entries()].sort((a, b) => a[0] - b[0]);
+  if (pages.length === 0 && unlocatedSeq + unlocatedMeas === 0) return null;
+  const max = Math.max(1, ...pages.map(([, c]) => c.seq + c.meas));
+
+  return (
+    <div className="pd">
+      <div className="section-label">结果分布（点击跳页）</div>
+      <div className="pd-list">
+        {pages.length === 0 && (
+          <div className="wb-hint">尚无带页码定位的结果。</div>
+        )}
+        {pages.map(([page, counts]) => (
+          <button
+            key={page}
+            className={`pd-row${page === currentPage ? " current" : ""}`}
+            onClick={() => onJump(page)}
+            title={`跳到第 ${page} 页（共 ${pageCount || "?"} 页）`}
+          >
+            <span className="pd-page">{page}</span>
+            <span className="pd-bar">
+              <span className="pd-seq" style={{ width: `${(counts.seq / max) * 100}%` }} />
+              <span className="pd-meas" style={{ width: `${(counts.meas / max) * 100}%` }} />
+            </span>
+            <span className="pd-counts">
+              {counts.seq > 0 && <span className="pd-chip seq">序列 {counts.seq}</span>}
+              {counts.meas > 0 && <span className="pd-chip meas">活性 {counts.meas}</span>}
+            </span>
+          </button>
+        ))}
+        {unlocatedSeq + unlocatedMeas > 0 && (
+          <div className="wb-hint" style={{ marginTop: 4 }}>
+            另有 {unlocatedSeq + unlocatedMeas} 条记录缺少可定位页码
+            {unlocatedSeq > 0 && `（序列 ${unlocatedSeq}`}
+            {unlocatedSeq > 0 && unlocatedMeas > 0 && "、"}
+            {unlocatedMeas > 0 && `活性 ${unlocatedMeas}`}
+            {unlocatedSeq + unlocatedMeas > 0 && "）"}，不在上图内。
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { getSamples, listJobs } from "../../api/client";
+import { cancelJob, getSamples, listJobs, resumeJob } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
 import { WorkerHint } from "../../components/WorkerHint";
 import { UploadDialog } from "./UploadDialog";
@@ -18,6 +18,16 @@ export function JobsPage() {
     refetchInterval: (q) => (activeJobs(q.state.data) ? 1500 : false),
   });
   const samples = useQuery({ queryKey: ["samples"], queryFn: getSamples });
+  const queryClient = useQueryClient();
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => cancelJob(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onError: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+  const resumeMutation = useMutation({
+    mutationFn: (id: string) => resumeJob(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
 
   const jobsList = jobs.data ?? [];
 
@@ -60,14 +70,41 @@ export function JobsPage() {
                   <td className="dim">{job.current_stage ?? "—"}</td>
                   <td className="dim">{new Date(job.created_at).toLocaleString()}</td>
                   <td>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/jobs/${job.job_id}/workbench`);
-                      }}
-                    >
-                      打开工作台
-                    </button>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      {(job.status === "queued" || job.status === "running") && (
+                        <button
+                          disabled={cancelMutation.isPending}
+                          style={{ borderColor: "var(--red)", color: "var(--red)" }}
+                          title="取消解析；已完成阶段的缓存会保留，重新解析可复用"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cancelMutation.mutate(job.job_id);
+                          }}
+                        >
+                          停止
+                        </button>
+                      )}
+                      {(job.status === "failed" || job.status === "cancelled") && (
+                        <button
+                          disabled={resumeMutation.isPending}
+                          title="从已完成阶段的缓存继续解析"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            resumeMutation.mutate(job.job_id);
+                          }}
+                        >
+                          重新解析
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/jobs/${job.job_id}/workbench`);
+                        }}
+                      >
+                        打开工作台
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

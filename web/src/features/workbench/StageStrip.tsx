@@ -18,6 +18,14 @@ const STAGE_GROUPS: StageDef[] = [
   { key: "export", label: "导出", members: ["export"] },
 ];
 
+/** Display order of the merged stage groups (progress banner step count). */
+export const STAGE_GROUP_ORDER = STAGE_GROUPS.map((g) => g.key);
+
+/** Chinese label for a raw stage name; null when unknown. */
+export function stageGroup(stageName: string): StageDef | undefined {
+  return STAGE_GROUPS.find((g) => g.members.includes(stageName));
+}
+
 const SEVERITY: Record<string, number> = { pending: 0, skipped: 0, succeeded: 1, running: 2, failed: 3 };
 
 export function StageStrip({ stages }: { stages: StageRun[] }) {
