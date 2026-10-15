@@ -300,6 +300,20 @@ class WorkflowRunner:
                     }
                     continue
 
+            # Progress visibility (design §7.7): the job row names the stage
+            # actually executing. Fenced like every other status write — a
+            # cancelled/reclaimed job must not be flipped back to running.
+            if not self.repository.set_current_stage_fenced(
+                job.job_id, stage_name, token=self.lease_token
+            ):
+                return RunResult(
+                    job_id=job.job_id,
+                    status="fenced",
+                    stages_run=stages_run,
+                    review_count=review_total,
+                    failed_stage=stage_name,
+                )
+
             try:
                 outcome, outputs, stage_run_id, ok = self._run_stage(
                     job, handler, context, inputs, cache_key

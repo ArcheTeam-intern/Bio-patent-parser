@@ -712,6 +712,69 @@ class Repository:
         ).fetchall()
         return {str(row["status"]): int(row["n"]) for row in rows}
 
+    def cancel_job(self, job_id: str) -> str | None:
+        """Cancel a queued/running job and delete its lease in one transaction.
+
+        Deleting the lease row IS the fencing signal: the running worker's
+        next stage gate, stage-completion commit and heartbeat all re-verify
+        the lease and refuse, so it can never publish results or overwrite
+        the cancelled status. Returns ``None`` when the job is already in a
+        terminal state (the caller maps that to 409).
+        """
+
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._conn.execute(
+                "SELECT status FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None or row["status"] not in ("queued", "running"):
+                self._conn.execute("ROLLBACK")
+                return None
+            self._conn.execute(
+                "DELETE FROM worker_leases WHERE job_id = ?", (job_id,)
+            )
+            self._conn.execute(
+                "UPDATE jobs SET status = 'cancelled', current_stage = NULL, updated_at = ? WHERE job_id = ?",
+                (_utcnow_iso(), job_id),
+            )
+            self._conn.execute("COMMIT")
+            return "cancelled"
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    def set_current_stage_fenced(
+        self,
+        job_id: str,
+        stage_name: str,
+        *,
+        token: "LeaseToken | None",
+    ) -> bool:
+        """Mark the job running at ``stage_name`` while the lease is held.
+
+        The per-stage progress write shares the fencing discipline with
+        stage completion: a worker whose lease was cancelled or reclaimed
+        must not flip the job's status back to running.
+        """
+
+        if token is None:
+            self.update_job_status(job_id, "running", current_stage=stage_name)
+            return True
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            if not self._token_holds(token):
+                self._conn.execute("ROLLBACK")
+                return False
+            self._conn.execute(
+                "UPDATE jobs SET status = 'running', current_stage = ?, updated_at = ? WHERE job_id = ?",
+                (stage_name, _utcnow_iso(), job_id),
+            )
+            self._conn.execute("COMMIT")
+            return True
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
     # ---- fenced conditional commits (plan B03) ----------------------------
 
     def _token_holds(self, token: "LeaseToken") -> bool:

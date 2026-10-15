@@ -156,12 +156,34 @@ def get_stages(service: ServiceDep, job_id: str) -> list[StageRunView]:
     ]
 
 
+@router.post("/{job_id}/cancel", response_model=JobResponse)
+def cancel_job(service: ServiceDep, job_id: str) -> JobResponse:
+    """Cancel a queued/running job (fenced): the worker's next stage gate
+    refuses and the parse stops without publishing. Terminal jobs get 409.
+    """
+
+    job = service.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
+    new_status = service.repository.cancel_job(job_id)
+    if new_status is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "JOB_NOT_CANCELLABLE",
+                "message": f"job status {job.status!r} cannot be cancelled",
+                "details": {"status": job.status},
+            },
+        )
+    return _job_response(service, service.get_job(job_id))
+
+
 @router.post("/{job_id}/resume", status_code=202)
 def resume_job(service: ServiceDep, job_id: str) -> dict:
     job = service.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
-    if job.status not in ("failed", "running", "queued"):
+    if job.status not in ("failed", "cancelled", "running", "queued"):
         # A fully succeeded job simply returns its current state.
         return _job_response(service, job)
     try:

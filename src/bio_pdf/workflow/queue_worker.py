@@ -150,7 +150,18 @@ def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False
                     resume=resume_mode,
                     # Fencing: the runner aborts before any status write or
                     # publish once this worker no longer holds the lease.
-                    lease_guard=lambda: not keeper.lost.is_set(),
+                    # Besides the in-memory lost flag, every stage boundary
+                    # re-verifies the lease row in the database — a user
+                    # cancel (or a reclaimed lease) takes effect at the next
+                    # stage instead of at the next heartbeat.
+                    lease_guard=lambda: (
+                        not keeper.lost.is_set()
+                        and service.repository.lease_is_valid(
+                            job.job_id,
+                            worker_id=claimed.worker_id,
+                            generation=claimed.generation,
+                        )
+                    ),
                     # B03: conditional commits re-verify this token inside
                     # their own transactions (stage completion, publication).
                     lease_token=LeaseToken.from_claim(claimed),
