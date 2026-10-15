@@ -246,7 +246,10 @@ def normalize_page(
     blocks: list[TextBlock] = []
     for idx, item in enumerate(_iter_text_items(page_dict)):
         raw_text = item.get("text") or item.get("content") or ""
-        if not raw_text:
+        # NonEmptyStr strips whitespace, so a whitespace-only group would
+        # fail validation — and it carries no evidence anyway. Skip it
+        # rather than fabricate content (same rule as the top-level path).
+        if not str(raw_text).strip():
             continue
         # Coordinates: item-level bbox first, then every prov span.
         try:
@@ -593,6 +596,14 @@ def _expand_top_level_pages(
     for text in payload.get("texts", []) or []:
         if not isinstance(text, dict):
             continue
+        raw_text = str(text.get("text") or "")
+        if not raw_text.strip():
+            # Docling emits empty text groups (picture captions without OCR
+            # text, whitespace groups). A block without text carries no
+            # evidence — skip it instead of fabricating a placeholder that
+            # would violate the TextBlock contract (real crash on the
+            # OCR'd EP patent: every layout attempt died here).
+            continue
         page_no = _page_no_from_prov(text)
         target = pages_dict.get(str(page_no))
         if target is None:
@@ -621,7 +632,7 @@ def _expand_top_level_pages(
                     text.get("label") or text.get("content_layer"), block_kind
                 ),
                 bbox=bbox,
-                text_raw=str(text.get("text") or ""),
+                text_raw=raw_text,
                 provenance=provenance,
             )
         )

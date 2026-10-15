@@ -88,12 +88,19 @@ def parse_activity_value(raw: str) -> ActivityValue:
 
     if (m := _RANGE_RE.match(text)):
         if _is_valid_number(m.group(1)) and _is_valid_number(m.group(2)):
-            return ActivityValue(
-                kind="range",
-                lower=m.group(1),
-                upper=m.group(2),
-                raw=raw,
-            )
+            # A self-contradictory range (lower > upper, e.g. OCR noise
+            # "10-8" from a date or page reference) is not a real interval.
+            # Keep the raw text honestly as unparsed instead of raising —
+            # the ActivityValue contract rejects lower > upper and a hard
+            # error would kill the whole extract stage.
+            if Decimal(m.group(1)) <= Decimal(m.group(2)):
+                return ActivityValue(
+                    kind="range",
+                    lower=m.group(1),
+                    upper=m.group(2),
+                    raw=raw,
+                )
+            return ActivityValue(kind="unparsed", raw=raw)
 
     if (m := _SCALAR_RE.match(text)):
         if _is_valid_number(m.group(1)):

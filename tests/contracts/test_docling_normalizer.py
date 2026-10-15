@@ -205,3 +205,39 @@ def test_normalize_does_not_invent_bbox_when_missing() -> None:
     assert block.bbox is None
     # The text is still preserved even though the bbox is missing.
     assert block.text_raw == "no bbox here"
+
+def test_normalize_skips_empty_text_groups_instead_of_crashing() -> None:
+    """Real regression: the OCR'd EP patent produced empty docling text
+    groups; the strict TextBlock contract (text_raw non-empty) made every
+    layout attempt die with a ValidationError. Empty groups carry no
+    evidence — they are skipped, never filled with a placeholder."""
+
+    payload = {
+        "pages": [
+            _minimal_page_dict(
+                items=[
+                    {
+                        "self_ref": "#/texts/1",
+                        "label": "caption",
+                        "text": "",
+                        "prov": [{"page_no": 1, "bbox": [10, 20, 100, 40]}],
+                    },
+                    {
+                        "self_ref": "#/texts/2",
+                        "label": "paragraph",
+                        "text": "   ",
+                        "prov": [{"page_no": 1, "bbox": [10, 50, 100, 70]}],
+                    },
+                    {
+                        "self_ref": "#/texts/3",
+                        "label": "paragraph",
+                        "text": "Actual text",
+                        "prov": [{"page_no": 1, "bbox": [10, 80, 100, 100]}],
+                    },
+                ]
+            )
+        ]
+    }
+    doc = normalize_docling_document(payload, parser_run_id="run-1", document_id="sha256:doc")
+    blocks = doc.pages[0].blocks
+    assert [b.text_raw for b in blocks] == ["Actual text"]

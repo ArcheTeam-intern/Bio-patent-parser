@@ -105,3 +105,15 @@ def test_normalize_unit_none_input() -> None:
 
 def test_normalize_unit_lowercase_slash() -> None:
     assert normalize_unit("ug/ml") == "ug/mL"
+
+def test_self_contradictory_range_degrades_to_unparsed():
+    """Real regression: OCR noise "10-8" (date/page fragments) parsed as a
+    range with lower > upper; the ActivityValue contract then raised and
+    killed the whole extract stage. The raw text is kept honestly instead."""
+    from bio_pdf.extract.activities.values import parse_activity_value
+    v = parse_activity_value("10-8")
+    assert v.kind == "unparsed"
+    assert v.raw == "10-8"
+    # Well-formed ranges still parse.
+    ok = parse_activity_value("1-10")
+    assert ok.kind == "range" and ok.lower == "1" and ok.upper == "10"
