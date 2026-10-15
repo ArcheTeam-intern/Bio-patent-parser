@@ -544,6 +544,28 @@ dialog::backdrop {
   flex: 1;
 }
 
+.spacer {
+  flex: 1;
+}
+
+.reading-flow {
+  font-size: 13px;
+}
+
+.error-detail pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 11px;
+  font-family: var(--mono);
+  max-height: 220px;
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+
 /* Segmented control inside the PDF toolbar */
 .seg {
   display: inline-flex;
@@ -696,6 +718,10 @@ dialog::backdrop {
   background: var(--amber);
 }
 
+.pd-bar .pd-tab {
+  background: #2563eb;
+}
+
 .pd-counts {
   display: flex;
   gap: 4px;
@@ -718,6 +744,16 @@ dialog::backdrop {
 .pd-chip.meas {
   background: var(--amber-soft);
   color: var(--amber);
+}
+
+.pd-chip.tab {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.pd-chip.muted {
+  background: var(--border-soft);
+  color: var(--text-dim);
 }
 
 .detail-grid {

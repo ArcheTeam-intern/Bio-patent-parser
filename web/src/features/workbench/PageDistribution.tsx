@@ -11,6 +11,8 @@ export interface PageDistributionProps {
   kinds: Record<string, "sequence" | "measurement">;
   currentPage: number;
   onJump: (page: number) => void;
+  /** Tables per page (tables-tab overview); rendered as a third series. */
+  tableCounts?: Record<string, number>;
 }
 
 export function PageDistribution({
@@ -19,8 +21,9 @@ export function PageDistribution({
   kinds,
   currentPage,
   onJump,
+  tableCounts,
 }: PageDistributionProps) {
-  const perPage = new Map<number, { seq: number; meas: number }>();
+  const perPage = new Map<number, { seq: number; meas: number; tab: number }>();
   let unlocatedSeq = 0;
   let unlocatedMeas = 0;
   for (const [id, pages] of Object.entries(recordPages)) {
@@ -30,16 +33,23 @@ export function PageDistribution({
       continue;
     }
     for (const page of new Set(pages)) {
-      const entry = perPage.get(page) ?? { seq: 0, meas: 0 };
+      const entry = perPage.get(page) ?? { seq: 0, meas: 0, tab: 0 };
       if (kinds[id] === "measurement") entry.meas += 1;
       else entry.seq += 1;
       perPage.set(page, entry);
     }
   }
+  for (const [page, count] of Object.entries(tableCounts ?? {})) {
+    const page_no = Number(page);
+    if (!Number.isInteger(page_no) || page_no < 1 || !count) continue;
+    const entry = perPage.get(page_no) ?? { seq: 0, meas: 0, tab: 0 };
+    entry.tab += count;
+    perPage.set(page_no, entry);
+  }
 
   const pages = [...perPage.entries()].sort((a, b) => a[0] - b[0]);
   if (pages.length === 0 && unlocatedSeq + unlocatedMeas === 0) return null;
-  const max = Math.max(1, ...pages.map(([, c]) => c.seq + c.meas));
+  const max = Math.max(1, ...pages.map(([, c]) => c.seq + c.meas + c.tab));
 
   return (
     <div className="pd">
@@ -59,10 +69,12 @@ export function PageDistribution({
             <span className="pd-bar">
               <span className="pd-seq" style={{ width: `${(counts.seq / max) * 100}%` }} />
               <span className="pd-meas" style={{ width: `${(counts.meas / max) * 100}%` }} />
+              <span className="pd-tab" style={{ width: `${(counts.tab / max) * 100}%` }} />
             </span>
             <span className="pd-counts">
               {counts.seq > 0 && <span className="pd-chip seq">序列 {counts.seq}</span>}
               {counts.meas > 0 && <span className="pd-chip meas">活性 {counts.meas}</span>}
+              {counts.tab > 0 && <span className="pd-chip tab">表格 {counts.tab}</span>}
             </span>
           </button>
         ))}

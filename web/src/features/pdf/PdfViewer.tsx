@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { documentSourceUrl } from "../../api/client";
+import { documentSourceUrl, type EvidenceData } from "../../api/client";
+import { Modal } from "../../components/Modal";
+import { precisionLabel } from "../evidence/EvidenceNavigator";
 import type { EvidenceTarget } from "../evidence/useEvidence";
 
 /**
@@ -21,6 +23,8 @@ interface Props {
   target: EvidenceTarget | null;
   pageNumber: number;
   onPageChange: (page: number) => void;
+  /** Current evidence payload for the magnifier (raw text + precision). */
+  evidence?: EvidenceData | null;
 }
 
 interface RenderedGeometry {
@@ -40,7 +44,7 @@ type PdfDocument = {
   }>;
 };
 
-export function PdfViewer({ documentId, target, pageNumber, onPageChange }: Props) {
+export function PdfViewer({ documentId, target, pageNumber, onPageChange, evidence }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -53,6 +57,8 @@ export function PdfViewer({ documentId, target, pageNumber, onPageChange }: Prop
   const [error, setError] = useState<string | null>(null);
   const [loadingPdf, setLoadingPdf] = useState(true);
   const renderTaskRef = useRef<{ cancel(): void } | null>(null);
+  // Magnifier: crop of the evidence region, opened by clicking the box.
+  const [magnifier, setMagnifier] = useState<string | null>(null);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -167,6 +173,28 @@ export function PdfViewer({ documentId, target, pageNumber, onPageChange }: Prop
     bbox !== null && geometry !== null && geometry.pageNumber === pageNumber && target?.page === geometry.pageNumber;
   const displayScale = fitWidth && geometry ? geometry.pxWidth / geometry.ptWidth : scale;
 
+  /** Crop the evidence region out of the rendered canvas, enlarged. */
+  const openMagnifier = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !bbox || !geometry) return;
+    const sx = (bbox[0] / geometry.ptWidth) * canvas.width;
+    const sy = (bbox[1] / geometry.ptHeight) * canvas.height;
+    const sw = Math.max(8, ((bbox[2] - bbox[0]) / geometry.ptWidth) * canvas.width);
+    const sh = Math.max(8, ((bbox[3] - bbox[1]) / geometry.ptHeight) * canvas.height);
+    // Enlarge small regions to a readable width; cap huge ones.
+    const targetW = Math.min(1100, Math.max(560, sw));
+    const zoom = targetW / sw;
+    const out = document.createElement("canvas");
+    out.width = Math.round(sw * zoom);
+    out.height = Math.round(sh * zoom);
+    const ctx = out.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    setMagnifier(out.toDataURL("image/png"));
+  };
+
   useEffect(() => {
     const wrap = wrapRef.current;
     const box = boxRef.current;
@@ -246,6 +274,8 @@ export function PdfViewer({ documentId, target, pageNumber, onPageChange }: Prop
             <div
               className="evidence-box"
               ref={boxRef}
+              title="点击放大查看该证据区域"
+              onClick={openMagnifier}
               style={{
                 left: `${(bbox![0] / geometry.ptWidth) * 100}%`,
                 top: `${(bbox![1] / geometry.ptHeight) * 100}%`,
@@ -256,6 +286,26 @@ export function PdfViewer({ documentId, target, pageNumber, onPageChange }: Prop
           )}
         </div>
       </div>
+
+      <Modal open={magnifier !== null} onClose={() => setMagnifier(null)} title="证据区域放大" width={860}>
+        {magnifier && (
+          <img
+            src={magnifier}
+            alt="证据区域放大图"
+            style={{ maxWidth: "100%", display: "block", margin: "0 auto", border: "1px solid var(--border)", borderRadius: 6 }}
+          />
+        )}
+        {evidence && (
+          <div style={{ marginTop: 12 }}>
+            <div className="dim">{precisionLabel(evidence)} · 第 {target?.page} 页</div>
+            {evidence.raw_text && (
+              <div className="mono" style={{ fontSize: 12, lineHeight: 1.7, marginTop: 6, wordBreak: "break-all" }}>
+                {evidence.raw_text.length > 600 ? evidence.raw_text.slice(0, 600) + "…" : evidence.raw_text}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </>
   );
 }

@@ -105,6 +105,7 @@ export interface RecordsResponse {
   sequences: SequenceRecordData[];
   measurements: MeasurementData[];
   record_pages: Record<string, number[]>;
+  table_pages: Record<string, number>;
 }
 
 export interface ActivityValue {

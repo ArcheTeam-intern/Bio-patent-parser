@@ -68,6 +68,24 @@ describe("PageDistribution", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it("includes table counts as a third series", () => {
+    render(
+      <PageDistribution
+        pageCount={12}
+        recordPages={{ "seq-1": [9] }}
+        kinds={{ "seq-1": "sequence" }}
+        currentPage={1}
+        onJump={() => {}}
+        tableCounts={{ "8": 1, "9": 3 }}
+      />,
+    );
+    const rows = screen.getAllByRole("button").filter(b => b.className.includes("pd-row"));
+    expect(rows.map(r => r.querySelector(".pd-page")?.textContent)).toEqual(["8", "9"]);
+    expect(rows[0].textContent).toContain("表格 1");
+    expect(rows[1].textContent).toContain("序列 1");
+    expect(rows[1].textContent).toContain("表格 3");
+  });
+
   it("renders nothing when there are no records at all", () => {
     const { container } = render(
       <PageDistribution pageCount={5} recordPages={{}} kinds={{}} currentPage={1} onJump={() => {}} />,

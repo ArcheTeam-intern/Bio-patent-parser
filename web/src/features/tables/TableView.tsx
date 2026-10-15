@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getJob, getPage } from "../../api/client";
+import { getPage } from "../../api/client";
 
 /**
  * 表格与原文视图（plan B12）：
@@ -107,7 +108,7 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
     queryFn: () => getPage(jobId, pageNumber),
     enabled: !!jobId,
   });
-  const job = useQuery({ queryKey: ["job", jobId], queryFn: () => getJob(jobId), enabled: !!jobId });
+  const [raw, setRaw] = useState(false);
 
   if (page.isLoading) return <div className="empty-state">加载中…</div>;
   if (page.error) return <div className="banner error">读取失败：{String(page.error)}</div>;
@@ -119,29 +120,135 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
       </div>
     );
   }
+  const groups = mergeBlocks(blocks as TextBlockLike[]);
   return (
     <div style={{ padding: 8 }}>
-      <div className="dim" style={{ marginBottom: 6 }}>
-        页面路由：{page.data?.route} · 块数：{blocks.length} · 文档解析器：{job.data?.document_id.slice(0, 18)}…
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <span className="dim">
+          页面路由：{page.data?.route} · 块数：{blocks.length} · 合并为 {groups.length} 段
+        </span>
+        <span className="spacer" />
+        <button
+          aria-pressed={raw}
+          title={raw ? "切换回阅读视图" : "按解析器原始切分逐块查看"}
+          onClick={() => setRaw(v => !v)}
+        >
+          {raw ? "阅读视图" : "逐块查看"}
+        </button>
       </div>
-      <table className="data">
-        <thead>
-          <tr>
-            <th>类型</th>
-            <th>角色</th>
-            <th>文本</th>
-          </tr>
-        </thead>
-        <tbody>
-          {blocks.map((block: { block_id: string; kind: string; semantic_role?: string; text_raw: string }) => (
-            <tr key={block.block_id}>
-              <td className="dim">{block.kind}</td>
-              <td className="dim">{block.semantic_role ?? "unknown"}</td>
-              <td style={{ whiteSpace: "pre-wrap" }}>{block.text_raw}</td>
+      {raw ? (
+        <table className="data">
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>角色</th>
+              <th>文本</th>
             </tr>
+          </thead>
+          <tbody>
+            {blocks.map((block: { block_id: string; kind: string; semantic_role?: string; text_raw: string }) => (
+              <tr key={block.block_id}>
+                <td className="dim">{block.kind}</td>
+                <td className="dim">{block.semantic_role ?? "unknown"}</td>
+                <td style={{ whiteSpace: "pre-wrap" }}>{block.text_raw}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="reading-flow">
+          {groups.map((g, i) => (
+            <TextGroup key={g.ids.join("|") || i} group={g} />
           ))}
-        </tbody>
-      </table>
+        </div>
+      )}
     </div>
+  );
+}
+
+export interface TextBlockLike {
+  block_id: string;
+  kind: string;
+  semantic_role?: string;
+  text_raw: string;
+}
+
+export interface MergedGroup {
+  kind: string;
+  role: string;
+  /** Original fragments in document order. */
+  fragments: string[];
+  ids: string[];
+  /** True when the group is a run of cell-like short fragments (R/S/…). */
+  cellLike: boolean;
+}
+
+function mergeable(b: TextBlockLike): boolean {
+  const role = b.semantic_role ?? "unknown";
+  return (
+    b.text_raw.trim().length > 0 &&
+    (b.kind === "text" || b.kind === "caption") &&
+    role !== "title" &&
+    role !== "header"
+  );
+}
+
+/** Merge consecutive same-kind/same-role text blocks into reading groups.
+ *
+ * A page's raw blocks are parser line boxes — one sentence arrives as many
+ * fragments and a native-parsed table as single letters. Grouping runs of
+ * the same kind+role restores readable paragraphs; short fragments (R, S,
+ * strain numbers) stay individually visible as chips instead of pretending
+ * to be a sentence. Headers/titles/captions always stand alone.
+ */
+export function mergeBlocks(blocks: TextBlockLike[]): MergedGroup[] {
+  const groups: MergedGroupWithFlag[] = [];
+  for (const b of blocks) {
+    const role = b.semantic_role ?? "unknown";
+    const text = b.text_raw.trim();
+    const prev = groups[groups.length - 1];
+    if (mergeable(b) && prev && prev.canMerge && prev.kind === b.kind && prev.role === role) {
+      prev.fragments.push(text);
+      prev.ids.push(b.block_id);
+      if (text.length <= 3) prev.cellLike = true;
+      continue;
+    }
+    groups.push({
+      kind: b.kind,
+      role,
+      fragments: text.length > 0 ? [text] : [],
+      ids: [b.block_id],
+      cellLike: mergeable(b) && text.length > 0 && text.length <= 3,
+      canMerge: mergeable(b),
+    });
+  }
+  return groups.map(({ canMerge: _omit, ...g }) => g);
+}
+
+type MergedGroupWithFlag = MergedGroup & { canMerge: boolean };
+
+function TextGroup({ group }: { group: MergedGroup }) {
+  const text = group.fragments;
+  if (text.length === 0) return null;
+  if (group.role === "title" || group.role === "header") {
+    return <div style={{ fontWeight: 700, fontSize: 14, margin: "14px 0 4px" }}>{text.join(" ")}</div>;
+  }
+  if (group.role === "caption" || group.kind === "caption") {
+    return <div className="dim" style={{ fontStyle: "italic", margin: "8px 0" }}>{text.join(" ")}</div>;
+  }
+  if (group.cellLike) {
+    return (
+      <div style={{ margin: "6px 0", display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {text.map((t, i) => (
+          <span key={i} className="pd-chip muted">{t}</span>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <p style={{ margin: "8px 0", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
+      {/* Line boxes rejoin without a space after a hard hyphen break. */}
+      {text.reduce((acc, cur, i) => (i === 0 ? cur : acc.endsWith("-") ? acc + cur : `${acc} ${cur}`), "")}
+    </p>
   );
 }

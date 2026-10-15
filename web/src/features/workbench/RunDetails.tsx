@@ -20,6 +20,33 @@ function duration(started: string | null, ended: string | null): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+/**
+ * 阶段失败原因：code + message 直接可见，诊断字段（如引擎 stderr 尾部）
+ * 收在展开里。旧任务只存了 code/message 时也能如实显示。
+ */
+function StageError({ error }: { error: Record<string, string> }) {
+  const entries = Object.entries(error ?? {});
+  if (entries.length === 0) return <>—</>;
+  const headline = [error["code"], error["message"]].filter(Boolean).join("：");
+  const details = entries.filter(([k]) => k !== "code" && k !== "message");
+  return (
+    <div>
+      <div style={{ color: "var(--red)" }}>{headline || entries.map(([k, v]) => `${k}: ${v}`).join("；")}</div>
+      {details.length > 0 && (
+        <details style={{ marginTop: 4 }}>
+          <summary className="dim" style={{ cursor: "pointer" }}>详细诊断</summary>
+          {details.map(([k, v]) => (
+            <div key={k} className="error-detail">
+              <div className="dim mono" style={{ fontSize: 11 }}>{k}</div>
+              <pre>{v}</pre>
+            </div>
+          ))}
+        </details>
+      )}
+    </div>
+  );
+}
+
 export function RunDetails({ jobId, job }: { jobId: string; job: Job | undefined }) {
   const artifacts = useQuery({
     queryKey: ["artifacts", jobId],
@@ -77,8 +104,8 @@ export function RunDetails({ jobId, job }: { jobId: string; job: Job | undefined
                     {s.started_at ? new Date(s.started_at).toLocaleString() : "—"}
                   </td>
                   <td className="dim">{duration(s.started_at, s.ended_at)}</td>
-                  <td className="dim">
-                    {Object.values(s.error ?? {}).join("；") || "—"}
+                  <td className="dim" style={{ maxWidth: 260 }}>
+                    <StageError error={s.error} />
                   </td>
                 </tr>
               ))}

@@ -19,6 +19,9 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
   const [acceptedOnly, setAcceptedOnly] = useState(false);
   const [exportId, setExportId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The format/filter the finished export was built with: switching either
+  // afterwards must offer a re-export instead of a stale download only.
+  const [exportedWith, setExportedWith] = useState<{ format: string; acceptedOnly: boolean } | null>(null);
 
   const job = useQuery({
     queryKey: ["job", jobId],
@@ -54,6 +57,7 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
     if (!open) {
       setExportId(null);
       setError(null);
+      setExportedWith(null);
     }
   }, [open]);
 
@@ -64,12 +68,16 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
   const revision = job.data?.result_revision ?? 0;
   const done = exportInfo.data?.status === "completed";
   const failed = exportInfo.data?.status === "failed";
+  const staleSelection =
+    done && exportedWith !== null &&
+    (exportedWith.format !== format || exportedWith.acceptedOnly !== acceptedOnly);
 
   const start = async () => {
     setError(null);
     try {
       const res = await createExport(jobId, { format, accepted_only: acceptedOnly });
       setExportId(res.export_id);
+      setExportedWith({ format, acceptedOnly });
     } catch (e) {
       setError(String(e));
     }
@@ -84,12 +92,12 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
         <>
           {done && (
             <a href={exportDownloadUrl(exportInfo.data!.export_id)} target="_blank" rel="noreferrer">
-              <button className="primary">下载</button>
+              <button className={staleSelection ? "" : "primary"}>下载</button>
             </a>
           )}
-          {!exportId && (
-            <button className="primary" onClick={start}>
-              开始导出
+          {(!exportId || done) && (
+            <button className={staleSelection || !exportId ? "primary" : ""} onClick={start}>
+              {staleSelection ? "重新导出" : exportId ? "再次导出" : "开始导出"}
             </button>
           )}
           <button onClick={onClose}>关闭</button>
@@ -126,6 +134,11 @@ export function ExportDialog({ jobId, open, onClose }: Props) {
           {failed && `导出失败：${exportInfo.data.error ?? "未知原因"}`}
           {done && `导出完成，共 ${exportInfo.data.record_count} 条记录（r${exportInfo.data.result_revision}）。`}
           {!done && !failed && "导出中…"}
+        </div>
+      )}
+      {staleSelection && (
+        <div className="banner info">
+          已切换到新的格式/范围，当前下载仍是上一次的结果。点“重新导出”生成新文件。
         </div>
       )}
     </Modal>

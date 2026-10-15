@@ -190,7 +190,8 @@ export function WorkbenchPage() {
           <div className="panel-header">原始 PDF</div>
           {job.data && (
             <PdfViewer documentId={job.data.document_id} target={evidenceState.target}
-              pageNumber={currentPage} onPageChange={changePage} />
+              pageNumber={currentPage} onPageChange={changePage}
+              evidence={evidenceState.evidence} />
           )}
         </section>
 
@@ -256,7 +257,7 @@ export function WorkbenchPage() {
                 )}
               </div>
             )}
-            {(tab === "sequences" || tab === "activities") &&
+            {(tab === "sequences" || tab === "activities" || tab === "tables") &&
               records.data &&
               !isActive(job.data?.status) && (
                 <div style={{ padding: "12px 14px 6px", borderBottom: "1px solid var(--border-soft)" }}>
@@ -266,6 +267,7 @@ export function WorkbenchPage() {
                     kinds={kindsById}
                     currentPage={currentPage}
                     onJump={changePage}
+                    tableCounts={tab === "tables" ? records.data.table_pages : undefined}
                   />
                 </div>
               )}
