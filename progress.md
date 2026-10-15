@@ -273,3 +273,8 @@
 - 档位（实测）：当前生产组合（heron 172MB + TableFormer v1 accurate/fast 358MB + RapidOCR small 32MB）≈0.55GB；官方默认全开（+公式 CodeFormulaV2 640MB、图片分类器 34MB、RapidOCR 另一后端）≈1.3GB；本机可用满血全集（+TableFormer v2 + 全部 VLM/OCR：granite-docling/SmolDocling/SmolVLM/granite-vision/chart2csv/Nanonets/Nemotron/MinerU2.5-Pro）≈40GB；含互斥备选与 Mac 专用 MLX 的全部仓库 ≈42.3GB。
 - 运行开销（估算）：主链路 CPU 约 1.5–3GB 内存、无 GPU 需求；VLM 显存 256M 级≈0.5–1GB、1.2B≈2.5–3GB、2B≈5–6GB、3B≈6–7GB、4B≈8–9GB（超本机 8GB）。现状 torch 2.14.1+cpu、onnxruntime 仅 CPU provider → VLM 现在只能 CPU 推理；先做算力升级再评估 VLM 路线。
 - 修正一处旧记录错误：HF 缓存里的 PaddlePaddle PP-OCRv5_server_* 目录只有 refs/元数据（~1MB）并无权重；且 PP-OCRv6 实际档位为 small/medium（v6 无 server）。桌面文档第六节第 3 条（OCR 升档）与上一轮进度中的对应表述已同步修正，升档路径改为 medium 档（det 62MB + rec 77MB 实测可下载）。
+
+### 满血模型资源补充：本地磁盘实占与运行内存实测（用户追问引出）
+- 磁盘口径澄清：满血 ≈40GB 就是磁盘占用（Docling 整仓拉取，下载量=磁盘量）。本地实占：模型 0.56GB（HF 缓存 530MB=TableFormer 342MiB+heron 164MiB，RapidOCR 33MB）+ 后端运行时（.venv）1.35GB（torch 506MiB 等）≈ 合计 1.9GB；另 data/ 约 186MB、node_modules 约 184MB。
+- 运行内存实测（scripts/docling_mem_probe.py，按线上同款 options：heron+TableFormer ACCURATE、force_backend_text）：空闲常驻 API 33MiB + worker 7MiB；解析子进程导入后 331MiB、模型加载完 0.7–0.8GiB、12 页论文全跑峰值 1.5GiB（22.5s）、扫描页+RapidOCR 2 页峰值 1.4GiB（12.1s）→ 最坏 ≈2GiB，15GiB 内存余量充足、无需 GPU。
+- 桌面文档"满血资源清单"子节已补齐：表头改为"下载量（=磁盘占用）"、新增"本地已下载磁盘"与"运行内存（实测）"两块；口径备注指向两个可复跑脚本。
