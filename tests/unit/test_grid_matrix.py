@@ -101,3 +101,33 @@ def test_row_without_label_is_reported_not_invented():
     assert any(
         c.row_index == 2 and c.header_role == "data" for c in tables.cells
     )
+
+
+def test_dense_columns_are_not_merged():
+    """Real regression (paper page 9): 6 call columns at ~11.7pt pitch with
+    6.5pt-wide glyphs. A fixed clustering span fused adjacent columns into
+    one band and the duplicate guard then rejected the whole matrix.
+    Tolerance must follow the cell size, not a constant."""
+    blocks = []
+    ys = [80 + r * 30 for r in range(10)]
+    xs = [150.6, 171.8, 183.6, 203.3, 224.5, 236.2]
+    for r, y in enumerate(ys):
+        blocks.append(_b(f"d{r}", "Gentamicin", 59, y, 140, y + 7))
+        for c, x in enumerate(xs):
+            blocks.append(_b(f"c{r}{c}", ["R", "S"][(r + c) % 2], x, y, x + 6.5, y + 7))
+    (t,) = reconstruct_call_matrices(blocks, page_number=9)
+    data = [c for c in t.cells if c.header_role == "data"]
+    assert len(data) == 60
+    assert len({c.column_index for c in data}) == 6
+
+
+def test_single_cell_noise_rows_are_trimmed_not_fatal():
+    """Isolated R/S glyphs elsewhere on the page must not abort the whole
+    reconstruction (they are dropped as off-lattice and reported)."""
+    blocks = _paper_like_blocks()
+    blocks.append(_b("n1", "R", 400, 400, 405, 407))  # stray glyph, own row+col
+    blocks.append(_b("n2", "S", 500, 450, 505, 457))
+    (t,) = reconstruct_call_matrices(blocks, page_number=9)
+    assert any("OFF_LATTICE_CALLS_EXCLUDED" in i for i in t.structure_issues)
+    data = [c for c in t.cells if c.header_role == "data"]
+    assert len(data) == 16  # the real 4x4 matrix, noise excluded

@@ -43,10 +43,15 @@ _CAPTION_RE = re.compile(
 _MIN_CELLS = 10
 _MIN_ROWS = 3
 _MIN_COLS = 2
-#: Row/column centres closer than this (pt) are the same band; spacing
-#: must stay under _MAX_PITCH for the grid to count as regular.
-_MAX_CELL_SPAN = 24.0
-_MAX_PITCH = 90.0
+#: Cell-centre separation used to merge cells into a row/column band. Set
+#: from the median cell size at runtime: same-column cells share a centre
+#: (native glyphs land on identical coordinates), while two visually
+#: adjacent columns never overlap. A fixed tolerance breaks on dense
+#: matrices where the column pitch is barely larger than a cell.
+_TOLERANCE_FLOOR = 4.0
+#: Upper bound on the spacing between adjacent row/column bands; beyond it
+#: the cells are scatter on the page, not one lattice.
+_MAX_PITCH = 160.0
 
 
 def _bbox(block: dict[str, Any]) -> tuple[float, float, float, float] | None:
@@ -115,45 +120,75 @@ def reconstruct_call_matrices(
     if len(calls) < _MIN_CELLS:
         return []
 
-    row_bands = _cluster([_cy(c[2]) for c in calls], _MAX_CELL_SPAN / 2)
-    col_bands = _cluster([_cx(c[2]) for c in calls], _MAX_CELL_SPAN / 2)
+    widths = sorted(c[2][2] - c[2][0] for c in calls)
+    heights = sorted(c[2][3] - c[2][1] for c in calls)
+    med_w = widths[len(widths) // 2]
+    med_h = heights[len(heights) // 2]
+    # Merge cells whose centres are within one cell-size: same-column
+    # glyphs coincide; visually adjacent columns never do. A fixed span
+    # would fuse dense columns (real paper: 11.7pt pitch, 6.5pt cells).
+    row_bands = _cluster([_cy(c[2]) for c in calls], max(_TOLERANCE_FLOOR, med_h))
+    col_bands = _cluster([_cx(c[2]) for c in calls], max(_TOLERANCE_FLOOR, med_w))
     if len(row_bands) < _MIN_ROWS or len(col_bands) < _MIN_COLS:
         return []
-    # Regular lattice check: adjacent band centres must not jump wildly.
     row_centers = [sum(_cy(calls[j][2]) for j in band) / len(band) for band in row_bands]
     col_centers = [sum(_cx(calls[j][2]) for j in band) / len(band) for band in col_bands]
-    if any(
-        row_centers[i + 1] - row_centers[i] > _MAX_PITCH
-        for i in range(len(row_centers) - 1)
-    ) or any(
-        col_centers[i + 1] - col_centers[i] > _MAX_PITCH
-        for i in range(len(col_centers) - 1)
-    ):
-        return []
 
     # Grid assignment.
     grid: dict[tuple[int, int], tuple[int, dict[str, Any], tuple[float, float, float, float]]] = {}
-    duplicates = 0
     for band_r, rband in enumerate(row_bands):
         for j in rband:
             band_c = min(
                 range(len(col_bands)),
                 key=lambda k: abs(_cx(calls[j][2]) - col_centers[k]),
             )
-            key = (band_r, band_c)
-            if key in grid:
-                duplicates += 1
-                continue
-            grid[key] = calls[j]
-    if duplicates or len(grid) < _MIN_CELLS:
+            grid[(band_r, band_c)] = calls[j]
+    if len(grid) < _MIN_CELLS:
         return []
+    # Keep only the coherent sub-lattice: drop row/column bands that carry a
+    # single call (isolated R/S glyphs from captions or a second table), so a
+    # noisy page yields a clean matrix instead of being rejected whole. The
+    # dropped cells are NOT fabricated into the table — they stay ordinary
+    # text blocks and the exclusion is reported on the table.
+    excluded = 0
+    while True:
+        rows_with_calls = {r for (r, _c) in grid}
+        cols_with_calls = {c for (_r, c) in grid}
+        thin_rows = {r for r in rows_with_calls
+                     if sum(1 for (rr, _c) in grid if rr == r) < 2}
+        thin_cols = {c for c in cols_with_calls
+                     if sum(1 for (_r, cc) in grid if cc == c) < 2}
+        if not thin_rows and not thin_cols:
+            break
+        keep = {
+            k: v for k, v in grid.items()
+            if k[0] not in thin_rows and k[1] not in thin_cols
+        }
+        excluded += len(grid) - len(keep)
+        grid = keep
+        if not grid:
+            return []
     rows_with_calls = {r for (r, _c) in grid}
     cols_with_calls = {c for (_r, c) in grid}
-    if len(rows_with_calls) < _MIN_ROWS or len(cols_with_calls) < _MIN_COLS:
+    if len(rows_with_calls) < _MIN_ROWS or len(cols_with_calls) < _MIN_COLS or len(grid) < _MIN_CELLS:
         return []
-    for r in rows_with_calls:
-        if sum(1 for (rr, _c) in grid if rr == r) < 2:
-            return []  # a single cell in a row is not a lattice, it is noise
+    kept_rows = sorted(rows_with_calls)
+    kept_cols = sorted(cols_with_calls)
+    row_seq = [row_centers[b] for b in kept_rows]
+    col_seq = [col_centers[b] for b in kept_cols]
+    # The kept bands must still be a regular lattice (adjacent band pitch
+    # bounded): guards against cells that merely happened to pair up across
+    # unrelated page regions.
+    if any(row_seq[i + 1] - row_seq[i] > _MAX_PITCH for i in range(len(row_seq) - 1)) or any(
+        col_seq[i + 1] - col_seq[i] > _MAX_PITCH for i in range(len(col_seq) - 1)
+    ):
+        return []
+    row_align = max(med_h, min(
+        (row_seq[i + 1] - row_seq[i] for i in range(len(row_seq) - 1)), default=med_h
+    ) / 2)
+    col_align = max(med_w, min(
+        (col_seq[i + 1] - col_seq[i] for i in range(len(col_seq) - 1)), default=med_w
+    ) / 2)
 
     grid_x0 = min(c[2][0] for c in grid.values())
     grid_top = min(c[2][1] for c in grid.values())
@@ -164,7 +199,7 @@ def reconstruct_call_matrices(
         candidates = [
             (b, bbox)
             for _i, b, bbox in others
-            if abs(_cy(bbox) - center) <= _MAX_CELL_SPAN / 2
+            if abs(_cy(bbox) - center) <= row_align
             and bbox[2] < grid_x0 - 2
         ]
         if not candidates:
@@ -176,7 +211,7 @@ def reconstruct_call_matrices(
         candidates = [
             (b, bbox)
             for _i, b, bbox in others
-            if abs(_cx(bbox) - center) <= _MAX_CELL_SPAN / 2
+            if abs(_cx(bbox) - center) <= col_align
             and (bbox[1] > grid_bottom + 2 or bbox[3] < grid_top - 2)
         ]
         if not candidates:
@@ -199,6 +234,11 @@ def reconstruct_call_matrices(
     issues: list[str] = [
         "GEOMETRY_RECONSTRUCTED: table structure rebuilt from call-cell positions; review required"
     ]
+    if excluded:
+        issues.append(
+            f"OFF_LATTICE_CALLS_EXCLUDED count={excluded}: single-cell rows/columns "
+            "were treated as noise and left as text, not table cells"
+        )
     for band_c in sorted(cols_with_calls):
         lab = col_label(band_c)
         if lab is None:
