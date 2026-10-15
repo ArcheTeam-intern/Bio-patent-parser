@@ -6,6 +6,16 @@ import { ActivityValue, SequenceRecordData } from "../../api/client";
  * unknown residue visually flagged at its position — never filtered out.
  */
 
+// CLSI/EUCAST interpretive-category display words for disk-diffusion
+// calls. Display-only gloss: the stored qualifier stays the exact
+// evidence letter (raw must agree with the cell text per B07).
+const CALL_WORDS: Record<string, string> = {
+  S: "敏感 (Susceptible)",
+  I: "中介 (Intermediate)",
+  R: "耐药 (Resistant)",
+  SDD: "剂量依赖敏感 (SDD)",
+};
+
 export function formatValue(v: ActivityValue): string {
   switch (v.kind) {
     case "scalar":
@@ -14,8 +24,11 @@ export function formatValue(v: ActivityValue): string {
       return `${v.lower ?? "?"}–${v.upper ?? "?"}`;
     case "plus_minus":
       return `${v.number ?? "?"} ± ${v.uncertainty ?? "?"}`;
-    case "categorical":
-      return v.qualifier ?? "(categorical)";
+    case "categorical": {
+      const q = v.qualifier ?? "";
+      const word = CALL_WORDS[q.toUpperCase()];
+      return word ? `${q} · ${word}` : (q || "(categorical)");
+    }
     case "unparsed":
       return `${v.raw}（待解析）`;
   }

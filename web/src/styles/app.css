@@ -175,6 +175,17 @@ select:focus-visible {
   letter-spacing: 0.01em;
 }
 
+.panel-header a {
+  color: var(--accent);
+  font-weight: 400;
+  text-decoration: none;
+  margin-left: 8px;
+}
+
+.panel-header a:hover {
+  text-decoration: underline;
+}
+
 table.data {
   width: 100%;
   border-collapse: collapse;

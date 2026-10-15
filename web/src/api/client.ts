@@ -240,6 +240,12 @@ export function getPage(jobId: string, pageNumber: number): Promise<PageData> {
   return request(`/jobs/${encodeURIComponent(jobId)}/pages/${pageNumber}`);
 }
 
+/** 把本页某区域(bbox, 左上角 pt 坐标)渲染为独立 PNG 的下载地址。 */
+export function pageFigureUrl(jobId: string, pageNumber: number, bbox: number[]): string {
+  const q = encodeURIComponent(bbox.map((v) => v.toFixed(2)).join(","));
+  return `${API_PREFIX}/jobs/${encodeURIComponent(jobId)}/pages/${pageNumber}/figure.png?bbox=${q}`;
+}
+
 export function getReviews(jobId?: string): Promise<{ reviews: ReviewItem[]; total: number }> {
   const suffix = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
   return request(`/reviews${suffix}`);

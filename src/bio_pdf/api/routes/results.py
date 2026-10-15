@@ -155,6 +155,83 @@ def get_page(
     )
 
 
+@router.get("/pages/{page_number}/figure.png")
+def page_figure(
+    service: ServiceDep,
+    job_id: str,
+    page_number: int,
+    bbox: str,
+    dpi: int = 200,
+    pad: float = 6.0,
+) -> Response:
+    """Render one region of the job's OWN source page as a standalone PNG.
+
+    This is a derived image (a crop of the PDF the client can already see),
+    not a parser claim: it exists so colour-encoded result figures —
+    susceptibility heat matrices where the background colour is part of the
+    message — can be exported and reviewed as one picture. Coordinates are
+    the normalized top-left points already served by /pages; a small
+    padding includes the table's own borders/labels.
+    """
+
+    job = _job_or_404(service, job_id)
+    try:
+        values = [float(part) for part in bbox.split(",")]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "BAD_BBOX", "message": "bbox must be x0,y0,x1,y1 in points"},
+        ) from exc
+    if len(values) != 4:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "BAD_BBOX", "message": "bbox must have 4 numbers"},
+        )
+    bx0, by0, bx1, by1 = values
+    x0, x1 = sorted((bx0, bx1))
+    y0, y1 = sorted((by0, by1))
+    if x1 - x0 <= 1 or y1 - y0 <= 1:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "BAD_BBOX", "message": "degenerate region"},
+        )
+    import os
+
+    from bio_pdf.pdf.render import render_evidence_crop
+
+    row = service.repository.connection.execute(
+        "SELECT source_path FROM documents WHERE document_id = ?",
+        (job.document_id,),
+    ).fetchone()
+    if row is None or not os.path.isfile(row["source_path"]):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SOURCE_MISSING", "message": "job source file not available"},
+        )
+    x0 = max(0.0, x0 - pad)
+    y0 = max(0.0, y0 - pad)
+    x1, y1 = x1 + pad, y1 + pad
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="figure-") as tmp:
+        out = Path(tmp) / "figure.png"
+        render_evidence_crop(
+            Path(row["source_path"]),
+            page_number=page_number,
+            bbox=(x0, y0, x1, y1),
+            dpi=max(72, min(dpi, 400)),
+            output_path=out,
+            document_id=job.document_id,
+        )
+        data = out.read_bytes()
+    filename = f"{job_id}-p{page_number}-figure.png"
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 @router.get("/evidence/{evidence_id}")
 def get_evidence(
     service: ServiceDep,

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getPage } from "../../api/client";
+import { getPage, pageFigureUrl } from "../../api/client";
 
 /**
  * 表格与原文视图（plan B12）：
@@ -25,20 +25,54 @@ export function TablesTab({ jobId, pageNumber }: { jobId: string; pageNumber: nu
   return (
     <div style={{ padding: 8 }}>
       {tables.map((table) => (
-        <div key={table.table_id} className="panel" style={{ marginBottom: 12 }}>
-          <div className="panel-header">
-            <span className="mono dim">{table.table_id}</span>
-            <span className="dim">
-              {table.row_count}×{table.column_count}
-              {table.structure_issues.length > 0 && (
-                <span className="status conflict" style={{ marginLeft: 8 }}>
-                  结构问题 {table.structure_issues.length}
-                </span>
-              )}
+        <TablePanel key={table.table_id} jobId={jobId} table={table}
+          blocks={(page.data?.blocks ?? []) as { block_id: string; text_raw: string }[]} />
+      ))}
+    </div>
+  );
+}
+
+function TablePanel({
+  jobId,
+  table,
+  blocks,
+}: {
+  jobId: string;
+  table: TableData;
+  blocks: { block_id: string; text_raw: string }[];
+}) {
+  const blockText = new Map(blocks.map((b) => [b.block_id, b.text_raw]));
+  const legends = (table.footnote_refs ?? [])
+    .map((id) => blockText.get(id))
+    .filter((t): t is string => !!t);
+  return (
+    <div className="panel" style={{ marginBottom: 12 }}>
+      <div className="panel-header">
+        <span className="mono dim">{table.table_id}</span>
+        <span className="dim" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          {table.row_count}×{table.column_count}
+          {table.source === "geometry_reconstructed" && (
+            <span className="status review" title="结构由文本块坐标重建（解析器未识别此表），需人工核对">
+              几何重建
             </span>
-          </div>
-          {table.caption && <div className="dim" style={{ padding: "4px 8px" }}>{table.caption}</div>}
-          <TableGrid table={table} />
+          )}
+          {table.structure_issues.length > 0 && (
+            <span className="status conflict" title={table.structure_issues.join("；")}>
+              结构问题 {table.structure_issues.length}
+            </span>
+          )}
+          {table.bbox && (
+            <a href={pageFigureUrl(jobId, table.page_number, table.bbox)} target="_blank" rel="noreferrer">
+              导出图像
+            </a>
+          )}
+        </span>
+      </div>
+      {table.caption && <div className="dim" style={{ padding: "4px 8px" }}>{table.caption}</div>}
+      <TableGrid table={table} />
+      {legends.map((text, i) => (
+        <div key={i} className="dim" style={{ padding: "6px 8px", borderTop: "1px dashed var(--border-soft)" }}>
+          图例：{text}
         </div>
       ))}
     </div>
@@ -65,6 +99,9 @@ interface TableData {
   header_cell_ids: string[];
   caption: string | null;
   structure_issues: string[];
+  footnote_refs?: string[];
+  source?: string;
+  bbox?: number[] | null;
 }
 
 function TableGrid({ table }: { table: TableData }) {
@@ -120,7 +157,17 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
       </div>
     );
   }
-  const groups = mergeBlocks(blocks as TextBlockLike[]);
+  // 表格重建已吸收的块（cell.source_refs 指回 block_id）不再作为正文/气泡
+  // 出现在阅读视图——它们是矩阵单元格，完整形态去「表格」标签页看。
+  const absorbed = new Set<string>();
+  for (const t of (page.data?.tables ?? []) as { cells: { source_refs?: string[] }[] }[]) {
+    for (const c of t.cells ?? []) {
+      for (const ref of c.source_refs ?? []) absorbed.add(ref);
+    }
+  }
+  const proseBlocks = (blocks as TextBlockLike[]).filter((b) => !absorbed.has(b.block_id));
+  const hiddenCount = blocks.length - proseBlocks.length;
+  const groups = mergeBlocks(proseBlocks);
   return (
     <div style={{ padding: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -136,6 +183,11 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
           {raw ? "阅读视图" : "逐块查看"}
         </button>
       </div>
+      {hiddenCount > 0 && !raw && (
+        <div className="wb-hint" style={{ marginBottom: 6 }}>
+          另有 {hiddenCount} 个文本块属于本页表格的单元格，已隐藏在「表格」标签页呈现（含颜色与行列结构）。
+        </div>
+      )}
       {raw ? (
         <table className="data">
           <thead>

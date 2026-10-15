@@ -38,6 +38,18 @@ _CAPTION_RE = re.compile(
     r"\bTABLE\b.*\b(sensitiv|susceptib|antibiot|antibiogram|microbial|minimal)",
     re.IGNORECASE,
 )
+#: A susceptibility legend explains the category letters and colours with
+#: the CLSI reading rules, e.g. "S (green), sensitive; R (orange),
+#: resistant; empty cells were not tested". A block is treated as legend
+#: when it hits at least two of these patterns.
+_LEGEND_PATTERNS = (
+    re.compile(r"\bS\b.{0,12}(green|sensitive|susceptible)", re.IGNORECASE),
+    re.compile(r"\bR\b.{0,12}(orange|red|resistant)", re.IGNORECASE),
+    re.compile(r"\bI\b.{0,12}(yellow|intermediate|partially)", re.IGNORECASE),
+    re.compile(r"(empty|blank) cells.{0,30}not tested", re.IGNORECASE),
+    re.compile(r"not tested", re.IGNORECASE),
+    re.compile(r"(Kirby|Bauer|disk diffusion|CLSI|EUCAST)", re.IGNORECASE),
+)
 
 #: Minimum evidence before a lattice is believed at all.
 _MIN_CELLS = 10
@@ -229,6 +241,21 @@ def reconstruct_call_matrices(
         None,
     )
 
+    # The legend carries the reading rules for this exact table (CLSI
+    # disk-diffusion convention): colour/category words and what empty
+    # cells mean. Carry it as a footnote so reviewers see how the calls
+    # were decided next to the structure they explain.
+    def _legend_hits(text: str) -> int:
+        return sum(1 for pat in _LEGEND_PATTERNS if pat.search(text))
+
+    footnote_ids = [
+        str(b.get("block_id"))
+        for _i, b, _bbox in others
+        if b.get("block_id")
+        and len(str(b.get("text_raw") or "")) > 30
+        and _legend_hits(str(b.get("text_raw") or "")) >= 2
+    ][:3]
+
     cells: list[TableCell] = []
     header_ids: list[str] = []
     issues: list[str] = [
@@ -305,6 +332,7 @@ def reconstruct_call_matrices(
             header_cell_ids=header_ids,
             caption=str(caption_block[0]["text_raw"]).strip() if caption_block else None,
             caption_refs=[str(caption_block[0].get("block_id"))] if caption_block else [],
+            footnote_refs=footnote_ids,
             bbox=(
                 min(c.bbox[0] for c in cells if c.bbox),
                 min(c.bbox[1] for c in cells if c.bbox),
