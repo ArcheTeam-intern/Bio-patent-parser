@@ -241,3 +241,58 @@ def test_normalize_skips_empty_text_groups_instead_of_crashing() -> None:
     doc = normalize_docling_document(payload, parser_run_id="run-1", document_id="sha256:doc")
     blocks = doc.pages[0].blocks
     assert [b.text_raw for b in blocks] == ["Actual text"]
+
+
+def test_normalize_extracts_figures_with_resolved_captions() -> None:
+    """Real regression: docling detects charts/curves as `pictures` but the
+    pipeline dropped them, so no statistical figure could ever be exported."""
+
+    payload = {
+        "pages": {"2": {"page": 2, "size": {"width": 612.0, "height": 792.0}}},
+        "texts": [
+            {
+                "self_ref": "#/texts/0",
+                "label": "paragraph",
+                "text": "Growth curve of strain X",
+                "prov": [{"page_no": 2, "bbox": [60, 700, 400, 720]}],
+            }
+        ],
+        "pictures": [
+            {
+                "self_ref": "#/pictures/0",
+                "label": "chart",
+                "prov": [
+                    {
+                        "page_no": 2,
+                        "bbox": {"l": 60, "t": 420, "r": 400, "b": 300, "coord_origin": "BOTTOMLEFT"},
+                    }
+                ],
+                "captions": [{"$ref": "#/texts/0"}],
+            },
+            {
+                "self_ref": "#/pictures/1",
+                "label": "picture",
+                "prov": [
+                    {
+                        "page_no": 2,
+                        "bbox": {"l": 60, "t": 200, "r": 300, "b": 60, "coord_origin": "BOTTOMLEFT"},
+                    }
+                ],
+                "captions": [{"$ref": "#/texts/missing"}],
+            },
+        ],
+    }
+    doc = normalize_docling_document(
+        payload, parser_run_id="run-1", document_id="sha256:doc"
+    )
+    figs = doc.pages[0].figures
+    assert len(figs) == 2
+    growth, other = figs
+    assert growth.caption == "Growth curve of strain X"
+    assert growth.kind == "plot"  # caption keyword, not the raw label
+    assert growth.bbox[0] == pytest.approx(60.0)
+    # BOTTOMLEFT bbox -> normalized top-left origin
+    assert growth.bbox[1] == pytest.approx(792.0 - 420.0)
+    assert other.caption is None  # unresolved $ref never invents a caption
+    assert other.kind == "picture"
+    assert [f.figure_id for f in figs] == ["2:fig0", "2:fig1"]

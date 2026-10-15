@@ -164,6 +164,16 @@ class PageResponse(ApiEnvelope):
     route: str
     blocks: list[dict[str, Any]] = Field(default_factory=list)
     tables: list[dict[str, Any]] = Field(default_factory=list)
+    figures: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FiguresResponse(ApiEnvelope):
+    job_id: str
+    #: One entry per detected visual region (chart/plot/diagram/photo).
+    figures: list[dict[str, Any]] = Field(default_factory=list)
+    #: Engine limitation note for native-only jobs (empty when figures exist
+    #: or the job used a layout engine).
+    note: str | None = None
 
 
 class ArtifactInfo(BaseModel):

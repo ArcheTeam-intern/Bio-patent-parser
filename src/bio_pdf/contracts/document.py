@@ -229,6 +229,24 @@ class Table(_StrictModel):
     source: Literal["parser", "geometry_reconstructed"] = "parser"
 
 
+class Figure(_StrictModel):
+    """A non-text visual region (chart / plot / diagram / photo).
+
+    ``kind`` classifies what the region most likely is (from the parser
+    label + nearby keywords). The bbox is the crop region used to export
+    the figure as a standalone image; ``caption`` carries the resolved
+    figure caption so the image travels with its title.
+    """
+
+    figure_id: NonEmptyStr
+    page_number: PageNumber
+    bbox: BoundingBox
+    kind: Literal["chart", "plot", "diagram", "photo", "picture"] = "picture"
+    caption: NonEmptyStr | None = None
+    caption_refs: list[NonEmptyStr] = Field(default_factory=list)
+    provenance: list[Provenance] = Field(default_factory=list)
+
+
 class NormalizedPage(_StrictModel):
     """A page in a :class:`NormalizedDocument`."""
 
@@ -239,6 +257,9 @@ class NormalizedPage(_StrictModel):
     route: RouteLabel = "unknown"
     blocks: list[TextBlock] = Field(default_factory=list)
     tables: list[Table] = Field(default_factory=list)
+    #: Visual regions (charts / plots / diagrams) detected by the layout
+    #: parser; each can be exported as a standalone image via its bbox.
+    figures: list[Figure] = Field(default_factory=list)
 
 
 class NormalizedDocument(_StrictModel):

@@ -352,7 +352,9 @@ class NativeParseStage(_FileStage):
 
 class LayoutParseStage(_FileStage):
     name = "layout_parse"
-    implementation = "v5-ocr-selection"
+    # v6: the child now forwards docling `pictures` and the normaliser emits
+    # figure regions (bbox + resolved caption) so charts can be exported.
+    implementation = "v6-figures"
 
     def provider_version(self, context: StageContext) -> str:
         engine = str(context.options.get(OPT_ENGINE, "native"))

@@ -34,6 +34,7 @@ def main() -> None:
     runs = contiguous_runs(requested)
     merged_texts: list[dict] = []
     merged_tables: list[dict] = []
+    merged_pictures: list[dict] = []
     sizes: dict[str, dict] = {}
 
     for start, end in runs:
@@ -55,7 +56,7 @@ def main() -> None:
         if isinstance(pages_field, dict):
             for key, value in pages_field.items():
                 sizes[key] = value
-        for key in ("texts", "tables"):
+        for key in ("texts", "tables", "pictures"):
             for item in raw_document.get(key, []) or []:
                 # Keep only items whose provenance points at a requested page.
                 prov_pages = {
@@ -65,9 +66,19 @@ def main() -> None:
                 }
                 if prov_pages and not (prov_pages & set(requested)):
                     continue
-                (merged_texts if key == "texts" else merged_tables).append(item)
+                if key == "texts":
+                    merged_texts.append(item)
+                elif key == "tables":
+                    merged_tables.append(item)
+                else:
+                    merged_pictures.append(item)
 
-    combined = {"pages": sizes, "texts": merged_texts, "tables": merged_tables}
+    combined = {
+        "pages": sizes,
+        "texts": merged_texts,
+        "tables": merged_tables,
+        "pictures": merged_pictures,
+    }
     raw_document = combined
 
     # The upstream Docling document JSON is the *raw* artifact; it must not

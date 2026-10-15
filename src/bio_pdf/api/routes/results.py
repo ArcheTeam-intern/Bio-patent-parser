@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from bio_pdf.api.contracts import (
     ArtifactInfo,
     ArtifactsResponse,
+    FiguresResponse,
     PageResponse,
     RecordsResponse,
 )
@@ -152,7 +153,44 @@ def get_page(
         route=page.route,
         blocks=[b.model_dump(mode="json") for b in page.blocks],
         tables=[t.model_dump(mode="json") for t in page.tables],
+        figures=[f.model_dump(mode="json") for f in page.figures],
     )
+
+
+@router.get("/figures", response_model=FiguresResponse)
+def list_figures(service: ServiceDep, job_id: str) -> FiguresResponse:
+    """Every detected visual region (chart / curve / diagram) across pages."""
+
+    _job_or_404(service, job_id)
+    from bio_pdf.errors import WorkflowError
+
+    try:
+        data = ResultReader(service.paths.artifact_root).read_json(job_id, "normalized")
+    except WorkflowError:
+        return FiguresResponse(
+            job_id=job_id,
+            figures=[],
+            note="no normalized result yet",
+        )
+    out: list[dict] = []
+    for page in data.get("pages", []) or []:
+        if not isinstance(page, dict):
+            continue
+        for fig in page.get("figures", []) or []:
+            if isinstance(fig, dict):
+                out.append(fig)
+    note = None
+    if not out:
+        pages = [p for p in data.get("pages", []) or [] if isinstance(p, dict)]
+        layout_seen = any(str(p.get("route", "")).startswith("layout_") for p in pages)
+        if not layout_seen:
+            note = (
+                "此任务未使用结构增强引擎（Docling），没有图表区域检测；"
+                "重新创建任务并选择“结构增强”后可提取统计图/曲线图。"
+            )
+        else:
+            note = "结构引擎在本文件未检测到任何图区（可能是纯文本论文或图表未被识别）。"
+    return FiguresResponse(job_id=job_id, figures=out, note=note)
 
 
 @router.get("/pages/{page_number}/figure.png")
@@ -160,7 +198,8 @@ def page_figure(
     service: ServiceDep,
     job_id: str,
     page_number: int,
-    bbox: str,
+    bbox: str | None = None,
+    figure: str | None = None,
     dpi: int = 200,
     pad: float = 6.0,
 ) -> Response:
@@ -168,13 +207,44 @@ def page_figure(
 
     This is a derived image (a crop of the PDF the client can already see),
     not a parser claim: it exists so colour-encoded result figures —
-    susceptibility heat matrices where the background colour is part of the
-    message — can be exported and reviewed as one picture. Coordinates are
-    the normalized top-left points already served by /pages; a small
-    padding includes the table's own borders/labels.
+    susceptibility heat matrices and stat charts where the drawing itself
+    carries information — can be exported and reviewed as one picture.
+    Coordinates come either from an explicit top-left ``bbox`` (the values
+    /pages serves) or a detected ``figure`` id (resolved server-side, no
+    coordinate round-trip). A small padding includes borders/labels.
     """
 
     job = _job_or_404(service, job_id)
+    from bio_pdf.errors import WorkflowError
+
+    if figure and not bbox:
+        try:
+            norm = ResultReader(service.paths.artifact_root).read_json(job_id, "normalized")
+        except WorkflowError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "RESULT_NOT_READY", "message": str(exc)},
+            ) from exc
+        found = None
+        for page in norm.get("pages", []) or []:
+            for fig in (page or {}).get("figures", []) or []:
+                if isinstance(fig, dict) and fig.get("figure_id") == figure:
+                    found = fig
+                    break
+            if found:
+                break
+        if found is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "NOT_FOUND", "message": f"figure {figure!r} not in result"},
+            )
+        page_number = int(found.get("page_number", page_number))
+        bbox = ",".join(str(v) for v in found["bbox"])
+    if not bbox:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "BAD_BBOX", "message": "bbox or figure is required"},
+        )
     try:
         values = [float(part) for part in bbox.split(",")]
     except ValueError as exc:

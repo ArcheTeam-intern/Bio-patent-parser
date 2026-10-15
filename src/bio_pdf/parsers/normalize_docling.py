@@ -24,6 +24,7 @@ from typing import Any
 from bio_pdf.contracts import (
     BoundingBox,
     BlockKind,
+    Figure,
     NormalizedDocument,
     NormalizedPage,
     Provenance,
@@ -204,6 +205,30 @@ def _coerce_kind(value: Any) -> BlockKind:
     return "text"
 
 
+def _classify_figure(label: str, caption: str | None) -> str:
+    """Bucket a visual region for display grouping.
+
+    Docling only labels pictures ``chart`` or ``picture``; the caption often
+    names the plot type ("growth curve", "bar chart"), so a cheap keyword
+    pass over both gives ``chart``/``plot``/``diagram``/``photo`` with a
+    safe ``picture`` fallback. Classification is cosmetic — the crop is the
+    real product either way.
+    """
+
+    text = f"{label} {caption or ''}".lower()
+    # Specific caption words win over Docling's generic ``chart`` label: a
+    # "Growth curve" figure is a line plot even when the label says chart.
+    if any(w in text for w in ("curve", "growth", "survival", "kinetic", "time-course", "time course", "plot", "graph")):
+        return "plot"
+    if any(w in text for w in ("chart", "bar", "histogram", "column plot")):
+        return "chart"
+    if any(w in text for w in ("diagram", "scheme", "pathway", "structure", "model")):
+        return "diagram"
+    if any(w in text for w in ("micrograph", "photo", "stain", "image of", "colony")):
+        return "photo"
+    return "picture"
+
+
 def _safe_block_id(prefix: str, raw_id: Any, fallback: int) -> str:
     """Return a block id; sanitize the upstream id and fall back if needed."""
 
@@ -289,6 +314,24 @@ def normalize_page(
 
     tables = _coerce_tables(page_dict, page_number=page_number, height_pt=height_pt)
 
+    page_text_ref = {
+        str(it.get("self_ref")): str(it.get("text") or "")
+        for it in _iter_text_items(page_dict)
+        if isinstance(it, dict) and it.get("self_ref")
+    }
+    figures: list[Figure] = []
+    for pic in page_dict.get("pictures", []) or []:
+        fig = _build_figure(
+            pic,
+            parser_run_id=parser_run_id,
+            page_number=page_number,
+            page_height_pt=height_pt,
+            text_ref=page_text_ref,
+            index=len(figures),
+        )
+        if fig is not None:
+            figures.append(fig)
+
     provenance = [
         Provenance(
             source_type="docling",
@@ -311,6 +354,63 @@ def normalize_page(
         route="layout_native",
         blocks=blocks,
         tables=tables,
+        figures=figures,
+    )
+
+
+def _build_figure(
+    pic: Any,
+    *,
+    parser_run_id: str,
+    page_number: int,
+    page_height_pt: float,
+    text_ref: dict[str, str],
+    index: int,
+) -> Figure | None:
+    """One Docling picture item → :class:`Figure` (None if not crop-able)."""
+
+    if not isinstance(pic, dict):
+        return None
+    bbox, locators = _bbox_from_prov(pic, page_height_pt=page_height_pt)
+    if bbox is None:
+        return None  # a region we cannot crop is not exportable
+    caption_parts: list[str] = []
+    caption_ids: list[str] = []
+    for cap in pic.get("captions", []) or []:
+        ref = (
+            str(cap.get("$ref") or cap.get("ref") or cap)
+            if isinstance(cap, dict)
+            else str(cap)
+        )
+        if not ref:
+            continue
+        caption_ids.append(ref)
+        content = text_ref.get(ref, "").strip()
+        if content:
+            caption_parts.append(content)
+    caption = " ".join(caption_parts)[:400] or None
+    provenance = [
+        Provenance(
+            source_type="docling",
+            artifact_ref=f"runs/{parser_run_id}/docling.json",
+            provider_locator=loc,
+        )
+        for loc in locators
+    ] or [
+        Provenance(
+            source_type="docling",
+            artifact_ref=f"runs/{parser_run_id}/docling.json",
+            provider_locator=f"page={page_number}",
+        )
+    ]
+    return Figure(
+        figure_id=f"{page_number}:fig{index}",
+        page_number=page_number,
+        bbox=bbox,
+        kind=_classify_figure(str(pic.get("label") or ""), caption),
+        caption=caption,
+        caption_refs=caption_ids,
+        provenance=provenance,
     )
 
 
@@ -716,11 +816,47 @@ def _expand_top_level_pages(
         )
         tables_out.append(table_obj)
 
+    # --- figures (charts / plots / diagrams) ------------------------------
+    # Docling reports every visual region as a ``picture`` with a bbox and a
+    # caption $ref. We keep them so result charts (growth curves, bar/line
+    # plots) can be exported as standalone images and listed for review.
+    text_ref = {
+        str(t.get("self_ref")): str(t.get("text") or "")
+        for t in payload.get("texts", []) or []
+        if isinstance(t, dict) and t.get("self_ref")
+    }
+    figures_out: list[Figure] = []
+    for pic in payload.get("pictures", []) or payload.get("figures", []) or []:
+        if not isinstance(pic, dict):
+            continue
+        prov_page = 1
+        for prov in pic.get("prov", []) or []:
+            if isinstance(prov, dict) and prov.get("page_no") is not None:
+                try:
+                    prov_page = int(prov["page_no"])
+                except (TypeError, ValueError):
+                    prov_page = 1
+                break
+        target = pages_dict.get(str(prov_page))
+        if target is None:
+            continue
+        fig = _build_figure(
+            pic,
+            parser_run_id=parser_run_id,
+            page_number=prov_page,
+            page_height_pt=target["height"],
+            text_ref=text_ref,
+            index=len(figures_out),
+        )
+        if fig is not None:
+            figures_out.append(fig)
+
     out: list[NormalizedPage] = []
     for key in sorted(pages_dict.keys(), key=lambda k: int(k)):
         meta = pages_dict[key]
         # Attach any tables that belong to this page.
         page_tables = [t for t in tables_out if t.page_number == meta["page_number"]]
+        page_figures = [f for f in figures_out if f.page_number == meta["page_number"]]
         out.append(
             NormalizedPage(
                 page_number=meta["page_number"],
@@ -729,6 +865,7 @@ def _expand_top_level_pages(
                 route="layout_native",
                 blocks=meta["blocks"],
                 tables=page_tables,
+                figures=page_figures,
             )
         )
     return out, geometry_warnings
