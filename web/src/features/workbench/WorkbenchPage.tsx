@@ -15,9 +15,10 @@ import { useEvidence } from "../evidence/useEvidence";
 import { EvidenceNavigator } from "../evidence/EvidenceNavigator";
 import { RunDetails } from "./RunDetails";
 import { TablesTab, TextTab } from "../tables/TableView";
+import { FiguresTab } from "../figures/FiguresTab";
 import { IssuePanel } from "../issues/IssuePanel";
 
-type Tab = "sequences" | "activities" | "tables" | "text" | "issues" | "run";
+type Tab = "sequences" | "activities" | "tables" | "figures" | "text" | "issues" | "run";
 
 /** 解析工作台（design §7）：PDF 与领域结果联动，URL 保存视图状态。 */
 
@@ -198,7 +199,7 @@ export function WorkbenchPage() {
         <section className="panel">
           <div className="panel-header">
             <div className="wb-tabs">
-              {(["sequences", "activities", "tables", "text", "issues", "run"] as Tab[]).map((t) => (
+              {(["sequences", "activities", "tables", "figures", "text", "issues", "run"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   className={`wb-tab${tab === t ? " active" : ""}`}
@@ -208,7 +209,7 @@ export function WorkbenchPage() {
                     setParams(next, { replace: true });
                   }}
                 >
-                  {{ sequences: "序列", activities: "活性", tables: "表格", text: "原文", issues: "问题", run: "运行详情" }[t]}
+                  {{ sequences: "序列", activities: "活性", tables: "表格", figures: "图表", text: "原文", issues: "问题", run: "运行详情" }[t]}
                 </button>
               ))}
             </div>
@@ -309,6 +310,7 @@ export function WorkbenchPage() {
               <TablesTab jobId={jobId} pageNumber={currentPage} />
             )}
             {tab === "text" && <TextTab jobId={jobId} pageNumber={currentPage} />}
+            {tab === "figures" && <FiguresTab jobId={jobId} onJump={changePage} />}
             {tab === "issues" && <IssuePanel jobId={jobId} />}
             {tab === "run" && <RunDetails jobId={jobId} job={job.data} />}
           </div>

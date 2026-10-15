@@ -163,6 +163,15 @@ export interface CheckResultData {
   evidence_ids: string[];
 }
 
+export interface FigureData {
+  figure_id: string;
+  page_number: number;
+  bbox: number[];
+  kind: string;
+  caption: string | null;
+  caption_refs: string[];
+}
+
 export interface PageData {
   api_version: string;
   job_id: string;
@@ -172,6 +181,7 @@ export interface PageData {
   route: string;
   blocks: { block_id: string; kind: string; bbox: number[] | null; text_raw: string }[];
   tables: unknown[];
+  figures?: FigureData[];
 }
 
 export interface ReviewItem {
@@ -244,6 +254,17 @@ export function getPage(jobId: string, pageNumber: number): Promise<PageData> {
 export function pageFigureUrl(jobId: string, pageNumber: number, bbox: number[]): string {
   const q = encodeURIComponent(bbox.map((v) => v.toFixed(2)).join(","));
   return `${API_PREFIX}/jobs/${encodeURIComponent(jobId)}/pages/${pageNumber}/figure.png?bbox=${q}`;
+}
+
+/** 按检测到的 figure_id 导出图区 PNG（bbox 由服务端解析）。 */
+export function figureFileUrl(jobId: string, figure: FigureData): string {
+  return `${API_PREFIX}/jobs/${encodeURIComponent(jobId)}/pages/${figure.page_number}/figure.png?figure=${encodeURIComponent(figure.figure_id)}`;
+}
+
+export function listFigures(
+  jobId: string,
+): Promise<{ api_version: string; job_id: string; figures: FigureData[]; note: string | null }> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/figures`);
 }
 
 export function getReviews(jobId?: string): Promise<{ reviews: ReviewItem[]; total: number }> {

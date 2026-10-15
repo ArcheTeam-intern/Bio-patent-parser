@@ -563,6 +563,31 @@ dialog::backdrop {
   font-size: 13px;
 }
 
+.figure-card {
+  display: block;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--panel);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.figure-card:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.figure-card img {
+  display: block;
+  width: 100%;
+  height: 190px;
+  object-fit: contain;
+  background: #fbfcfd;
+  border-bottom: 1px solid var(--border-soft);
+}
+
 .error-detail pre {
   white-space: pre-wrap;
   word-break: break-all;
