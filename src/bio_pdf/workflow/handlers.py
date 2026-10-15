@@ -596,7 +596,9 @@ class NormalizeStage(_FileStage):
     # cached normalize/extract chains so existing jobs can resume into the
     # new behaviour.
     # v6: re-filters figure regions against reconstructed tables.
-    implementation = "v6"
+    # v7: grid reconstruction seeds from the native glyph layer and anchors
+    # rows on the left-margin labels (empty rows kept, labels never shift).
+    implementation = "v7-native-call-seeds"
 
     def run(self, context: StageContext) -> StageOutcome:
         # Primary structure: layout parse when the engine produced one,
@@ -670,12 +672,24 @@ class NormalizeStage(_FileStage):
         from bio_pdf.parsers.grid_matrix import reconstruct_call_matrices
         from bio_pdf.parsers.normalize_docling import filter_exportable_figures
 
+        native_pages = (
+            {p.page_number: p for p in native_doc.pages} if native_doc is not None else {}
+        )
         for page in document.pages:
             occupied = [tuple(t.bbox) for t in page.tables if t.bbox]
+            # The native glyph layer is the seed source when available: the
+            # layout channel may merge adjacent letters into one text item,
+            # and a real page lost half its call glyphs that way.
+            native_page = native_pages.get(page.page_number)
             extra = reconstruct_call_matrices(
                 [b.model_dump(mode="json") for b in page.blocks],
                 page_number=page.page_number,
                 occupied_regions=occupied,
+                native_blocks=(
+                    [b.model_dump(mode="json") for b in native_page.blocks]
+                    if native_page is not None
+                    else None
+                ),
             )
             if extra:
                 document = document.model_copy(

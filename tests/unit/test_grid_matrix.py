@@ -131,3 +131,74 @@ def test_single_cell_noise_rows_are_trimmed_not_fatal():
     assert any("OFF_LATTICE_CALLS_EXCLUDED" in i for i in t.structure_issues)
     data = [c for c in t.cells if c.header_role == "data"]
     assert len(data) == 16  # the real 4x4 matrix, noise excluded
+
+
+def test_native_glyphs_recover_letters_fused_into_runs():
+    """Real regression (paper TABLE 2): the layout channel merged adjacent
+    letters into 'SSS' runs, so half the call glyphs never seeded the
+    grid. The native glyph layer keeps every letter as its own line and
+    must be used as the seed source when provided."""
+    fused = [
+        _b("cap", "TABLE 2 | Antibiotic sensitivity", 44, 20, 200, 27),
+        # drug labels defining four rows
+        _b("d0", "Vancomycin", 60, 100, 130, 107),
+        _b("d1", "Tobramycin", 60, 120, 130, 127),
+        _b("d2", "Meropenem", 60, 140, 130, 147),
+        _b("d3", "Amikacin", 60, 160, 130, 167),
+        # the layout channel only kept merged runs — NOT usable as seeds
+        _b("run0", "SSS", 160, 100, 175, 107),
+        _b("run1", "SS", 160, 120, 170, 127),
+    ]
+    native = [
+        # native keeps individual glyphs with exact positions (3 columns)
+        _b("n0", "S", 160, 100, 166, 107),
+        _b("n1", "S", 172, 100, 178, 107),
+        _b("n2", "S", 184, 100, 190, 107),
+        _b("n3", "S", 160, 120, 166, 127),
+        _b("n4", "S", 172, 120, 178, 127),
+        _b("n5", "R", 160, 140, 166, 147),
+        _b("n6", "I", 172, 140, 178, 147),
+        _b("n7", "S", 160, 160, 166, 167),
+        _b("n8", "S", 172, 160, 178, 167),
+        _b("n9", "S", 184, 160, 190, 167),
+    ]
+    (t,) = reconstruct_call_matrices(fused, page_number=2, native_blocks=native)
+    data = [c for c in t.cells if c.header_role == "data"]
+    assert len(data) == 10                      # every native glyph counted
+    assert len({c.column_index for c in data}) == 3
+    row_headers = [c.text_raw for c in t.cells if c.header_role == "row"]
+    assert row_headers == ["Vancomycin", "Tobramycin", "Meropenem", "Amikacin"]
+
+
+def test_empty_rows_are_kept_and_labels_never_shift():
+    """A drug row whose cells were all 'not tested' (empty in the figure)
+    must still exist — anchored by its label — and the following labels
+    must never slide onto a neighbour's cells."""
+    blocks = [
+        _b("cap", "TABLE 2 | Antibiotic sensitivity", 44, 20, 200, 27),
+        _b("d0", "Vancomycin", 60, 100, 130, 107),
+        _b("d1", "Tobramycin", 60, 120, 130, 127),   # row with NO cells
+        _b("d2", "Meropenem", 60, 140, 130, 147),
+        _b("d3", "Amikacin", 60, 160, 130, 167),
+    ]
+    for r, y in ((0, 100), (2, 140), (3, 160)):
+        for c, x in enumerate((160, 172, 184, 196)):
+            blocks.append(_b(f"c{r}{c}", "S", x, y, x + 6, y + 7))
+    (t,) = reconstruct_call_matrices(blocks, page_number=2)
+    rows = {c.row_index: c.text_raw for c in t.cells if c.header_role == "row"}
+    # labels sit on THEIR OWN rows, including the empty one
+    assert rows == {1: "Vancomycin", 2: "Tobramycin", 3: "Meropenem", 4: "Amikacin"}
+    data = [c for c in t.cells if c.header_role == "data"]
+    assert len(data) == 12
+    assert {c.row_index for c in data} == {1, 3, 4}  # row 2 stays empty
+
+
+def test_native_source_falls_back_when_unusable():
+    """A native channel with no call glyphs (e.g. a scan) must fall back
+    to the fused blocks instead of reconstructing nothing."""
+    blocks = _paper_like_blocks()
+    tables = reconstruct_call_matrices(
+        blocks, page_number=9, native_blocks=[_b("only-text", "prose line", 10, 10, 100, 17)]
+    )
+    assert len(tables) == 1
+    assert len([c for c in tables[0].cells if c.header_role == "data"]) == 16
