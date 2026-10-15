@@ -267,3 +267,9 @@
 - MinerU/Docling 对测〔主项〕：前置=人工金标样本集 + MinerU 本机/内网自建（SaaS 外发不合规）；做法=同输入同页、字段级准确率+回源率+耗时对比；引擎可换不改业务代码（设计文档"第二期"已登记）。详见桌面文档 `唯信计算/Bio-patent-parser实现文档.md` 第六节。
 - 算力升级（纯提速）：本机 RTX 4060 8GB 未启用（torch 2.14.1+cpu、onnxruntime 仅 CPU provider）；换 CUDA 版依赖即可数倍提速，模型与结果不变。
 - OCR 升档评估：RapidOCR 现为 PP-OCRv6 small；server 级权重已在本地 HF 缓存，扫描件样本上对比收益后再决定。
+
+### Docling 满血模型资源实测（用户提问引出）
+- 实测口径：docling 2.138 的下载器为整仓拉取（`snapshot_download` 无 allow_patterns），"选中某模型"即整包体积；数据经 HF 镜像 API（huggingface.co 直连不通、hf-mirror.com 可达）+ ModelScope 实下（RapidOCR）核实，脚本 `scripts/docling_model_inventory.py` 可复跑。
+- 档位（实测）：当前生产组合（heron 172MB + TableFormer v1 accurate/fast 358MB + RapidOCR small 32MB）≈0.55GB；官方默认全开（+公式 CodeFormulaV2 640MB、图片分类器 34MB、RapidOCR 另一后端）≈1.3GB；本机可用满血全集（+TableFormer v2 + 全部 VLM/OCR：granite-docling/SmolDocling/SmolVLM/granite-vision/chart2csv/Nanonets/Nemotron/MinerU2.5-Pro）≈40GB；含互斥备选与 Mac 专用 MLX 的全部仓库 ≈42.3GB。
+- 运行开销（估算）：主链路 CPU 约 1.5–3GB 内存、无 GPU 需求；VLM 显存 256M 级≈0.5–1GB、1.2B≈2.5–3GB、2B≈5–6GB、3B≈6–7GB、4B≈8–9GB（超本机 8GB）。现状 torch 2.14.1+cpu、onnxruntime 仅 CPU provider → VLM 现在只能 CPU 推理；先做算力升级再评估 VLM 路线。
+- 修正一处旧记录错误：HF 缓存里的 PaddlePaddle PP-OCRv5_server_* 目录只有 refs/元数据（~1MB）并无权重；且 PP-OCRv6 实际档位为 small/medium（v6 无 server）。桌面文档第六节第 3 条（OCR 升档）与上一轮进度中的对应表述已同步修正，升档路径改为 medium 档（det 62MB + rec 77MB 实测可下载）。
