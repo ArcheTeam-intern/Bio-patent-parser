@@ -283,3 +283,8 @@
 - 主链路为什么轻：角色拆分——版面=RT-DETRv2 小检测器（本机 config 核实，~43M 参数/172MB，判别式不出文本）；文本=字形层零模型（pypdfium2）；OCR 仅扫描页且 small 档（32MB）；表格=TableFormer（213MB 判别式）；提取=规则。全链路 0.55GB、纯 CPU、峰值 1.5GiB、~2s/页。
 - MinerU 本地（HF 镜像 API 实测）：VLM 路线（2.5 主推）单模型 ≈2.3GB（MinerU2.5-Pro/2509-1.2B 均 ~2.32GB），强依赖 GPU（生成式逐页解码）；pipeline 路线模型包 PDF-Extract-Kit-1.0 整包 15.1GB（含 UniMERNet/StructEqTable 等多种备选，按需子集量级几 GB）。
 - 已补进桌面文档第六节 MinerU 待办条目（作为对测的成本侧对照），供主引擎选型参考。
+
+### 引擎切换成本评估（用户提问"换 MinerU 是否只是换版面分析"）
+- 代码事实：layout_parse 是唯一引擎切换点（ParserAdapter 接口 → 统一 normalized 文档，其余 7 阶段不感知）。该阶段内部已按页分组（native/ocr profile）成 run、逐 run 调适配器、按页码合并——"难页分流 MinerU、其余页 Docling"的混合产物合并逻辑天然兼容；缺的只是 run 循环里的适配器选择 + 引擎放行 + 计划里的路由标记。
+- 但非零成本：现有 mineru_adapter.py 是 SaaS 远程版（848 行、原文外发、available=False）；本地切换 = 新写"本地子进程 + 输出翻译（HTML 表格/图区/bbox → 统一格式）"适配器（主要工作量），外加本地部署（GPU/CPU 慢）。行为差异三处需回归：全页像素识别（文字页不再免费）/扫描页 OCR 换 MinerU 自带/表格 HTML 形态。
+- 注：用户正在手工精简桌面文档（删掉了算力升级/OCR 升档条目与资源清单附块），本轮不再写入该文档。
