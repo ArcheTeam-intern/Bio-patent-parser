@@ -107,6 +107,46 @@ export interface RecordsResponse {
   record_pages: Record<string, number[]>;
   table_pages: Record<string, number>;
   sequence_inventory?: SequenceInventory | null;
+  /** C04 实体与关系（证据 id 可经 /evidence 解析）。 */
+  entities?: EntityData[];
+  relations?: RelationData[];
+  relation_summary?: {
+    extracted: boolean;
+    entities?: number;
+    relations?: number;
+    by_link_status?: Record<string, number>;
+    by_predicate?: Record<string, number>;
+    unresolved_references?: number;
+  };
+}
+
+/** C04 实体：名称 + 类型 + 真实证据。 */
+export interface EntityData {
+  entity_id: string;
+  document_id: string;
+  name_raw: string;
+  kind: string;
+  aliases?: string[];
+  chain_map?: Record<string, string>;
+  evidence_ids: string[];
+}
+
+/** C04 关系：主体→谓词→客体 + 关联状态 + 真实证据。 */
+export interface RelationData {
+  relation_id: string;
+  document_id: string;
+  subject_id: string;
+  predicate: string;
+  object_id: string;
+  evidence_ids: string[];
+  validation_state: string;
+  link_status:
+    | "linked"
+    | "ambiguous"
+    | "missing_sequence"
+    | "outside_scope"
+    | "not_applicable"
+    | "no_evidence";
 }
 
 /** C02 序列清点表：每个声明 SEQ ID 一行，状态固定词表，不冒充完整性。 */

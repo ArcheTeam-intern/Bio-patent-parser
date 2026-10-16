@@ -72,6 +72,7 @@ EntityKind = Literal[
     "antibody",
     "antibody_chain",
     "variant",
+    "construct",
     "compound",
     "control",
     "unknown",
@@ -186,6 +187,12 @@ class SequenceRelation(_StrictModel):
 
     ``predicate`` controls the semantic; cross-language consumers must
     accept the exact set in :data:`RelationPredicate`.
+
+    ``link_status`` (C04) states how the relation was established:
+    ``linked`` (explicit evidence), ``ambiguous`` (several candidates),
+    ``missing_sequence`` (target sequence not recovered), ``outside_scope``
+    (target outside the requested page window), ``not_applicable`` (no
+    sequence relation applies) or ``no_evidence`` (nothing supports it yet).
     """
 
     relation_id: NonEmptyStr
@@ -195,6 +202,14 @@ class SequenceRelation(_StrictModel):
     object_id: NonEmptyStr
     evidence_ids: list[NonEmptyStr] = Field(min_length=1)
     validation_state: ValidationState = "unchecked"
+    link_status: Literal[
+        "linked",
+        "ambiguous",
+        "missing_sequence",
+        "outside_scope",
+        "not_applicable",
+        "no_evidence",
+    ] = "linked"
 
 
 class Entity(_StrictModel):

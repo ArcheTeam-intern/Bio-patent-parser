@@ -308,3 +308,9 @@
 - **DNA 行启发式**：≤8 字符旧规则误杀 60 字符 DNA 块行 → 改为">8 字符的 token 必须全部是核酸字母（或整行单 token 连续串）"，SEQ 9/13 DNA 由此可解。
 - **混合区域 OCR（两次修复）**：①inspect 新增 `st25_ocr` 路由（`<400>` 无残基文本的页强制 OCR，不管字符数）；②extract 阶段定向兜底：对声明仍缺失的页整页 300dpi 渲染 + RapidOCR 直调（预算=reparse_max_regions，默认 10 页），**按页内 y 坐标与原生块交织合并**（整页追加会造成残基串位——SEQ 7 的 DNA 曾被错挂到 SEQ 8）+ 模糊去重（防 nativ 已有文本重复计数）。空归一化（纯行号列 OCR）如实记为 missing 不再崩溃。
 - 真实验收（job-819fab3181d3，EP3027649B1 全文 195 页 native + 区域 OCR）：**82/82 声明清点**；complete 8、partial 19（真实序列如 SQTTHAPFT 9/9、KVSNRFS 7/7、DIVMTQSPLSLPVTPGEPASISC 23/23）；SEQ 7 DNA 恢复 90 字符（原 0）；EPB1=0。剩余 54 missing 集中在 OCR 预算（10 页）外的声明页，如实标注（提高预算或 OCR 升档可扩）。501 测试全绿（+4 新回归）。
+
+### C04 完成：实体、构建体、变体与真实证据关系（真实验收）
+- 实体来源扩展：`#134/#136` 专利构建体编号、变体记法 `W317A`（实体≠自动改写序列，坐标待人工核对）、ST.25 `<223>` 特征注释（构建体+链+CDR）。EntityKind 增 "construct"。
+- 证据真实化：实体与关系证据全部注册为**可解析 span**（替换旧的拼串 id）——验收中关系证据经 /evidence 成功解析出原文 "Synthetic sequence: #134 and 136 VH CDR 1 amino acid sequence"（note 定位为 unlocated 兜底时也保留 raw_text，precision=none 如实标注）。
+- 关系：note 驱动 实体→序列 关系（has_cdr/heavy_chain/light_chain，真实 note 证据）；SequenceRelation 新增 `link_status` 词表（linked/ambiguous/missing_sequence/outside_scope/not_applicable/no_evidence），未恢复序列 → missing_sequence 或按清点表判 outside_scope，绝不猜配。
+- API `/records` 返回 entities/relations/relation_summary；前端序列 tab 新增"关联表"（被测对象｜角色｜序列编号｜状态｜证据按钮）、活性详情显示实体名称+证据按钮。验收（job-f4e73151ce60, EP 30-33）：2 实体（#134/#136 construct）+ 4 关系（has_cdr×1, heavy_chain×2, light_chain×1）全部 linked。503 后端 + 28 vitest 全绿。

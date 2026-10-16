@@ -9,6 +9,7 @@ import { PageDistribution } from "./PageDistribution";
 import { PdfViewer } from "../pdf/PdfViewer";
 import { SequenceDetail } from "../sequences/SequenceList";
 import { SequenceInventoryPanel } from "../sequences/SequenceInventoryPanel";
+import { RelationPanel } from "../sequences/RelationPanel";
 import { MeasurementDetail, CheckList } from "../activities/ActivityList";
 import { ReviewPanel } from "../reviews/ReviewPanel";
 import { ExportDialog } from "./ExportDialog";
@@ -333,6 +334,16 @@ export function WorkbenchPage() {
                     序列清单：该任务的结果早于清点功能（未评估），重新解析后可见每个声明编号的恢复状态。
                   </div>
                 )}
+                {(records.data.relations?.length ?? 0) > 0 && (
+                  <div style={{ padding: "4px 14px 0" }}>
+                    <RelationPanel
+                      entities={records.data.entities ?? []}
+                      relations={records.data.relations ?? []}
+                      sequences={records.data.sequences}
+                      onSelectSequence={(sequenceId) => selectRecord(sequenceId)}
+                    />
+                  </div>
+                )}
                 <SequenceTab
                   records={visibleSequences}
                   emptyMessage={scope === "page" ? `第 ${currentPage} 页没有序列候选。可切换“全部文档”查看其他页。` : "全文尚未提取到序列候选。"}
@@ -385,6 +396,13 @@ export function WorkbenchPage() {
                 <MeasurementDetail
                   record={selected.record}
                   onEvidenceClick={(eid) => evidenceState.select(eid)}
+                  entityName={
+                    selected.record.entity_id
+                      ? (records.data?.entities ?? []).find(
+                          (e) => e.entity_id === selected.record.entity_id,
+                        )?.name_raw ?? null
+                      : null
+                  }
                 />
                 <EvidenceNavigator
                   state={evidenceState}

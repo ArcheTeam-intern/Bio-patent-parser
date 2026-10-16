@@ -40,7 +40,11 @@ from bio_pdf.contracts import (
 from bio_pdf.errors import PageCoverageMismatchError, WorkflowError
 from bio_pdf.extract.activities.prose import extract_prose_measurements
 from bio_pdf.extract.activities.tables import extract_table_measurements
-from bio_pdf.extract.entities import extract_entities, link_measurements_to_entities
+from bio_pdf.extract.entities import (
+    entities_from_sequence_notes,
+    extract_entities,
+    link_measurements_to_entities,
+)
 from bio_pdf.extract.relations import link_explicit_relations
 from bio_pdf.extract.sequences.inline import extract_inline_sequences
 from bio_pdf.extract.sequences.references import extract_sequence_references
@@ -910,7 +914,7 @@ def _table_rows(document: NormalizedDocument) -> list[tuple[Any, dict[str, str]]
 
 class ExtractStage(_FileStage):
     name = "extract"
-    implementation = "v5-region-ocr"
+    implementation = "v6-entity-evidence"
 
     def run(self, context: StageContext) -> StageOutcome:
         targets = set(
@@ -1238,13 +1242,53 @@ class ExtractStage(_FileStage):
                     )
                 )
 
-        # B07: explicit entities from prose/table labels; measurements link
-        # ONLY on an exact name match (a non-match keeps entity_id None and
-        # carries a review reason — no closest-match guessing).
-        entities = extract_entities(blocks, doc_id)
+        # B07/C04: explicit entities from prose/table labels + ST.25 feature
+        # notes (#134 constructs, chains, CDRs, W317A variants). Entity and
+        # relation evidence is a REAL registered span — resolvable through
+        # the evidence API. Measurements link ONLY on an exact name match
+        # (a non-match keeps entity_id None and carries a review reason —
+        # no closest-match guessing).
+        entities = extract_entities(
+            blocks, doc_id, evidence_index=evidence, parser_run_id=parser_run_id
+        )
+        note_entities, note_links = entities_from_sequence_notes(
+            sequences,
+            feed_blocks,
+            doc_id,
+            evidence_index=evidence,
+            parser_run_id=parser_run_id,
+        )
+        by_entity_id = {e.entity_id: e for e in entities}
+        for note_entity in note_entities:
+            existing = by_entity_id.get(note_entity.entity_id)
+            if existing is None:
+                by_entity_id[note_entity.entity_id] = note_entity
+            else:
+                for eid in note_entity.evidence_ids:
+                    if eid not in existing.evidence_ids:
+                        existing.evidence_ids.append(eid)
+                for chain, seq_no in note_entity.chain_map.items():
+                    existing.chain_map.setdefault(chain, seq_no)
+        entities = sorted(by_entity_id.values(), key=lambda e: e.name_raw)
+
         measurements, entity_reasons = link_measurements_to_entities(measurements, entities)
 
-        relation_result = link_explicit_relations(entities, sequences, measurements, [])
+        inventory_status_by_seq: dict[str, str] = {}
+        for entry in (sequence_inventory or {}).get("entries", []):
+            seq_key = entry.get("seq_id_no")
+            if seq_key is not None:
+                inventory_status_by_seq.setdefault(
+                    str(seq_key), str(entry.get("status"))
+                )
+
+        relation_result = link_explicit_relations(
+            entities,
+            sequences,
+            measurements,
+            [],
+            note_links=note_links,
+            inventory_status_by_seq=inventory_status_by_seq,
+        )
 
         # Any record id the extractors did not register resolves to an
         # UNLOCATED span — never a fabricated page 1 (plan B02). Validation

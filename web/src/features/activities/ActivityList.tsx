@@ -10,9 +10,12 @@ export { formatValue } from "../sequences/SequenceList";
 export function MeasurementDetail({
   record,
   onEvidenceClick,
+  entityName,
 }: {
   record: MeasurementData;
   onEvidenceClick?: (evidenceId: string) => void;
+  /** C04: resolved entity name so the detail shows "谁被测", not a hash. */
+  entityName?: string | null;
 }) {
   return (
     <div>
@@ -36,7 +39,29 @@ export function MeasurementDetail({
           )}
         </dd>
         <dt>实体</dt>
-        <dd>{record.entity_id ?? "未关联"}</dd>
+        <dd>
+          {record.entity_id ? (
+            entityName ? (
+              <>
+                {entityName} <span className="dim mono">（{record.entity_id.slice(0, 14)}…）</span>
+              </>
+            ) : (
+              record.entity_id
+            )
+          ) : (
+            "未关联"
+          )}
+          {record.field_evidence["entity_raw"]?.map((eid) => (
+            <button
+              key={eid}
+              className="dim"
+              style={{ padding: "0 6px", marginLeft: 6 }}
+              onClick={() => onEvidenceClick?.(eid)}
+            >
+              证据
+            </button>
+          ))}
+        </dd>
         <dt>靶标</dt>
         <dd>{record.target_raw ?? "未关联"}</dd>
         <dt>证据类型</dt>

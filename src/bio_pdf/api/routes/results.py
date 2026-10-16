@@ -92,6 +92,7 @@ def get_records(
     visible_ids = {s["sequence_id"] for s in sequences} | {
         m["measurement_id"] for m in measurements
     }
+    entities, relations, relation_summary = _entities_relations(service, job_id)
     return RecordsResponse(
         job_id=job_id,
         revision=int(snapshot.get("result_revision", 0)),
@@ -103,6 +104,47 @@ def get_records(
         },
         table_pages=_table_pages(service, job_id),
         sequence_inventory=_sequence_inventory(service, job_id),
+        entities=entities,
+        relations=relations,
+        relation_summary=relation_summary,
+    )
+
+
+def _entities_relations(
+    service, job_id: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """C04 entities/relations from the extract artifact (real evidence ids).
+
+    Missing/unreadable output degrades to empty lists + a summary carrying
+    ``extracted: false`` — never fabricated links.
+    """
+
+    from bio_pdf.errors import WorkflowError
+
+    try:
+        data = ResultReader(service.paths.artifact_root).read_json(job_id, "extract")
+    except WorkflowError:
+        return [], [], {"extracted": False}
+    entities = data.get("entities") or []
+    relations = data.get("relations") or []
+    by_status: dict[str, int] = {}
+    by_predicate: dict[str, int] = {}
+    for relation in relations:
+        status = str(relation.get("link_status") or "linked")
+        predicate = str(relation.get("predicate") or "?")
+        by_status[status] = by_status.get(status, 0) + 1
+        by_predicate[predicate] = by_predicate.get(predicate, 0) + 1
+    return (
+        entities,
+        relations,
+        {
+            "extracted": True,
+            "entities": len(entities),
+            "relations": len(relations),
+            "by_link_status": by_status,
+            "by_predicate": by_predicate,
+            "unresolved_references": len(data.get("unresolved_references") or []),
+        },
     )
 
 

@@ -47,6 +47,9 @@ def link_explicit_relations(
     sequences: list[SequenceRecord],
     measurements: list[Measurement],
     evidence_spans: list[Any],
+    *,
+    note_links: list[dict[str, Any]] | None = None,
+    inventory_status_by_seq: dict[str, str] | None = None,
 ) -> RelationResult:
     """Link explicit entity/sequence/measurement relations.
 
@@ -56,10 +59,17 @@ def link_explicit_relations(
         measurements: Measurements to link back to entities.
         evidence_spans: Evidence spans (unused for linking here, but part of
             the stable interface).
+        note_links: C04 links derived from ST.25 feature notes
+            (:func:`bio_pdf.extract.entities.entities_from_sequence_notes`);
+            each carries its note's REAL evidence span.
+        inventory_status_by_seq: Inventory status per declared SEQ ID
+            (C02) — used to classify a note link whose sequence is not
+            recovered as ``missing_sequence`` vs ``outside_scope``.
 
     Returns:
         A :class:`RelationResult` with confirmed relations, unresolved
-        references and review reasons.
+        references and review reasons. Every relation carries a
+        ``link_status`` from the C04 vocabulary.
     """
 
     # Key sequences by (document_id, seq_id_no) so a same-numbered sequence
@@ -75,6 +85,51 @@ def link_explicit_relations(
     relations: list[SequenceRelation] = []
     unresolved: list[SequenceReference] = []
     review_reasons: list[str] = []
+
+    # ---- C04: relations derived from ST.25 feature notes -----------------
+    for link in note_links or []:
+        entity = entity_by_name.get(str(link.get("entity_name")))
+        if entity is None:
+            continue
+        seq_no = str(link.get("seq_no"))
+        evidence_id = str(link.get("evidence_id"))
+        seq = seq_by_no.get((entity.document_id, seq_no))
+        if seq is None:
+            status = "missing_sequence"
+            if inventory_status_by_seq:
+                declared = inventory_status_by_seq.get(seq_no)
+                if declared == "outside_scope":
+                    status = "outside_scope"
+            unresolved.append(
+                SequenceReference(
+                    document_id=entity.document_id,
+                    seq_id_no=seq_no,
+                    mention_raw=str(link.get("note") or f"SEQ ID {seq_no}"),
+                    evidence_ids=[evidence_id],
+                    resolved_sequence_id=None,
+                )
+            )
+            review_reasons.append(
+                f"{entity.name_raw} -> SEQ ID {seq_no} ({link.get('predicate')}): "
+                f"sequence not recovered ({status})"
+            )
+            continue
+        relations.append(
+            SequenceRelation(
+                relation_id=(
+                    f"{entity.document_id}:rel:note:{entity.entity_id}:"
+                    f"{link.get('predicate')}:{seq_no}"
+                ),
+                document_id=entity.document_id,
+                subject_id=entity.entity_id,
+                predicate=str(link.get("predicate") or "has_sequence"),  # type: ignore[arg-type]
+                object_id=seq.sequence_id,
+                # The note's real span — resolvable through the evidence API.
+                evidence_ids=[evidence_id],
+                validation_state="unchecked",
+                link_status="linked",
+            )
+        )
 
     for entity in entities:
         if entity.kind != "antibody":
@@ -112,6 +167,7 @@ def link_explicit_relations(
                     object_id=seq.sequence_id,
                     evidence_ids=[f"{entity.document_id}:rel:{entity.entity_id}:{chain}"],
                     validation_state="unchecked",
+                    link_status="linked",
                 )
             )
 
@@ -128,6 +184,7 @@ def link_explicit_relations(
                     object_id=measurement.measurement_id,
                     evidence_ids=list(measurement.evidence_ids),
                     validation_state="unchecked",
+                    link_status="linked",
                 )
             )
 

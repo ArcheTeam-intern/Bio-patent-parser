@@ -158,6 +158,11 @@ class RecordsResponse(ApiEnvelope):
     #: None for jobs extracted before the inventory existed — the UI shows
     #: "未评估" rather than inventing numbers.
     sequence_inventory: dict[str, Any] | None = None
+    #: C04 entities / relations with real evidence ids, plus per-status
+    #: counts. Empty lists mean "not extracted", never "none exist".
+    entities: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    relation_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class PageResponse(ApiEnvelope):
