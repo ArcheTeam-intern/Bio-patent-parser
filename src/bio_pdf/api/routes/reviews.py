@@ -148,10 +148,11 @@ class BatchDecisionRequest(BaseModel):
 
 @router.post("/decisions/batch")
 def submit_batch_decision(service: ServiceDep, request: BatchDecisionRequest) -> dict:
-    """C06 bulk decision: precheck every item, then apply all or none.
+    """D01 bulk decision: one transaction for the whole batch.
 
-    Returns 200 with ``status="applied"`` and per-item results, or 409 with
-    ``status="conflict"`` and the full conflict list (nothing applied).
+    Any failure (missing reject reason, illegal patch, blocker, revision
+    race, duplicate item) rolls back EVERYTHING — the response carries the
+    offending item's structured error and nothing was written.
     """
 
     review_service = ReviewService(service.repository, service.paths.artifact_root)
@@ -160,20 +161,24 @@ def submit_batch_decision(service: ServiceDep, request: BatchDecisionRequest) ->
             decisions=[d.model_dump() for d in request.decisions],
             actor=request.actor,
         )
-    except WorkflowError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": exc.code, "message": exc.message, "details": exc.details},
-        ) from exc
-    if result["status"] == "conflict":
+    except ReviewRevisionConflictError as exc:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "REVIEW_BATCH_CONFLICT",
-                "message": f"{len(result['conflicts'])} item(s) failed precheck; nothing applied",
-                "details": {"conflicts": result["conflicts"]},
+                "message": exc.message,
+                "details": {"conflicts": [exc.details], "applied": []},
             },
-        )
+        ) from exc
+    except WorkflowError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "details": {**exc.details, "applied": []},
+            },
+        ) from exc
     return {"api_version": "v1", **result}
 
 

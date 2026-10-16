@@ -73,6 +73,38 @@ class ReviewService:
         patch: dict[str, Any] | None = None,
         evidence_ids: list[str] | None = None,
     ) -> DecisionOutcome:
+        self._validate_action(action, reason)
+        conn = self.repository.connection
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            applied = self._apply_decision_locked(
+                review_id=review_id,
+                action=action,
+                base_revision=base_revision,
+                actor=actor,
+                reason=reason,
+                patch=patch,
+                evidence_ids=evidence_ids,
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+        job = self.repository.get_job(applied["job_id"])
+        return DecisionOutcome(
+            review_id=review_id,
+            action=action,
+            record_id=applied["record_id"],
+            new_revision=applied["new_revision"],
+            validation_state=str(applied["record"].get("validation_state")),
+            acceptance_state=str(applied["record"].get("acceptance_state")),
+            open_reviews=self._open_review_count(applied["job_id"]),
+            result_revision=job.result_revision if job else 0,
+            record=applied["record"],
+        )
+
+    def _validate_action(self, action: str, reason: str | None) -> None:
         if action not in ("confirm", "correct", "reject"):
             raise WorkflowError(
                 f"unknown review action: {action}",
@@ -84,91 +116,93 @@ class ReviewService:
                 details={"action": action},
             )
 
+    def _apply_decision_locked(
+        self,
+        *,
+        review_id: str,
+        action: str,
+        base_revision: int,
+        actor: str,
+        reason: str | None,
+        patch: dict[str, Any] | None,
+        evidence_ids: list[str] | None,
+    ) -> dict[str, Any]:
+        """One decision's full validation + writes. MUST be inside a caller
+        transaction — never issues BEGIN/COMMIT itself, so a batch can wrap
+        many of these in a single atomic unit (D01)."""
+
         conn = self.repository.connection
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            item = self._load_review_item(review_id)
-            job_id = str(item["job_id"])
-            record_id = str(item["record_id"])
+        item = self._load_review_item(review_id)
+        job_id = str(item["job_id"])
+        record_id = str(item["record_id"])
 
-            head = self.repository.get_record_head(job_id, record_id)
-            current_revision, record_dict, kind = self._current_record(
-                job_id, record_id, head
-            )
-            span_lookup = self._span_lookup(job_id)
-
-            # Conflict check comes before the resolved-state check: a second
-            # window submitting its stale view must see 409, not "resolved".
-            if base_revision != current_revision:
-                raise ReviewRevisionConflictError(
-                    f"base_revision {base_revision} does not match live revision {current_revision}",
-                    details={
-                        "review_id": review_id,
-                        "live_revision": current_revision,
-                        "base_revision": base_revision,
-                    },
-                )
-            self._ensure_open(item)
-
-            if action == "correct":
-                record_dict = self._apply_patch(record_dict, kind, patch or {}, span_lookup)
-            record = self._validate_record(record_dict, kind, span_lookup)
-
-            blockers = self._acceptance_blockers(record, kind)
-            if action in ("confirm", "correct") and blockers:
-                raise WorkflowError(
-                    "cannot accept while blockers remain: " + "; ".join(blockers),
-                    details={"blockers": blockers, "action": action},
-                )
-
-            if action == "reject":
-                record["acceptance_state"] = "rejected"
-            else:
-                record["acceptance_state"] = "accepted"
-                record["validation_state"] = "verified_human"
-
-            new_revision = current_revision + 1
-            decision = ReviewDecision(
-                decision_id=f"dec-{uuid4_hex()}",
-                review_id=review_id,
-                actor=actor,
-                action=action,  # type: ignore[arg-type]
-                patch_json=self._decision_patch(patch or {}, reason),
-                evidence_ids=evidence_ids or [],
-                base_revision=base_revision,
-            )
-
-            self._write_version(job_id, record_id, new_revision, kind, record, decision.decision_id)
-            self._move_head(job_id, record_id, new_revision, kind, record)
-            self.repository.append_review_decision(decision)
-            conn.execute(
-                "UPDATE review_items SET status = 'resolved' WHERE review_id = ?",
-                (review_id,),
-            )
-            conn.execute(
-                """
-                UPDATE jobs SET result_revision = result_revision + 1, updated_at = ?
-                WHERE job_id = ?
-                """,
-                (_now_iso(), job_id),
-            )
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
-
-        job = self.repository.get_job(job_id)
-        return DecisionOutcome(
-            review_id=review_id,
-            action=action,
-            record_id=record_id,
-            new_revision=new_revision,
-            validation_state=str(record.get("validation_state")),
-            acceptance_state=str(record.get("acceptance_state")),
-            open_reviews=self._open_review_count(job_id),
-            result_revision=job.result_revision if job else 0,
-            record=record,
+        head = self.repository.get_record_head(job_id, record_id)
+        current_revision, record_dict, kind = self._current_record(
+            job_id, record_id, head
         )
+        span_lookup = self._span_lookup(job_id)
+
+        # Conflict check comes before the resolved-state check: a second
+        # window submitting its stale view must see 409, not "resolved".
+        if base_revision != current_revision:
+            raise ReviewRevisionConflictError(
+                f"base_revision {base_revision} does not match live revision {current_revision}",
+                details={
+                    "review_id": review_id,
+                    "live_revision": current_revision,
+                    "base_revision": base_revision,
+                },
+            )
+        self._ensure_open(item)
+
+        if action == "correct":
+            record_dict = self._apply_patch(record_dict, kind, patch or {}, span_lookup)
+        record = self._validate_record(record_dict, kind, span_lookup)
+
+        blockers = self._acceptance_blockers(record, kind)
+        if action in ("confirm", "correct") and blockers:
+            raise WorkflowError(
+                "cannot accept while blockers remain: " + "; ".join(blockers),
+                details={"blockers": blockers, "action": action},
+            )
+
+        if action == "reject":
+            record["acceptance_state"] = "rejected"
+        else:
+            record["acceptance_state"] = "accepted"
+            record["validation_state"] = "verified_human"
+
+        new_revision = current_revision + 1
+        decision = ReviewDecision(
+            decision_id=f"dec-{uuid4_hex()}",
+            review_id=review_id,
+            actor=actor,
+            action=action,  # type: ignore[arg-type]
+            patch_json=self._decision_patch(patch or {}, reason),
+            evidence_ids=evidence_ids or [],
+            base_revision=base_revision,
+        )
+
+        self._write_version(job_id, record_id, new_revision, kind, record, decision.decision_id)
+        self._move_head(job_id, record_id, new_revision, kind, record)
+        self.repository.append_review_decision(decision)
+        conn.execute(
+            "UPDATE review_items SET status = 'resolved' WHERE review_id = ?",
+            (review_id,),
+        )
+        conn.execute(
+            """
+            UPDATE jobs SET result_revision = result_revision + 1, updated_at = ?
+            WHERE job_id = ?
+            """,
+            (_now_iso(), job_id),
+        )
+        return {
+            "job_id": job_id,
+            "record_id": record_id,
+            "new_revision": new_revision,
+            "record": record,
+        }
 
     def apply_batch(
         self,
@@ -176,15 +210,15 @@ class ReviewService:
         decisions: list[dict[str, Any]],
         actor: str,
     ) -> dict[str, Any]:
-        """Two-phase bulk decision (C06).
+        """D01: atomic bulk decision — ALL items or NONE.
 
-        Phase 1 is read-only: every item must exist, still be open, and its
-        ``base_revision`` must equal the live revision. ANY mismatch returns
-        the full conflict list and applies NOTHING (plan §3.3: precheck all,
-        then submit; one conflict fails the whole batch). Phase 2 applies
-        the decisions through :meth:`apply_decision`, so each record version,
-        decision log entry and revision bump has the same guarantees as a
-        single decision.
+        Unlike the previous precheck-then-apply implementation, the whole
+        batch runs inside ONE ``BEGIN IMMEDIATE``: every item's action /
+        reason / patch / blockers / revision / open-state is validated and
+        written in the same transaction, so a late failure (missing reject
+        reason, illegal patch, blocker, revision race) rolls back every
+        earlier write — no more partial commits. Duplicate review_ids or two
+        decisions for the same record are rejected before any write.
         """
 
         if not decisions:
@@ -193,54 +227,60 @@ class ReviewService:
                 details={"action": "batch"},
             )
 
-        conflicts: list[dict[str, Any]] = []
+        # Cheap pre-checks that need no DB access (fail before BEGIN).
+        seen_reviews: set[str] = set()
         for d in decisions:
             review_id = str(d.get("review_id") or "")
-            base_revision = int(d.get("base_revision", -1))
-            try:
+            if not review_id:
+                raise WorkflowError(
+                    "batch item without review_id", details={"action": "batch"}
+                )
+            if review_id in seen_reviews:
+                raise WorkflowError(
+                    f"duplicate review_id in batch: {review_id}",
+                    details={"review_id": review_id, "code": "BATCH_DUPLICATE"},
+                )
+            seen_reviews.add(review_id)
+            self._validate_action(str(d.get("action")), d.get("reason"))
+
+        conn = self.repository.connection
+        conn.execute("BEGIN IMMEDIATE")
+        seen_records: set[tuple[str, str]] = set()
+        try:
+            applied: list[dict[str, Any]] = []
+            for d in decisions:
+                review_id = str(d["review_id"])
                 item = self._load_review_item(review_id)
-            except (WorkflowError, KeyError):
-                conflicts.append({"review_id": review_id, "reason": "not_found"})
-                continue
-            job_id = str(item["job_id"])
-            record_id = str(item["record_id"])
-            head = self.repository.get_record_head(job_id, record_id)
-            current_revision, _record, _kind = self._current_record(job_id, record_id, head)
-            if base_revision != current_revision:
-                conflicts.append(
+                record_key = (str(item["job_id"]), str(item["record_id"]))
+                if record_key in seen_records:
+                    raise WorkflowError(
+                        f"batch contains two decisions for the same record: {record_key[1]}",
+                        details={"record_id": record_key[1], "code": "BATCH_SAME_RECORD"},
+                    )
+                seen_records.add(record_key)
+
+                result = self._apply_decision_locked(
+                    review_id=review_id,
+                    action=str(d["action"]),
+                    base_revision=int(d.get("base_revision", -1)),
+                    actor=actor,
+                    reason=d.get("reason"),
+                    patch=d.get("patch"),
+                    evidence_ids=d.get("evidence_ids"),
+                )
+                applied.append(
                     {
                         "review_id": review_id,
-                        "reason": "revision_conflict",
-                        "base_revision": base_revision,
-                        "live_revision": current_revision,
+                        "record_id": result["record_id"],
+                        "new_revision": result["new_revision"],
+                        "acceptance_state": str(result["record"].get("acceptance_state")),
                     }
                 )
-                continue
-            if str(item["status"]) != "open":
-                conflicts.append({"review_id": review_id, "reason": "not_open"})
-
-        if conflicts:
-            return {"status": "conflict", "applied": [], "conflicts": conflicts}
-
-        applied: list[dict[str, Any]] = []
-        for d in decisions:
-            outcome = self.apply_decision(
-                review_id=str(d["review_id"]),
-                action=str(d["action"]),
-                base_revision=int(d["base_revision"]),
-                actor=actor,
-                reason=d.get("reason"),
-                patch=d.get("patch"),
-                evidence_ids=d.get("evidence_ids"),
-            )
-            applied.append(
-                {
-                    "review_id": outcome.review_id,
-                    "record_id": outcome.record_id,
-                    "new_revision": outcome.new_revision,
-                    "acceptance_state": outcome.acceptance_state,
-                }
-            )
+            conn.execute("COMMIT")
+        except Exception:
+            # One rollback covers every item — nothing from this batch stays.
+            conn.execute("ROLLBACK")
+            raise
         return {"status": "applied", "applied": applied, "conflicts": []}
 
     # ---- internals --------------------------------------------------------

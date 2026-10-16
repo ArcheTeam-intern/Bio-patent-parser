@@ -155,3 +155,112 @@ def test_batch_decision_precheck_fails_all_on_one_stale_revision(completed_job) 
     remaining = c.get(f"/api/v1/reviews?job_id={job_id}").json()
     ids = {r["review_id"] for r in remaining["reviews"]}
     assert first["review_id"] in ids and second["review_id"] in ids
+
+
+def test_batch_missing_reason_rolls_back_everything(completed_job) -> None:
+    """D01 / S01 exact repro: item 1 valid, item 2 lacks a reject reason →
+    NOTHING may be written (previously item 1 was already committed)."""
+
+    c, job_id = completed_job
+    items = c.get(f"/api/v1/reviews?job_id={job_id}").json()["reviews"]
+    assert len(items) >= 2
+    first, second = items[0], items[1]
+
+    # Assertions run through the API-visible statuses and the decisions log
+    # — no direct DB access needed.
+    res = c.post(
+        "/api/v1/reviews/decisions/batch",
+        json={
+            "actor": "tester",
+            "decisions": [
+                {
+                    "review_id": first["review_id"],
+                    "action": "reject",
+                    "base_revision": first["record_revision"],
+                    "reason": "not our target",
+                },
+                {
+                    "review_id": second["review_id"],
+                    "action": "reject",
+                    "base_revision": second["record_revision"],
+                    # no reason -> must fail the WHOLE batch
+                },
+            ],
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert "reject requires a reason" in res.json()["error"]["message"]
+
+    remaining = c.get(f"/api/v1/reviews?job_id={job_id}").json()
+    ids = {r["review_id"] for r in remaining["reviews"]}
+    assert first["review_id"] in ids and second["review_id"] in ids, (
+        "rollback must leave BOTH items open"
+    )
+    for rid in (first["review_id"], second["review_id"]):
+        decisions = c.get(f"/api/v1/reviews/{rid}/decisions").json()["decisions"]
+        assert decisions == [], f"{rid} must have no decision log entries"
+
+    # The success path still writes everything in one go.
+    ok = c.post(
+        "/api/v1/reviews/decisions/batch",
+        json={
+            "actor": "tester",
+            "decisions": [
+                {
+                    "review_id": first["review_id"],
+                    "action": "reject",
+                    "base_revision": first["record_revision"],
+                    "reason": "not our target",
+                },
+                {
+                    "review_id": second["review_id"],
+                    "action": "reject",
+                    "base_revision": second["record_revision"],
+                    "reason": "also noise",
+                },
+            ],
+        },
+    )
+    assert ok.status_code == 200, ok.text
+    assert len(ok.json()["applied"]) == 2
+    for rid in (first["review_id"], second["review_id"]):
+        decisions = c.get(f"/api/v1/reviews/{rid}/decisions").json()["decisions"]
+        assert len(decisions) == 1
+
+
+def test_batch_rejects_duplicates_before_writing(completed_job) -> None:
+    """D01: duplicate review_id / same-record duplicates are refused up front."""
+
+    c, job_id = completed_job
+    items = c.get(f"/api/v1/reviews?job_id={job_id}").json()["reviews"]
+    first = items[0]
+
+    dup_ids = c.post(
+        "/api/v1/reviews/decisions/batch",
+        json={
+            "actor": "tester",
+            "decisions": [
+                {"review_id": first["review_id"], "action": "confirm", "base_revision": 1},
+                {"review_id": first["review_id"], "action": "confirm", "base_revision": 1},
+            ],
+        },
+    )
+    assert dup_ids.status_code == 422
+    assert dup_ids.json()["error"]["details"].get("code") == "BATCH_DUPLICATE"
+
+    # Same record via two different review items (if present) — create the
+    # situation directly using two items of the same record when available.
+    same_record = [r for r in items if r["record_id"] == first["record_id"]]
+    if len(same_record) >= 2:
+        dup_record = c.post(
+            "/api/v1/reviews/decisions/batch",
+            json={
+                "actor": "tester",
+                "decisions": [
+                    {"review_id": same_record[0]["review_id"], "action": "confirm", "base_revision": 1},
+                    {"review_id": same_record[1]["review_id"], "action": "confirm", "base_revision": 1},
+                ],
+            },
+        )
+        assert dup_record.status_code == 422
+        assert dup_record.json()["error"]["details"].get("code") == "BATCH_SAME_RECORD"
