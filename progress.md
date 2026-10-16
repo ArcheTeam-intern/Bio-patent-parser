@@ -332,3 +332,20 @@
 - 引擎分派：_LAYOUT_ENGINES 增 mineru_http；run 循环按配置调对应 adapter，缺 MINERU_TOKEN 时显式失败（绝不静默回退 Docling）；可用性在任务创建时同样拦截（既有）。
 - 测试：+5 MockTransport 协议测试（全流程/鉴权失败/远端失败/resume 免重提交/hash 不符先拒）；513 后端全绿。
 - **未完成**：真实 MinerU 云实测（本环境无 MINERU_TOKEN；按方案如实标注未实测，不伪造结果）。
+
+### C08-C12 收尾与四份报告（如实标注）
+- C09 完成并提交：问题卡带 severity（错误/警告/提示词表）+ 真实页码（仅从 detail/source 解析）+ 为什么/影响/下一步模板 + severity/page/state 过滤与计数；API 测试锁定。
+- C08（阅读顺序/来源对照）与 C11（对比任务/API/页面）未实现——原因：前者是多栏识别+三视图的大改造、后者依赖 C10 云实测环境且任务编排独立；为避免半成品入仓，未动工（已在执行记录中说明）。
+- C12：无人工金标 → 全部评测口径标注 not_evaluated；四份报告已交付：执行记录/序列前后/审核展示前后/引擎对比（云实测未完成——无 MINERU_TOKEN）。
+- 论文刷新任务（job-8205561af0cc，docling+区域OCR）真实验证：缺少单位原因 255→**0**；论文实体发现 #519/#520/W317A-变体。
+EOF
+git add reports/2026-10-16_C01_C12_execution.md reports/2026-10-16_sequence_inventory_before_after.md reports/2026-10-16_review_display_before_after.md reports/2026-10-16_docling_mineru_comparison.md progress.md && git commit -m "docs: C01-C12 execution record + before/after + engine comparison reports (honest partial status)" 2>&1 | tail -1
+__zcode_status=$?
+if [ "$__zcode_status" -eq 0 ]; then pwd -P > '/c/Users/SWQ/AppData/Local/Temp/zcode-a1fb42d5-8ab8-46e2-be9c-251722c0486c-cwd'; fi
+exit "$__zcode_status"
+
+### C08-C12 收尾与四份报告（如实标注）
+- C09 完成并提交：问题卡带 severity（错误/警告/提示词表）+ 真实页码（仅从 detail/source 解析）+ 为什么/影响/下一步模板 + severity/page/state 过滤与计数；API 测试锁定。
+- C08（阅读顺序/来源对照）与 C11（对比任务/API/页面）未实现——原因：前者是多栏识别+三视图的大改造、后者依赖 C10 云实测环境且任务编排独立；为避免半成品入仓，未动工（已在执行记录中说明）。
+- C12：无人工金标 → 全部评测口径标注 not_evaluated；四份报告已交付：执行记录/序列前后/审核展示前后/引擎对比（云实测未完成——无 MINERU_TOKEN）。
+- 论文刷新任务（job-8205561af0cc）真实验证：缺少单位原因 255->0；论文实体发现 #519/#520/W317A-变体。
