@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
+from pydantic import BaseModel
 from fastapi.responses import FileResponse
 
 from bio_pdf.api.contracts import (
@@ -119,11 +120,8 @@ def _entities_relations(
     ``extracted: false`` — never fabricated links.
     """
 
-    from bio_pdf.errors import WorkflowError
-
-    try:
-        data = ResultReader(service.paths.artifact_root).read_json(job_id, "extract")
-    except WorkflowError:
+    data = _read_result_or_409(service, job_id, "extract")
+    if data is None:
         return [], [], {"extracted": False}
     entities = data.get("entities") or []
     relations = data.get("relations") or []
@@ -155,15 +153,38 @@ def _sequence_inventory(service, job_id: str) -> dict[str, Any] | None:
     stays valid and the UI reports "未评估" instead of fabricating coverage.
     """
 
-    from bio_pdf.errors import WorkflowError
-
-    try:
-        data = ResultReader(service.paths.artifact_root).read_json(job_id, "extract")
-    except WorkflowError:
+    data = _read_result_or_409(service, job_id, "extract")
+    if data is None:
         return None
     value = data.get("sequence_inventory")
     return value if isinstance(value, dict) else None
 
+
+
+def _read_result_or_409(service, job_id: str, name: str) -> dict[str, Any] | None:
+    """Read a result artifact (D09): missing → None (the caller shows the
+    honest empty state); CORRUPT → 409 RESULT_CORRUPT.
+
+    The previous broad ``except WorkflowError`` turned a corrupted published
+    artifact into "no result yet" with empty content — exactly the silent
+    degradation the acceptance flagged.
+    """
+
+    from bio_pdf.storage.result_reader import ResultCorruptError
+
+    try:
+        return ResultReader(service.paths.artifact_root).read_json(job_id, name)
+    except ResultCorruptError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RESULT_CORRUPT",
+                "message": str(exc) or "published result is corrupted",
+                "details": getattr(exc, "details", {}) or {},
+            },
+        ) from exc
+    except WorkflowError:
+        return None
 
 def _table_pages(service, job_id: str) -> dict[int, int]:
     """Tables per page from the normalized artifact (tables tab overview).
@@ -172,11 +193,8 @@ def _table_pages(service, job_id: str) -> dict[int, int]:
     the overview is a convenience, never a hard dependency.
     """
 
-    from bio_pdf.errors import WorkflowError
-
-    try:
-        data = ResultReader(service.paths.artifact_root).read_json(job_id, "normalized")
-    except WorkflowError:
+    data = _read_result_or_409(service, job_id, "normalized")
+    if data is None:
         return {}
     out: dict[int, int] = {}
     for page in data.get("pages", []) or []:
@@ -233,11 +251,9 @@ def list_figures(
     """
 
     _job_or_404(service, job_id)
-    from bio_pdf.errors import WorkflowError
 
-    try:
-        data = ResultReader(service.paths.artifact_root).read_json(job_id, "normalized")
-    except WorkflowError:
+    data = _read_result_or_409(service, job_id, "normalized")
+    if data is None:
         return FiguresResponse(
             job_id=job_id,
             figures=[],
@@ -528,7 +544,20 @@ _ISSUE_GUIDANCE: dict[str, dict[str, str]] = {
 
 
 def _issue_page(issue: dict[str, Any]) -> int | None:
-    """Page from REAL fields only: detail text or source ids — never guessed."""
+    """Page from REAL fields only — never guessed.
+
+    D09: newly created issues carry ``page_number`` directly. For historical
+    rows the fallbacks use fields that MEAN a page: the ``page N`` text in
+    the detail, and OUR documented id conventions — ``<page>:t<idx>`` /
+    ``<page>:grid`` (normalize_docling and grid_matrix generate exactly
+    these shapes, so the prefix is a fact, not an opaque-id guess).
+    """
+
+    if issue.get("page_number") is not None:
+        try:
+            return int(issue["page_number"])
+        except (TypeError, ValueError):
+            pass
 
     import re as _re
 
@@ -537,9 +566,11 @@ def _issue_page(issue: dict[str, Any]) -> int | None:
         if match:
             return int(match.group(1))
     for source_id in issue.get("source_ids") or []:
-        match = _re.search(r":p(\d+)[:\-]", str(source_id))
-        if match:
-            return int(match.group(1))
+        sid = str(source_id)
+        for pattern in (r"^(?:p)?(\d+):t\d+$", r"^(\d+):grid$", r":p(\d+)[:\-]"):
+            match = _re.search(pattern, sid)
+            if match:
+                return int(match.group(1))
     return None
 
 
@@ -573,7 +604,18 @@ def list_issues(
             "created_at": row["created_at"],
         }
         issue["severity"] = _ISSUE_SEVERITY.get(str(row["reason_code"]), "warning")
-        issue["page_number"] = _issue_page(issue)
+        # D09: prefer the page/region captured at creation time; the
+        # fallbacks below only serve historical rows.
+        row_keys = row.keys()
+        if "region_json" in row_keys and row["region_json"]:
+            try:
+                issue["region"] = json.loads(row["region_json"])
+            except json.JSONDecodeError:
+                issue["region"] = None
+        if "page_number" in row_keys and row["page_number"] is not None:
+            issue["page_number"] = int(row["page_number"])
+        else:
+            issue["page_number"] = _issue_page(issue)
         issued_guidance = _ISSUE_GUIDANCE.get(str(row["reason_code"]))
         if issued_guidance:
             issue.update(issued_guidance)
@@ -652,3 +694,254 @@ def get_artifact_content(
 
 
 __all__ = ["router"]
+
+
+# ---- D09 issue actions (backend + audit log) -------------------------------
+
+
+class _IssueActionRequest(BaseModel):
+    action: str
+    actor: str = "local-operator"
+    note: str | None = None
+
+
+def _issue_or_404(service, issue_id: str):
+    row = service.repository.get_issue(issue_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "issue not found"},
+        )
+    return row
+
+
+def _issue_view(service, row) -> dict[str, Any]:
+    issue = {
+        "issue_id": row["issue_id"],
+        "job_id": row["job_id"],
+        "scope": row["scope"],
+        "reason_code": row["reason_code"],
+        "source_ids": json.loads(row["source_json"] or "[]"),
+        "detail": row["detail"],
+        "state": row["state"],
+        "baseline_id": row["baseline_id"],
+        "created_at": row["created_at"],
+        "severity": _ISSUE_SEVERITY.get(str(row["reason_code"]), "warning"),
+    }
+    row_keys = row.keys()
+    if "page_number" in row_keys and row["page_number"] is not None:
+        issue["page_number"] = int(row["page_number"])
+    else:
+        issue["page_number"] = _issue_page(issue)
+    if "region_json" in row_keys and row["region_json"]:
+        try:
+            issue["region"] = json.loads(row["region_json"])
+        except json.JSONDecodeError:
+            issue["region"] = None
+    issue.update(
+        _ISSUE_GUIDANCE.get(
+            str(row["reason_code"]),
+            {"title": str(row["reason_code"]), "impact": "见详情", "suggestion": "按详情人工核对"},
+        )
+    )
+    return issue
+
+
+def _issue_events(service, issue_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "event_id": e["event_id"],
+            "actor": e["actor"],
+            "action": e["action"],
+            "note": e["note"],
+            "artifact_rel": e["artifact_rel"],
+            "created_at": e["created_at"],
+        }
+        for e in service.repository.list_issue_events(issue_id)
+    ]
+
+
+@router.get("/issues/{issue_id}")
+def get_issue(service: ServiceDep, job_id: str, issue_id: str) -> dict:
+    """One issue with its full action history (D09)."""
+
+    _job_or_404(service, job_id)
+    row = _issue_or_404(service, issue_id)
+    return {
+        "api_version": "v1",
+        "issue": _issue_view(service, row),
+        "events": _issue_events(service, issue_id),
+    }
+
+
+@router.post("/issues/{issue_id}/actions")
+def issue_action(
+    service: ServiceDep,
+    job_id: str,
+    issue_id: str,
+    request: _IssueActionRequest,
+) -> dict:
+    """dismiss / note / reopen — every action is logged with actor+note.
+
+    - ``dismiss`` (标记非目标): requires a reason (note) — an unexplained
+      dismissal is not an audit trail.
+    - ``note`` (保留未解决并添加说明): requires a note; a dismissed issue
+      reopens with it.
+    - ``reopen``: returns a dismissed issue to the open state.
+    """
+
+    _job_or_404(service, job_id)
+    row = _issue_or_404(service, issue_id)
+    action = request.action
+    note = (request.note or "").strip()
+
+    if action == "dismiss":
+        if not note:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "ISSUE_NOTE_REQUIRED",
+                    "message": "dismissing an issue requires a reason in note",
+                    "details": {"issue_id": issue_id},
+                },
+            )
+        service.repository.update_issue_state(issue_id, state="dismissed")
+    elif action == "note":
+        if not note:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "ISSUE_NOTE_REQUIRED",
+                    "message": "adding a note requires note text",
+                    "details": {"issue_id": issue_id},
+                },
+            )
+        if str(row["state"]) == "dismissed":
+            service.repository.update_issue_state(issue_id, state="open")
+    elif action == "reopen":
+        service.repository.update_issue_state(issue_id, state="open")
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ISSUE_ACTION_UNKNOWN",
+                "message": f"unknown issue action: {action}",
+                "details": {"choices": ["dismiss", "note", "reopen"]},
+            },
+        )
+
+    service.repository.connection.commit()
+    service.repository.append_issue_event(
+        issue_id=issue_id, actor=request.actor, action=action, note=note or None
+    )
+    refreshed = _issue_or_404(service, issue_id)
+    return {
+        "api_version": "v1",
+        "issue": _issue_view(service, refreshed),
+        "events": _issue_events(service, issue_id),
+    }
+
+
+@router.post("/issues/{issue_id}/reparse")
+def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
+    """Bounded region reparse (D09): OCR the issue's own page, store the
+    candidate artifact and log the action.
+
+    Produces a CANDIDATE (never auto-published — adoption stays a human
+    decision). Scopes without a bounded reparse path are refused with a
+    reason instead of pretending to run.
+    """
+
+    _job_or_404(service, job_id)
+    row = _issue_or_404(service, issue_id)
+    view = _issue_view(service, row)
+    page = view.get("page_number")
+    reason = str(row["reason_code"])
+
+    reparse_pages = {
+        "SEQ_INVENTORY_MISSING",
+        "ZERO_RESIDUE_LISTING",
+        "SOURCE_CONFLICT",
+    }
+    if reason not in reparse_pages or page is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ISSUE_REPARSE_UNSUPPORTED",
+                "message": (
+                    "bounded reparse is available for declarations/residue "
+                    "regions with a known page; this issue has no such path"
+                ),
+                "details": {"issue_id": issue_id, "reason_code": reason, "page": page},
+            },
+        )
+
+    job = service.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
+    doc_row = service.repository.connection.execute(
+        "SELECT source_path FROM documents WHERE document_id = ?", (job.document_id,)
+    ).fetchone()
+    if doc_row is None or not Path(str(doc_row["source_path"])).is_file():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SOURCE_MISSING",
+                "message": "the source PDF is no longer available for reparse",
+            },
+        )
+
+    from bio_pdf.extract.sequences.region_ocr import ocr_residue_pages
+
+    try:
+        ocr = ocr_residue_pages(Path(str(doc_row["source_path"])), [int(page)])
+    except Exception as exc:  # noqa: BLE001 — the failure becomes the log entry
+        service.repository.append_issue_event(
+            issue_id=issue_id,
+            actor="reparse",
+            action="reparse_failed",
+            note=f"{type(exc).__name__}: {exc}"[:300],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "REPARSE_FAILED",
+                "message": f"region OCR failed: {exc}",
+                "details": {"page": page},
+            },
+        ) from exc
+
+    lines = ocr.get(int(page), [])
+    text = "\n".join(line[2] for line in lines)
+    rel_dir = Path("jobs") / job_id / "issues" / issue_id
+    out_dir = service.paths.artifact_root / rel_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    candidate = out_dir / "candidate_ocr.txt"
+    candidate.write_text(text, encoding="utf-8")
+    rel = (rel_dir / "candidate_ocr.txt").as_posix()
+
+    service.repository.update_issue_state(issue_id, state="reparse_requested")
+    service.repository.connection.commit()
+    service.repository.append_issue_event(
+        issue_id=issue_id,
+        actor="reparse",
+        action="reparse_candidate",
+        note=(
+            f"page {page}: {len(lines)} OCR lines, {len(text)} chars"
+            + (f"; preview: {text[:120]!r}" if text else "; region empty — still unresolved")
+        ),
+        artifact_rel=rel,
+    )
+    refreshed = _issue_or_404(service, issue_id)
+    return {
+        "api_version": "v1",
+        "issue": _issue_view(service, refreshed),
+        "candidate": {
+            "artifact_rel": rel,
+            "line_count": len(lines),
+            "char_count": len(text),
+            "preview": text[:400],
+            "note": "候选未自动采用；人工核对后才能并入基线",
+        },
+        "events": _issue_events(service, issue_id),
+    }

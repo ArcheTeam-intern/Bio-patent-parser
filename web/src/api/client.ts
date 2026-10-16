@@ -446,6 +446,33 @@ export function retryComparison(comparisonId: string): Promise<ComparisonInfo> {
   return request(`/comparisons/${encodeURIComponent(comparisonId)}/retry`, { method: "POST" });
 }
 
+export function getIssue(jobId: string, issueId: string): Promise<{
+  issue: ParseIssueData;
+  events: { event_id: string; actor: string; action: string; note: string | null; artifact_rel: string | null; created_at: string }[];
+}> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/issues/${encodeURIComponent(issueId)}`);
+}
+
+export function issueAction(
+  jobId: string,
+  issueId: string,
+  body: { action: "dismiss" | "note" | "reopen"; note?: string; actor?: string },
+): Promise<{ issue: ParseIssueData; events: unknown[] }> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/issues/${encodeURIComponent(issueId)}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function reparseIssue(jobId: string, issueId: string): Promise<{
+  issue: ParseIssueData;
+  candidate: { artifact_rel: string; line_count: number; char_count: number; preview: string; note: string };
+  events: unknown[];
+}> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/issues/${encodeURIComponent(issueId)}/reparse`, { method: "POST" });
+}
+
 export function documentSourceUrl(documentId: string): string {
   return `${API_PREFIX}/documents/${encodeURIComponent(documentId)}/source`;
 }

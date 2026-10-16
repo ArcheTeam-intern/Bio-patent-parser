@@ -215,6 +215,17 @@ CREATE TABLE IF NOT EXISTS comparisons (
     updated_at    TEXT NOT NULL
 );
 
+-- D09: per-issue action audit trail (dismiss/note/reparse…).
+CREATE TABLE IF NOT EXISTS issue_events (
+    event_id   TEXT PRIMARY KEY,
+    issue_id   TEXT NOT NULL REFERENCES parse_issues(issue_id),
+    actor      TEXT NOT NULL,
+    action     TEXT NOT NULL,
+    note       TEXT,
+    artifact_rel TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS comparison_sides (
     comparison_id TEXT NOT NULL REFERENCES comparisons(comparison_id),
     side          TEXT NOT NULL,
@@ -1007,12 +1018,15 @@ class Repository:
                 self._conn.execute(
                     """
                     INSERT INTO parse_issues (issue_id, job_id, scope, reason_code,
-                                              source_json, detail, state, baseline_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              source_json, detail, state, baseline_id, created_at,
+                                              page_number, region_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(issue_id) DO UPDATE SET
                         source_json = excluded.source_json,
                         detail = excluded.detail,
-                        baseline_id = excluded.baseline_id
+                        baseline_id = excluded.baseline_id,
+                        page_number = excluded.page_number,
+                        region_json = excluded.region_json
                     WHERE parse_issues.state = 'open'
                     """,
                     (
@@ -1025,6 +1039,8 @@ class Repository:
                         issue.get("state", "open"),
                         manifest_sha[:16],
                         now,
+                        issue.get("page_number"),
+                        _json_dumps(issue.get("region")) if issue.get("region") else None,
                     ),
                 )
             self._conn.execute(
@@ -1044,6 +1060,39 @@ class Repository:
         except Exception:
             self._conn.execute("ROLLBACK")
             raise
+
+    def get_issue(self, issue_id: str) -> Any:
+        return self._conn.execute(
+            "SELECT * FROM parse_issues WHERE issue_id = ?", (issue_id,)
+        ).fetchone()
+
+    def append_issue_event(
+        self,
+        *,
+        issue_id: str,
+        actor: str,
+        action: str,
+        note: str | None = None,
+        artifact_rel: str | None = None,
+    ) -> str:
+        import uuid
+
+        event_id = f"evt-{uuid.uuid4().hex[:12]}"
+        self._conn.execute(
+            """
+            INSERT INTO issue_events (event_id, issue_id, actor, action, note, artifact_rel, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (event_id, issue_id, actor, action, note, artifact_rel, _utcnow_iso()),
+        )
+        self._conn.commit()
+        return event_id
+
+    def list_issue_events(self, issue_id: str) -> list[Any]:
+        return self._conn.execute(
+            "SELECT * FROM issue_events WHERE issue_id = ? ORDER BY created_at",
+            (issue_id,),
+        ).fetchall()
 
     def list_issues(self, job_id: str, *, state: str | None = None) -> list[Any]:
         if state:

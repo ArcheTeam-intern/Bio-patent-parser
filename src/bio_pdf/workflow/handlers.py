@@ -1001,7 +1001,19 @@ class ExtractStage(_FileStage):
         raw_mentions: list[dict[str, Any]] = []
         issues: list[dict[str, Any]] = []
 
-        def _issue(scope: str, reason_code: str, source_ids: list[str], detail: str) -> None:
+        def _issue(
+            scope: str,
+            reason_code: str,
+            source_ids: list[str],
+            detail: str,
+            *,
+            page: int | None = None,
+            region: dict[str, Any] | None = None,
+        ) -> None:
+            """Record a parse issue (D09: carries the REAL page/region when
+            the caller knows it — position is never re-derived from id
+            shapes afterwards)."""
+
             import hashlib as _hashlib
 
             digest = _hashlib.sha256(
@@ -1016,6 +1028,8 @@ class ExtractStage(_FileStage):
                     "source_ids": source_ids,
                     "detail": detail,
                     "state": "open",
+                    "page_number": page,
+                    "region": region,
                 }
             )
 
@@ -1111,6 +1125,11 @@ class ExtractStage(_FileStage):
                                 f"native text {conflict['native_text']!r} differs from OCR "
                                 f"{conflict['ocr_text']!r} at the same position"
                             ),
+                            page=int(conflict["page_number"]),
+                            region={
+                                "y_top": conflict["y_top"],
+                                "y_bottom": conflict["y_bottom"],
+                            },
                         )
                     if ocr_conflicts:
                         diagnostics.append(
@@ -1180,6 +1199,7 @@ class ExtractStage(_FileStage):
                             f"SEQ ID {entry.get('seq_id_no')} (page {entry['declaration_page']}): "
                             "residue region reached but no recoverable residues — needs region OCR"
                         ),
+                        page=int(entry["declaration_page"]),
                     )
                 elif entry["status"] == "conflict":
                     _issue(
@@ -1190,6 +1210,7 @@ class ExtractStage(_FileStage):
                             f"SEQ ID {entry.get('seq_id_no')} (page {entry['declaration_page']}): "
                             + "; ".join(entry["reasons"])
                         ),
+                        page=int(entry["declaration_page"]),
                     )
 
             st25_pages = {
@@ -1257,6 +1278,8 @@ class ExtractStage(_FileStage):
                         "TABLE_GEOMETRY_RECONSTRUCTED",
                         [table.table_id],
                         f"page {table.page_number}: call matrix rebuilt from text geometry; structure and axes need human review",
+                        page=int(table.page_number),
+                        region={"table_id": table.table_id},
                     )
                 if kind in (
                     TableKind.INVENTORY,
@@ -1280,11 +1303,20 @@ class ExtractStage(_FileStage):
                         f"TABLE_{kind.value.upper()}",
                         [table.table_id],
                         f"page {table.page_number}: classified {kind.value}; structure preserved",
+                        page=int(table.page_number),
+                        region={"table_id": table.table_id},
                     )
                     continue
 
                 for structure_issue in table.structure_issues:
-                    _issue("table", "TABLE_STRUCTURE", [table.table_id], structure_issue)
+                    _issue(
+                        "table",
+                        "TABLE_STRUCTURE",
+                        [table.table_id],
+                        structure_issue,
+                        page=int(table.page_number),
+                        region={"table_id": table.table_id},
+                    )
                 measurements.extend(
                     extract_table_measurements(
                         table,

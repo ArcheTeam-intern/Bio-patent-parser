@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getIssues } from "../../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getIssues, issueAction, reparseIssue } from "../../api/client";
 
 /**
  * Issues 面板（plan B12 / C09）：结构化处理问题的可审计视图。
@@ -125,12 +125,114 @@ export function IssuePanel({ jobId }: { jobId: string }) {
                 来源：{issue.source_ids.slice(0, 6).join(", ")}
               </div>
             )}
+            <IssueActions jobId={jobId} issueId={issue.issue_id} state={issue.state} reasonCode={issue.reason_code} />
           </div>
         ))
       )}
-      <div className="dim" style={{ padding: 4 }}>
-        动作（重解析 / 标记非目标 / 保留未解决）随区域复解析执行环境接入；当前为只读审计视图。
+
+    </div>
+  );
+}
+
+
+const REPARSE_SCOPES = new Set(["SEQ_INVENTORY_MISSING", "ZERO_RESIDUE_LISTING", "SOURCE_CONFLICT"]);
+
+/** D09：动作全部有后端与审计日志——标记非目标需原因，保留未解决带说明，
+ * 区域复解析产出候选制品（不自动采用）。 */
+function IssueActions({
+  jobId,
+  issueId,
+  state,
+  reasonCode,
+}: {
+  jobId: string;
+  issueId: string;
+  state: string;
+  reasonCode: string;
+}) {
+  const [note, setNote] = useState("");
+  const [open, setOpen] = useState(false);
+  const [guess, setGuess] = useState<string | null>(null);
+  const [reparseResult, setReparseResult] = useState<{ preview: string; note: string } | null>(null);
+  const queryClient = useQueryClient();
+
+  const action = useMutation({
+    mutationFn: (body: { action: "dismiss" | "note" | "reopen"; note?: string }) =>
+      issueAction(jobId, issueId, body),
+    onSuccess: () => {
+      setNote("");
+      setOpen(false);
+      setGuess(null);
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+    },
+    onError: (error) => setGuess(String(error)),
+  });
+
+  const reparse = useMutation({
+    mutationFn: () => reparseIssue(jobId, issueId),
+    onSuccess: (result) => {
+      setReparseResult({ preview: result.candidate.preview, note: result.candidate.note });
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+    },
+    onError: (error) => setGuess(String(error)),
+  });
+
+  const canReparse = REPARSE_SCOPES.has(reasonCode) && state !== "dismissed";
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        {!open && (
+          <>
+            <button onClick={() => setOpen(true)}>标记非目标 / 加说明…</button>
+            {canReparse && (
+              <button
+                disabled={reparse.isPending}
+                title="对该问题所在页执行区域 OCR，产出候选文本（不自动采用）"
+                onClick={() => reparse.mutate()}
+              >
+                {reparse.isPending ? "复解析中…" : "区域复解析"}
+              </button>
+            )}
+            {state === "dismissed" && (
+              <button onClick={() => action.mutate({ action: "reopen" })}>恢复为待处理</button>
+            )}
+          </>
+        )}
+        {open && (
+          <>
+            <input
+              aria-label="问题说明"
+              style={{ width: 260 }}
+              placeholder="原因 / 说明（标记非目标必填）"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <button
+              disabled={action.isPending || (!note.trim() && true)}
+              className="dim"
+              title="保留未解决并添加说明"
+              onClick={() => action.mutate({ action: "note", note })}
+            >
+              保留未解决
+            </button>
+            <button
+              disabled={action.isPending}
+              style={{ borderColor: "var(--red)", color: "var(--red)" }}
+              title="标记为非目标（需要原因）"
+              onClick={() => action.mutate({ action: "dismiss", note })}
+            >
+              标记非目标
+            </button>
+            <button onClick={() => setOpen(false)}>取消</button>
+          </>
+        )}
       </div>
+      {guess && <div className="banner warn" style={{ marginTop: 4 }}>{guess}</div>}
+      {reparseResult && (
+        <div className="dim" style={{ marginTop: 4 }}>
+          候选文本（{reparseResult.note}）：<span className="mono">{reparseResult.preview.slice(0, 120)}</span>
+        </div>
+      )}
     </div>
   );
 }
