@@ -225,13 +225,32 @@ def get_page(
             status_code=404,
             detail={"code": "NOT_FOUND", "message": f"page {page_number} not in result"},
         )
+
+    def _channel(block) -> str:
+        # D08 来源对照: the block's OWN provenance decides; the document
+        # channel is only the fallback.
+        for prov in block.provenance:
+            if prov.source_type in ("native", "docling", "mineru", "ocr", "tesseract"):
+                return prov.source_type
+        lowered = document.parser_run_id.lower()
+        if "native" in lowered:
+            return "native"
+        if "docling" in lowered or "mineru" in lowered:
+            return "layout"
+        return "unknown"
+
+    blocks_out = []
+    for block in page.blocks:
+        payload = block.model_dump(mode="json")
+        payload["source_parser"] = _channel(block)
+        blocks_out.append(payload)
     return PageResponse(
         job_id=job_id,
         page_number=page.page_number,
         width_pt=page.width_pt,
         height_pt=page.height_pt,
         route=page.route,
-        blocks=[b.model_dump(mode="json") for b in page.blocks],
+        blocks=blocks_out,
         tables=[t.model_dump(mode="json") for t in page.tables],
         figures=[f.model_dump(mode="json") for f in page.figures],
     )
