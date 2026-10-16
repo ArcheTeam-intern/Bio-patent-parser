@@ -1,0 +1,47 @@
+{
+  "target": "paper",
+  "batch_id": "98b15398-88be-49f8-be16-2bf9d75465bd",
+  "zip_sha256": "50703ac6669a2b1696e1f691e7e88af103259ec37b2b62e4d0dd50dfda21d1dd",
+  "zip_bytes": 393923,
+  "content_list_entries": 22,
+  "layout_page_size_check": {
+    "8": {
+      "layout": [
+        null,
+        null
+      ],
+      "source": [
+        595.3,
+        779.5
+      ],
+      "match": false
+    },
+    "9": {
+      "layout": [
+        null,
+        null
+      ],
+      "source": [
+        595.3,
+        779.5
+      ],
+      "match": false
+    }
+  },
+  "coordinate_basis": {
+    "unit": "normalized_1000",
+    "origin": "top_left",
+    "protocol": "mineru-content-list-v1",
+    "transform": "coord / 1000 * source_page_size"
+  },
+  "projection_warnings": [],
+  "pages_produced": [
+    1,
+    2
+  ],
+  "sequence_count": 0,
+  "sequences": {},
+  "measurement_count": 0,
+  "measurements_sample": [],
+  "note": "remote parsed OUR submission; the local plain-HTTPS download path failed (CDN TLS EOF, same environment issue as the F-round reviewer); this zip was fetched with TLS verification ON via a temporary DoH-resolved connection and replayed through the product projection — not a constructed fixture"
+}

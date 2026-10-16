@@ -1,0 +1,84 @@
+{
+  "source_sha256": "ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+  "model_version": "vlm",
+  "comparison_id": "cmp-29d990bf7ec4",
+  "pages": [
+    30,
+    31,
+    32,
+    33
+  ],
+  "download_transport": "curl_doh_cn",
+  "source_zip_sha256": "05584407fba54a217ef1243dc073ba959f87d22b5246586779088a51f2f5cec1",
+  "sides": [
+    {
+      "engine": "docling",
+      "status": "done",
+      "sequence_count": 0,
+      "sequences": [],
+      "measurements_count": 0
+    },
+    {
+      "engine": "mineru_http",
+      "status": "done",
+      "sequence_count": 7,
+      "sequences": [
+        {
+          "seq_id_no": "2",
+          "molecule_type": "protein",
+          "declared_length": 16,
+          "observed_length": 16,
+          "normalized_sequence": "VIWSDGTTTYNSALKS"
+        },
+        {
+          "seq_id_no": "3",
+          "molecule_type": "protein",
+          "declared_length": 13,
+          "observed_length": 13,
+          "normalized_sequence": "DTHYRLYYYAMDY"
+        },
+        {
+          "seq_id_no": "4",
+          "molecule_type": "protein",
+          "declared_length": 16,
+          "observed_length": 16,
+          "normalized_sequence": "RSSQSLVHSNGDTYFH"
+        },
+        {
+          "seq_id_no": "5",
+          "molecule_type": "protein",
+          "declared_length": 7,
+          "observed_length": 7,
+          "normalized_sequence": "KVSNRFS"
+        },
+        {
+          "seq_id_no": "6",
+          "molecule_type": "protein",
+          "declared_length": 9,
+          "observed_length": 9,
+          "normalized_sequence": "SQTTHAPFT"
+        },
+        {
+          "seq_id_no": "8",
+          "molecule_type": "protein",
+          "declared_length": 121,
+          "observed_length": 121,
+          "normalized_sequence": "EVQLVESGGGLVQPGGSLRLSCAASGFSLDSYGVHWVRQAPGKGLEWVSVIWSDGTTTYNSALKSRFTISRDNSKNTLYLQMNSLRAEDTAVYYCARDTHYRLYYYAMDYWGQGTTVTVSS"
+        },
+        {
+          "seq_id_no": "9",
+          "molecule_type": "DNA",
+          "declared_length": 337,
+          "observed_length": 337,
+          "normalized_sequence": "GACATCGTGATGACCCAGAGCCCCCTGAGCCTGCCCGTGACCCCAGGCGAGCCCGCTAGCATCAGCTGCAGGTCCAGCCAGAGCCTGGTGCACAGCAACGGCGACACCTACTTCCACTGGTATCTGCAGAAGCCCGGCCAGTCCCCCCAGCTGCTGATCTACAAGGTGTCCAACAGGTTCAGCGGCGTGCCCGACAGGTTCTCCGGCAGCGGCTCCGGCACCGACTTCACCCTGAAGATCAGCAGGGTGGAGGCCGAGGACGTGGGCGTGTACTACTGCAGCCAGACCACCCACGCCCCCTTCACCTTCGGCCAGGGCACCAAGCTGGAGATCAAAC"
+        }
+      ],
+      "measurements_count": 0
+    }
+  ],
+  "evaluation": {
+    "gold": null,
+    "status": "not_evaluated",
+    "note": "no verified human gold exists; agreement is not accuracy"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "bio_pdf_visual_spotcheck_v1",
+  "source_pdf": "pdf/patent_EP3027649B1_TNFa_IL17_bispecific_antibodies.pdf",
+  "source_sha256": "ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+  "verification_method": "assistant visual inspection of complete PDF pages rendered with Poppler at 140 dpi",
+  "human_verified": false,
+  "scope": "SEQ ID 1-5 only; not an approved evaluation corpus and not a document-level accuracy estimate",
+  "entities_mentioned": ["#134", "#136"],
+  "entries": [
+    {"seq_id_no": 1, "declaration_page": 30, "residue_pages": [30], "declared_length": 5, "molecule_type": "protein", "sequence": "SYGVH", "role_in_source": "VH CDR 1", "full_job_sequence": "SYGVH", "docling_subset_sequence": "SYGVH"},
+    {"seq_id_no": 2, "declaration_page": 30, "residue_pages": [31], "declared_length": 16, "molecule_type": "protein", "sequence": "VIWSDGTTTYNSALKS", "role_in_source": "VH CDR 2", "full_job_sequence": "????????????????", "docling_subset_sequence": null},
+    {"seq_id_no": 3, "declaration_page": 31, "residue_pages": [31], "declared_length": 13, "molecule_type": "protein", "sequence": "DTHYRLYYYAMDY", "role_in_source": "VH CDR 3", "full_job_sequence": "ARRRRRRRRRRRRYR", "docling_subset_sequence": null},
+    {"seq_id_no": 4, "declaration_page": 31, "residue_pages": [31], "declared_length": 16, "molecule_type": "protein", "sequence": "RSSQSLVHSNGDTYFH", "role_in_source": "VL CDR 1", "full_job_sequence": "????????????????", "docling_subset_sequence": null},
+    {"seq_id_no": 5, "declaration_page": 31, "residue_pages": [31], "declared_length": 7, "molecule_type": "protein", "sequence": "KVSNRFS", "role_in_source": "VL CDR 2", "full_job_sequence": "KVSNRFS", "docling_subset_sequence": null}
+  ],
+  "published_jobs": {"full": "job-0fde96e378e8", "docling_subset": "job-a1e99f6fff97"}
+}

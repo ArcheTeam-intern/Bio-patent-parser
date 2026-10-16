@@ -1,0 +1,28 @@
+{
+  "comparison_id": "cmp-208bbf91bfc4",
+  "pages": [
+    8,
+    9
+  ],
+  "source_sha256": "d927d1c3d8f80fe396d1090190bac25e944ade61b74683fffcab382cc596da35",
+  "source_zip_sha256": "604f2a1e1426024abcadd1ca4321537054049a216c578921dedc97991017a1de",
+  "sides": [
+    {
+      "engine": "docling",
+      "status": "done",
+      "sequences": [],
+      "measurements_count": 0
+    },
+    {
+      "engine": "mineru_http",
+      "status": "done",
+      "sequences": [],
+      "measurements_count": 0
+    }
+  ],
+  "evaluation": {
+    "gold": null,
+    "status": "not_evaluated",
+    "note": "no verified human gold exists; agreement is not accuracy"
+  }
+}

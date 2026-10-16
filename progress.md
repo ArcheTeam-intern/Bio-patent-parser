@@ -372,3 +372,19 @@ exit "$__zcode_status"
   - F09 采用=真消费（候选验哈希复制进新任务、进有效配置、extract 消费并入解析流、块带候选身份、侧车独立通道；区域 OCR 故意下线仍恢复残基的端到端回归）；对外 baseline_id 统一（DB==manifest，三真实任务核验）；
   - F10 sequence-diagnosis/annotation-queue 工具 + draft v2 gold（82+10 条待人工）；固定版本重跑 EP 全文 job-0fde96e378e8（7/19/54/2，SEQ28 诊断=OCR 已进解析流仍无产出，非预算）、EP30-33 job-a1e99f6fff97、论文 job-550d519df867（255/255）；MinerU 无 token 如实未实测。
 - 验证：590 后端 + 33 vitest + build 全绿。报告 reports/2026-10-16_F01_F10_fixes.md（含仍未解决 6 项）。
+
+### 第五轮 G01-G11（E01-E10 独立复核驱动 + 真实 MinerU 云端验证，2026-10-17）
+- 按 reports/2026-10-17_F01_F10_independent_recheck.md 逐项修复并回归锁定：
+  - G01/S01 采用输入完整性：meta 哈希入有效配置，消费前校验（正文/meta/行文本一致/页码/源 SHA/coverage_policy），四类篡改提取前拒绝（含复核的"只改 meta 行文本"复现）；合法候选真 worker 恢复原序列；
+  - G02/S02 每数据库操作独立连接（事务线程内封闭），三回归（异线程操作/写锁串行/3 比较并发心跳）；
+  - G03/S03 受监督执行单元：spawn 子进程可终止 + 看门狗预算围栏 + 停续租 + 迟到零发布（真 Docling 子进程 kill 与正常路径两测试）；线程模式同看门狗；
+  - G04/S04 总体状态单条 UPDATE 派生（陈旧值可自愈、不可回退）；
+  - G05/S05 比较级 remote_state_dir；MockTransport 与**真实网络**双验证：retry 同 batch（25016beb / 98b15398）只重下载不重传；
+  - G06/P01+P06 数字保真指纹 + 计数标记专用容忍 + 声明冲突阻止 complete；margin 行号词法（lex_mappings clean→raw）；真实 EP content_list 回放 7→8 条含 SEQ1 SYGVH；
+  - G07/P02 生产条件链（表头/表题/表注+证据+conditions_status）；1h vs 2h 不再判实验相同；前端显示"条件未核对"；
+  - G08/P03 单位仅字形/别名归一、保留大小写、不换算数量级（µM≠µm、mM≠µM 报差异）；
+  - G09/P04+P05 0-1000→pt 协议转换（layout.json 与源 PDF 六页尺寸全匹配、EP 页 30 叠框核对）；bbox_verified 贯穿契约→块→证据（未验证=页级）→API/前端；
+  - G11/P07 td-only 轴推断+结构质量（RAGGED_ROWS_SEVERE/GRID_SIZE_SUSPECT 拒绝强提+可复解析 issue）；真实论文 TABLE3 不再判库存、失真不强行产活性；清洁矩阵 6 条药-菌-S/R/I 带证据；
+  - G10 真实制品回放 fixtures（tests/fixtures/real_cloud/）+ 报告 reports/2026-10-17_G01_G11_fixes.md。
+- 真实云端：EP 30-33 云 done、论文 8-9 云 done；本机普通 HTTPS 下载 TLS EOF（同复核环境问题），按复核者方法固定 IP+TLS 校验取回**我方批次** zip（SHA 记录）；回放 SEQ 2-5 与复核目视抽查逐字相符。
+- 验证：629 后端 + 33 vitest + build 全绿；服务已重启新代码单实例。

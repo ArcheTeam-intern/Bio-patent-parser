@@ -1,0 +1,38 @@
+{
+  "comparison_id": "cmp-0ae1aa48d944",
+  "status": "failed",
+  "sides": [
+    {
+      "side": "docling",
+      "status": "done",
+      "attempt": 1,
+      "error": "",
+      "sequences": 0,
+      "measurements": 0,
+      "pages_produced": [
+        8,
+        9
+      ],
+      "artifact_dir": "comparisons\\cmp-0ae1aa48d944\\docling\\attempt-1"
+    },
+    {
+      "side": "mineru_http",
+      "status": "failed",
+      "attempt": 1,
+      "error": "NetworkTransientError: [NETWORK_TRANSIENT] failed to download MinerU result zip for 98b15398-88be-49f8-be16-2bf9d75465bd: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1000)",
+      "sequences": 0,
+      "measurements": 0,
+      "pages_produced": null,
+      "artifact_dir": null
+    }
+  ],
+  "remote_identity": {
+    "batch_id": "98b15398-88be-49f8-be16-2bf9d75465bd",
+    "phase": "polling",
+    "fingerprint": "fa76926cb3d28e3ca1002e1f",
+    "pages": [
+      8,
+      9
+    ]
+  }
+}
