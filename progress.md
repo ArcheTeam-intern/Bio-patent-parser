@@ -388,3 +388,15 @@ exit "$__zcode_status"
   - G10 真实制品回放 fixtures（tests/fixtures/real_cloud/）+ 报告 reports/2026-10-17_G01_G11_fixes.md。
 - 真实云端：EP 30-33 云 done、论文 8-9 云 done；本机普通 HTTPS 下载 TLS EOF（同复核环境问题），按复核者方法固定 IP+TLS 校验取回**我方批次** zip（SHA 记录）；回放 SEQ 2-5 与复核目视抽查逐字相符。
 - 验证：629 后端 + 33 vitest + build 全绿；服务已重启新代码单实例。
+
+### 第六轮 H01-H09（G01-G11 独立复核驱动，2026-10-17）
+- H01/S01 进程树预算：taskkill /F /T 从存活中继进程终止全后代 + 存活子树台账 + atexit 服务退出清扫 + 失租即终止（aborted 零发布）；真实 docling 孙进程 kill 与独立进程退出清扫两回归。
+- H02/S02 采用页范围三层：API 前置 422（零写入）、create_job 校验、worker 结构化失败；adopt 响应改 scheduled+consumption_proof（消费由制品证明）。
+- H03/S03 上传断点恢复：allocate/upload 拆分，身份（含 slot）先落盘 phase=allocated，重试同 slot 幂等重 PUT；uploaded 后退出零 PUT 零 POST。
+- H04/P01 行宽按行（span 占位）+表头含值语义门；2×6 五活性复现恢复；5/6/10/20 列矩形零告警；真实畸形仍拒。
+- H05/P02 标签签名比较：含标签文本禁用 substring 覆盖，1/12、5/50、2/20、10/100 双向冲突保双方。
+- H06/P03 条件身份=纯语义（kind/value/unit/operator），证据保留仅回溯；两引擎同条件 paired=1。
+- H07/P04 prose/entities/inline 四个 BlockRef 站点传 bbox_verified；真实 prose 入口页级降级回归。
+- H08/P05 allowed_actions 服务端 capability（列表与详情同一构造器）；前端按钮能力驱动+禁用原因；真实 TABLE_STRUCTURE issue 浏览器点击 → 候选+审计+制品（截图存证）；能力=端点行为测试锁定。
+- H09 取证脚本索引修正（zip pdf_info page_idx=提交子集序号）+ scripts/regen_cloud_replay.py 重生成：六页尺寸全 match、zip SHA 校验、EP 序列 8。
+- 验证：658 后端 + 37 vitest + build 全绿；服务重启单实例（旧 G 轮 worker 已终止）。
