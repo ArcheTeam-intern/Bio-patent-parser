@@ -349,3 +349,8 @@ exit "$__zcode_status"
 - C08（阅读顺序/来源对照）与 C11（对比任务/API/页面）未实现——原因：前者是多栏识别+三视图的大改造、后者依赖 C10 云实测环境且任务编排独立；为避免半成品入仓，未动工（已在执行记录中说明）。
 - C12：无人工金标 → 全部评测口径标注 not_evaluated；四份报告已交付：执行记录/序列前后/审核展示前后/引擎对比（云实测未完成——无 MINERU_TOKEN）。
 - 论文刷新任务（job-8205561af0cc）真实验证：缺少单位原因 255->0；论文实体发现 #519/#520/W317A-变体。
+
+### 第二轮 D01-D10 修复（独立验收驱动，同日）
+- 按 reports/2026-10-16_C01_C12_independent_acceptance.md 逐项修复：D01 批量单事务；D02 OCR 位置融合+冲突记录+complete 降级；D03 页眉几何/角色证据过滤；D04 关系角色(encodes/has_domain)+双主体+target_status+抗生素 compound 实体链接；D05 baseline 身份/superseded/服务端 group_id；D06 MinerU 跨 attempt 身份+指纹+参数贯通；D07 页几何+C11 对比表/服务/API/页面（隔离复现全被回归锁定，542 后端+33 vitest）。
+- D08 原文三视图（列检测/原始块/来源对照，provenance 通道）；D09 问题真实页码+409 损坏不吞+动作审计（dismiss/note/reopen/有界复解析候选）。
+- D10 固定版本重跑抓出 np.float32 泄入 issue JSON 致 EP extract 崩溃（回归锁定）。真实取证：EP 全文 job-ae6fd4f1a553（82/82、complete 5/conflict 4 保守化、EPB1=0、关系 34）；EP30-33 job-c6d96cb945d2（encodes/has_domain/has_cdr、#136 不丢、target_status 如实）；论文 job-e2fd74f2fa7b（255/255 实体链接、未关联原因 255→0、缺单位 0）；对比 cmp-f2639efaec88（docling 真实完成、mineru 无 token 如实失败）。报告：reports/2026-10-16_D01_D10_fixes.md。
