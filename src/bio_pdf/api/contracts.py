@@ -215,6 +215,9 @@ class ReviewItemView(BaseModel):
 class ReviewsResponse(ApiEnvelope):
     reviews: list[ReviewItemView]
     total: int
+    #: C06 grouping: one entry per (job, page/table cluster) over the WHOLE
+    #: filtered queue — "N 条 / M 组" without pretending the page is the queue.
+    groups: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReviewDecisionRequest(BaseModel):

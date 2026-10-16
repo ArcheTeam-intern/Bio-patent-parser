@@ -170,6 +170,79 @@ class ReviewService:
             record=record,
         )
 
+    def apply_batch(
+        self,
+        *,
+        decisions: list[dict[str, Any]],
+        actor: str,
+    ) -> dict[str, Any]:
+        """Two-phase bulk decision (C06).
+
+        Phase 1 is read-only: every item must exist, still be open, and its
+        ``base_revision`` must equal the live revision. ANY mismatch returns
+        the full conflict list and applies NOTHING (plan §3.3: precheck all,
+        then submit; one conflict fails the whole batch). Phase 2 applies
+        the decisions through :meth:`apply_decision`, so each record version,
+        decision log entry and revision bump has the same guarantees as a
+        single decision.
+        """
+
+        if not decisions:
+            raise WorkflowError(
+                "batch decision requires at least one item",
+                details={"action": "batch"},
+            )
+
+        conflicts: list[dict[str, Any]] = []
+        for d in decisions:
+            review_id = str(d.get("review_id") or "")
+            base_revision = int(d.get("base_revision", -1))
+            try:
+                item = self._load_review_item(review_id)
+            except (WorkflowError, KeyError):
+                conflicts.append({"review_id": review_id, "reason": "not_found"})
+                continue
+            job_id = str(item["job_id"])
+            record_id = str(item["record_id"])
+            head = self.repository.get_record_head(job_id, record_id)
+            current_revision, _record, _kind = self._current_record(job_id, record_id, head)
+            if base_revision != current_revision:
+                conflicts.append(
+                    {
+                        "review_id": review_id,
+                        "reason": "revision_conflict",
+                        "base_revision": base_revision,
+                        "live_revision": current_revision,
+                    }
+                )
+                continue
+            if str(item["status"]) != "open":
+                conflicts.append({"review_id": review_id, "reason": "not_open"})
+
+        if conflicts:
+            return {"status": "conflict", "applied": [], "conflicts": conflicts}
+
+        applied: list[dict[str, Any]] = []
+        for d in decisions:
+            outcome = self.apply_decision(
+                review_id=str(d["review_id"]),
+                action=str(d["action"]),
+                base_revision=int(d["base_revision"]),
+                actor=actor,
+                reason=d.get("reason"),
+                patch=d.get("patch"),
+                evidence_ids=d.get("evidence_ids"),
+            )
+            applied.append(
+                {
+                    "review_id": outcome.review_id,
+                    "record_id": outcome.record_id,
+                    "new_revision": outcome.new_revision,
+                    "acceptance_state": outcome.acceptance_state,
+                }
+            )
+        return {"status": "applied", "applied": applied, "conflicts": []}
+
     # ---- internals --------------------------------------------------------
 
     def _load_review_item(self, review_id: str) -> Any:

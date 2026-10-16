@@ -319,3 +319,9 @@
 - 后端 `GET /figures?page_number=N`（保留无参全文兼容；新增 total 文档总数 + page_number 回显 + 空页说明"第 N 页没有图表（全文共 M 个）"）。
 - 前端图表 tab：默认"当前页"（URL scope 参数同步），显式切换"全文"；显示"第 N 页 X 图 · 全文共 M 图"双计数；页标题点击跳页；卡片=大图/下载（独立动作）。缓存键含 job+scope+页码。
 - 验收：job-62f430801980 → 全文 total 7；?page_number=2 → total 7 / 1 图；?page_number=8（无图页）→ 0 图 + 说明。504 后端（+1 API 测试）+ 28 vitest 全绿。服务已重启（API 单实例 48224）。
+
+### C06 完成：审核幂等、分组与批量决定
+- 幂等确认+回归：review_id 稳定派生（job|record|revision 哈希）；写入 ON CONFLICT 且不重开已决项——新增 2 个单测锁定（重复 upsert 不重复、已决项不被重开）。
+- 分组：/reviews 响应新增 groups（对整条筛选队列聚合，不是当前页）：由 record_id 推导 第N页·药敏矩阵/表格/正文、序列记录等。实测 job-62f430801980 → 250 条 = 2 组（第8页药敏矩阵 192 + 第9页药敏矩阵 58）。
+- 批量决定：POST /reviews/decisions/batch——两阶段（先全量预检记录存在/仍 open/base_revision==live，任一冲突返回 409 全部冲突清单且不落任何决定；通过后逐项经 apply_decision 提交，逐条保留版本/决定日志/修订号）。前端队列：分组行（组头=全选/折叠计数）、行勾选、"批量确认所选(N)"、冲突横幅。浏览器实测通过。
+- 508 后端（+4）+ 28 vitest 全绿。

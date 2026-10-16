@@ -93,3 +93,65 @@ def test_record_id_filter_finds_the_review_item_directly(completed_job) -> None:
     empty = c.get(f"/api/v1/reviews?job_id={job_id}&record_id=no-such-record").json()
     assert empty["total"] == 0
     assert empty["reviews"] == []
+
+
+def test_queue_reports_groups_over_the_whole_filtered_queue(completed_job) -> None:
+    """C06: counts come as records AND groups; groups cover the whole queue."""
+
+    c, job_id = completed_job
+    body = c.get(f"/api/v1/reviews?job_id={job_id}").json()
+    assert body["groups"], "filtered queue must carry group counts"
+    grouped = sum(g["count"] for g in body["groups"])
+    assert grouped == body["total"], "group counts must cover the whole queue"
+    # Every group has a stable key and a human label.
+    for g in body["groups"]:
+        assert g["group_key"].startswith(job_id)
+        assert g["label"]
+
+
+def test_batch_decision_precheck_fails_all_on_one_stale_revision(completed_job) -> None:
+    """C06: one stale revision fails the whole batch — nothing applied."""
+
+    c, job_id = completed_job
+    items = c.get(f"/api/v1/reviews?job_id={job_id}").json()["reviews"]
+    assert len(items) >= 2
+    first, second = items[0], items[1]
+
+    # Live revisions of both records.
+    def live_revision(review_id: str) -> int:
+        return c.get(f"/api/v1/reviews/{review_id}/decisions").status_code == 200 and _record_revision(c, job_id, review_id)
+
+    def _record_revision(c, job_id, review_id):  # pragma: no cover - helper alias
+        return 1
+
+    from bio_pdf.api.app import create_app  # noqa: F401  (context only)
+
+    # Fetch record revisions via the workbench records endpoint.
+    records = c.get(f"/api/v1/jobs/{job_id}/records").json()
+    rev_by_id = {r["sequence_id"]: r.get("_revision", 1) for r in records["sequences"]}
+    rev_by_id.update({r["measurement_id"]: r.get("_revision", 1) for r in records["measurements"]})
+
+    def base_for(item):
+        return int(rev_by_id.get(item["record_id"], 1))
+
+    # One good + one stale (base 999) — precheck must reject the batch.
+    res = c.post(
+        "/api/v1/reviews/decisions/batch",
+        json={
+            "actor": "tester",
+            "decisions": [
+                {"review_id": first["review_id"], "action": "confirm", "base_revision": base_for(first)},
+                {"review_id": second["review_id"], "action": "confirm", "base_revision": 999},
+            ],
+        },
+    )
+    assert res.status_code == 409, res.text
+    detail = res.json()["error"]
+    assert detail["code"] == "REVIEW_BATCH_CONFLICT"
+    conflicts = detail["details"]["conflicts"]
+    assert any(cf["review_id"] == second["review_id"] for cf in conflicts)
+
+    # Nothing was applied: both still open.
+    remaining = c.get(f"/api/v1/reviews?job_id={job_id}").json()
+    ids = {r["review_id"] for r in remaining["reviews"]}
+    assert first["review_id"] in ids and second["review_id"] in ids

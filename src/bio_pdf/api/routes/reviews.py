@@ -3,13 +3,20 @@
 Decisions run through :class:`ReviewService` — one atomic transaction with
 base_revision conflict protection. A stale revision returns 409 with both
 values; the client re-checks, never overwrites.
+
+C06: the queue response also carries a ``groups`` summary — one group per
+(job, page/table cluster) so 192 identical-looking matrix cells render as
+"第 8 页 · 药敏矩阵 (192 条)" instead of a wall of duplicate-looking rows; a
+bulk decision endpoint applies checked children with per-item revisions.
 """
 
 from __future__ import annotations
 
 import json
+import re
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from bio_pdf.api.contracts import ReviewDecisionRequest, ReviewDecisionResponse, ReviewItemView, ReviewsResponse
 from bio_pdf.api.dependencies import ServiceDep
@@ -27,6 +34,31 @@ def _record_kind(record_id: str) -> str:
     return "unknown"
 
 
+#: ``…:meas:<page>:grid:rNcM`` — a reconstructed susceptibility cell.
+_GRID_RE = re.compile(r":meas:(\d+):grid:")
+#: ``…:meas:<page>:table:<id>:…`` or ``:meas:<page>:prose:…``.
+_PAGE_RE = re.compile(r":meas:(\d+):([a-z_]+)")
+
+
+def _group_for(record_id: str) -> tuple[str, str, int | None]:
+    """(group_key_suffix, label, page) — derived from the record id only."""
+
+    grid = _GRID_RE.search(record_id)
+    if grid:
+        page = int(grid.group(1))
+        return f"p{page}:matrix", f"第 {page} 页 · 药敏矩阵", page
+    page_match = _PAGE_RE.search(record_id)
+    if page_match:
+        page = int(page_match.group(1))
+        source = page_match.group(2)
+        if source == "table":
+            return f"p{page}:table", f"第 {page} 页 · 表格", page
+        return f"p{page}:prose", f"第 {page} 页 · 正文", page
+    if ":seq:" in record_id or ":inline:" in record_id:
+        return "sequences", "序列记录", None
+    return "other", "其他记录", None
+
+
 @router.get("", response_model=ReviewsResponse)
 def list_reviews(
     service: ServiceDep,
@@ -42,7 +74,8 @@ def list_reviews(
     susceptibility matrix is one review item); a truncated page must never
     masquerade as the whole queue. ``record_id`` narrows to the review item
     of one record — the workbench panel relies on it so a record beyond the
-    first page is still found.
+    first page is still found. ``groups`` counts the WHOLE filtered queue
+    (not just the page) so the UI can say "N 条 / M 组".
     """
 
     limit = max(1, min(limit, 1000))
@@ -56,11 +89,12 @@ def list_reviews(
         clauses.append("record_id = ?")
         params.append(record_id)
     where = " AND ".join(clauses)
-    total_row = service.repository.connection.execute(
+    conn = service.repository.connection
+    total_row = conn.execute(
         f"SELECT COUNT(*) AS n FROM review_items WHERE {where}", params
     ).fetchone()
     total = int(total_row["n"]) if total_row is not None else 0
-    rows = service.repository.connection.execute(
+    rows = conn.execute(
         f"SELECT * FROM review_items WHERE {where} ORDER BY rowid DESC LIMIT {limit} OFFSET {offset}",
         params,
     ).fetchall()
@@ -77,7 +111,70 @@ def list_reviews(
         )
         for row in rows
     ]
-    return ReviewsResponse(reviews=items, total=total)
+
+    # Group counts over the WHOLE filtered queue (a page-only count would
+    # understate a 192-item matrix group).
+    group_rows = conn.execute(
+        f"SELECT job_id, record_id FROM review_items WHERE {where}", params
+    ).fetchall()
+    groups: dict[str, dict] = {}
+    for row in group_rows:
+        suffix, label, page = _group_for(str(row["record_id"]))
+        key = f"{row['job_id']}|{suffix}"
+        entry = groups.setdefault(
+            key,
+            {"group_key": key, "job_id": row["job_id"], "label": label, "page": page, "count": 0},
+        )
+        entry["count"] += 1
+    return ReviewsResponse(
+        reviews=items,
+        total=total,
+        groups=sorted(groups.values(), key=lambda g: (g["job_id"], g["page"] or 0, g["label"])),
+    )
+
+
+class BatchDecisionItem(BaseModel):
+    review_id: str
+    action: str
+    base_revision: int
+    reason: str | None = None
+    patch: dict = Field(default_factory=dict)
+
+
+class BatchDecisionRequest(BaseModel):
+    actor: str = "local-operator"
+    decisions: list[BatchDecisionItem] = Field(min_length=1)
+
+
+@router.post("/decisions/batch")
+def submit_batch_decision(service: ServiceDep, request: BatchDecisionRequest) -> dict:
+    """C06 bulk decision: precheck every item, then apply all or none.
+
+    Returns 200 with ``status="applied"`` and per-item results, or 409 with
+    ``status="conflict"`` and the full conflict list (nothing applied).
+    """
+
+    review_service = ReviewService(service.repository, service.paths.artifact_root)
+    try:
+        result = review_service.apply_batch(
+            decisions=[d.model_dump() for d in request.decisions],
+            actor=request.actor,
+        )
+    except WorkflowError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": exc.message, "details": exc.details},
+        ) from exc
+    if result["status"] == "conflict":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "REVIEW_BATCH_CONFLICT",
+                "message": f"{len(result['conflicts'])} item(s) failed precheck; nothing applied",
+                "details": {"conflicts": result["conflicts"]},
+            },
+        )
+    return {"api_version": "v1", **result}
 
 
 @router.get("/{review_id}/decisions")

@@ -359,7 +359,12 @@ export function listFigures(
 export function getReviews(
   jobId?: string,
   options?: { recordId?: string; limit?: number; offset?: number },
-): Promise<{ reviews: ReviewItem[]; total: number }> {
+): Promise<{
+  reviews: ReviewItem[];
+  total: number;
+  /** C06 分组：整条筛选队列按 (任务, 页/表簇) 聚合的条数。 */
+  groups?: { group_key: string; job_id: string; label: string; page: number | null; count: number }[];
+}> {
   const params = new URLSearchParams();
   if (jobId) params.set("job_id", jobId);
   if (options?.recordId) params.set("record_id", options.recordId);
@@ -367,6 +372,22 @@ export function getReviews(
   if (options?.offset !== undefined) params.set("offset", String(options.offset));
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return request(`/reviews${suffix}`);
+}
+
+/** C06 批量决定：全部预检查通过才提交；任一冲突整体失败（409）。 */
+export function submitBatchDecisions(
+  decisions: { review_id: string; action: "confirm" | "correct" | "reject"; base_revision: number }[],
+  actor = "local-operator",
+): Promise<{
+  status: string;
+  applied: { review_id: string; record_id: string; new_revision: number; acceptance_state: string }[];
+  conflicts: unknown[];
+}> {
+  return request(`/reviews/decisions/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor, decisions }),
+  });
 }
 
 export function documentSourceUrl(documentId: string): string {

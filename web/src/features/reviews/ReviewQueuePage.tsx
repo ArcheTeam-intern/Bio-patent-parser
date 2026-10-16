@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Fragment, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { getRecords, getReviews, listJobs } from "../../api/client";
+import { getRecords, getReviews, listJobs, submitBatchDecisions } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
 
 /**
@@ -69,6 +69,7 @@ export function ReviewQueuePage() {
   const jobFilter = params.get("job_id") ?? "";
   const [limit, setLimit] = useState(PAGE_SIZE);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const reviews = useQuery({
     queryKey: ["reviews", "queue", jobFilter, limit],
@@ -105,6 +106,72 @@ export function ReviewQueuePage() {
     staleTime: 60_000,
   });
 
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const batchMutation = useMutation({
+    mutationFn: () =>
+      submitBatchDecisions(
+        items
+          .filter((r) => selected.has(r.review_id))
+          .map((r) => ({
+            review_id: r.review_id,
+            action: "confirm" as const,
+            base_revision: r.record_revision,
+          })),
+      ),
+    onSuccess: (result) => {
+      setSelected(new Set());
+      setBatchError(null);
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      setBatchNotice(`批量确认完成：${result.applied.length} 条`);
+    },
+    onError: (error) => {
+      setBatchError(String((error as Error)?.message ?? error));
+    },
+  });
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
+
+  // 分组（C06）：按客户端同一规则聚合可见行，与后端 group 计数一致。
+  const groupOf = (recordId: string): { key: string; label: string } => {
+    const grid = recordId.match(/:meas:(\d+):grid:/);
+    if (grid) return { key: `p${grid[1]}:matrix`, label: `第 ${grid[1]} 页 · 药敏矩阵` };
+    const pm = recordId.match(/:meas:(\d+):([a-z_]+)/);
+    if (pm) {
+      const src = pm[2] === "table" ? "表格" : "正文";
+      return { key: `p${pm[1]}:${pm[2]}`, label: `第 ${pm[1]} 页 · ${src}` };
+    }
+    if (recordId.includes(":seq:") || recordId.includes(":inline:"))
+      return { key: "sequences", label: "序列记录" };
+    return { key: "other", label: "其他记录" };
+  };
+  const visibleGroups = new Map<string, typeof items>();
+  for (const r of items) {
+    const g = groupOf(r.record_id);
+    const arr = visibleGroups.get(g.label) ?? [];
+    arr.push(r);
+    visibleGroups.set(g.label, arr);
+  }
+
+  const toggleOne = (reviewId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(reviewId)) next.delete(reviewId);
+      else next.add(reviewId);
+      return next;
+    });
+  };
+  const toggleGroup = (rows: typeof items) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allIn = rows.every((r) => next.has(r.review_id));
+      for (const r of rows) {
+        if (allIn) next.delete(r.review_id);
+        else next.add(r.review_id);
+      }
+      return next;
+    });
+  };
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
@@ -120,6 +187,7 @@ export function ReviewQueuePage() {
               else next.delete("job_id");
               setParams(next, { replace: true });
               setLimit(PAGE_SIZE);
+              setSelected(new Set());
             }}
           >
             <option value="">全部任务</option>
@@ -130,10 +198,28 @@ export function ReviewQueuePage() {
             ))}
           </select>
         </label>
-        <span className="wb-count">共 {total} 条待审核</span>
+        <span className="wb-count">
+          共 {total} 条 · {reviews.data?.groups?.length ?? 0} 组待审核
+        </span>
+        {selected.size > 0 && (
+          <button
+            className="primary"
+            disabled={batchMutation.isPending}
+            title="对勾选的子项批量确认；任一条版本冲突则整批不提交"
+            onClick={() => batchMutation.mutate()}
+          >
+            {batchMutation.isPending ? "提交中…" : `批量确认所选（${selected.size}）`}
+          </button>
+        )}
       </div>
+      {batchNotice && <div className="banner info">{batchNotice}（仅确认已勾选且版本未冲突的项）</div>}
+      {batchError && (
+        <div className="banner error">
+          批量确认未提交：{batchError}（存在版本冲突时整批不生效——请刷新后重试）
+        </div>
+      )}
       <div className="banner info">
-        队列只包含需要人工处理的记录（序列与活性）。点击一行跳到工作台对应记录，在右侧面板确认 / 修正 / 拒绝。
+        队列只包含需要人工处理的记录（序列与活性）。点击一行跳到工作台对应记录，在右侧面板确认 / 修正 / 拒绝；勾选多行可批量确认。
       </div>
       {items.length === 0 ? (
         <div className="panel">
@@ -147,6 +233,7 @@ export function ReviewQueuePage() {
             <table className="data">
               <thead>
                 <tr>
+                  <th style={{ width: 30 }}></th>
                   <th>记录</th>
                   <th>原因</th>
                   <th>记录类型</th>
@@ -155,33 +242,61 @@ export function ReviewQueuePage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((r) => (
-                  <tr
-                    key={r.review_id}
-                    className="clickable"
-                    onClick={() => navigate(`/jobs/${r.job_id}/workbench?record=${encodeURIComponent(r.record_id)}`)}
-                  >
-                    <td>
-                      {summaries.data?.[r.record_id] ? (
-                        <span>{summaries.data[r.record_id]}</span>
-                      ) : (
-                        <span className="mono dim">{r.record_id.slice(0, 20)}…</span>
-                      )}
-                    </td>
-                    <td>
-                      {r.reason_codes.map((code, i) => (
-                        <span key={i} className="status review" style={{ marginRight: 4 }}>
-                          {REASON_LABELS[code] ?? code}
-                        </span>
+                {[...visibleGroups.entries()].map(([label, rows]) => {
+                  const allSelected = rows.every((r) => selected.has(r.review_id));
+                  return (
+                    <Fragment key={`group-${label}`}>
+                      <tr className="group-row">
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`选择分组 ${label}`}
+                            checked={allSelected}
+                            onChange={() => toggleGroup(rows)}
+                          />
+                        </td>
+                        <td colSpan={5} style={{ fontWeight: 600 }}>
+                          {label}（{rows.length} 条）
+                        </td>
+                      </tr>
+                      {rows.map((r) => (
+                        <tr
+                          key={r.review_id}
+                          className="clickable"
+                          onClick={() => navigate(`/jobs/${r.job_id}/workbench?record=${encodeURIComponent(r.record_id)}`)}
+                        >
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={`选择 ${r.review_id}`}
+                              checked={selected.has(r.review_id)}
+                              onChange={() => toggleOne(r.review_id)}
+                            />
+                          </td>
+                          <td>
+                            {summaries.data?.[r.record_id] ? (
+                              <span>{summaries.data[r.record_id]}</span>
+                            ) : (
+                              <span className="mono dim">{r.record_id.slice(0, 20)}…</span>
+                            )}
+                          </td>
+                          <td>
+                            {r.reason_codes.map((code, i) => (
+                              <span key={i} className="status review" style={{ marginRight: 4 }}>
+                                {REASON_LABELS[code] ?? code}
+                              </span>
+                            ))}
+                          </td>
+                          <td>{r.record_kind === "sequence" ? "序列" : r.record_kind === "measurement" ? "活性" : "未知"}</td>
+                          <td className="mono dim">{r.job_id}</td>
+                          <td>
+                            <StatusLabel value={r.status === "open" ? "needs_review" : r.status} kind="record" />
+                          </td>
+                        </tr>
                       ))}
-                    </td>
-                    <td>{r.record_kind === "sequence" ? "序列" : r.record_kind === "measurement" ? "活性" : "未知"}</td>
-                    <td className="mono dim">{r.job_id}</td>
-                    <td>
-                      <StatusLabel value={r.status === "open" ? "needs_review" : r.status} kind="record" />
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
