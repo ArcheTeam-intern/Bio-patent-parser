@@ -9,12 +9,12 @@ import type { EntityData, RelationData, SequenceRecordData } from "../../api/cli
 const PREDICATE_LABELS: Record<string, string> = {
   has_sequence: "包含序列",
   has_cdr: "包含 CDR",
+  has_domain: "包含结构域",
+  encodes: "编码序列",
   heavy_chain: "重链",
   light_chain: "轻链",
   assayed_entity: "被测对象",
-  is_variant_of: "变体",
-  composed_of: "组成",
-  references_sequence: "引用序列",
+  variant_of: "变体",
 };
 
 const STATUS_LABELS: Record<RelationData["link_status"], string> = {
@@ -24,6 +24,16 @@ const STATUS_LABELS: Record<RelationData["link_status"], string> = {
   outside_scope: "范围外",
   not_applicable: "不适用",
   no_evidence: "未找到证据",
+};
+
+/** D04：目标记录的恢复状态——linked 不代表完整或已人工确认。 */
+const TARGET_STATUS_LABELS: Record<string, string> = {
+  complete: "完整",
+  partial: "部分恢复",
+  conflict: "冲突",
+  missing: "未恢复",
+  outside_scope: "范围外",
+  unknown: "未知",
 };
 
 export function RelationPanel({
@@ -81,6 +91,15 @@ export function RelationPanel({
                     >
                       {STATUS_LABELS[r.link_status] ?? r.link_status}
                     </span>
+                    {r.target_status && r.target_status !== "unknown" && (
+                      <span
+                        className={`status ${r.target_status === "complete" ? "muted" : "review"}`}
+                        style={{ marginLeft: 4 }}
+                        title="目标序列的恢复状态（linked 不代表完整）"
+                      >
+                        {TARGET_STATUS_LABELS[r.target_status] ?? r.target_status}
+                      </span>
+                    )}
                   </td>
                   <td>
                     {r.evidence_ids.slice(0, 2).map((ev) => (

@@ -45,6 +45,14 @@ _HASH_NUMBER_RE = re.compile(r"#(\d{1,4})\b")
 #: Variant notation ``W317A`` — wildtype residue, position, replacement.
 _VARIANT_RE = re.compile(r"\b([ACDEFGHIKLMNPQRSTVWY])(\d{1,4})([ACDEFGHIKLMNPQRSTVWY])\b")
 
+#: Named constructs with a residue range, e.g. ``TAT-RasGAP317-326`` /
+#: ``TAT-Ras-GAP317−326`` (title hyphen and body minus signs both occur).
+#: Requires a capital start AND at least one lowercase letter in the token
+#: so all-caps gene names with numbers (IL-17, COVID-19) are not swept in.
+_CONSTRUCT_RANGE_RE = re.compile(
+    r"\b[A-Z][A-Za-z0-9]*(?:[-\u2013][A-Za-z0-9]+)*[\u2212\u2013-]\d{1,4}\b"
+)
+
 #: Capitalised words that follow a kind noun at a sentence/line boundary
 #: (line-fused text) — they are not identifiers.
 _STOPWORDS = {
@@ -192,6 +200,66 @@ def extract_entities(
                 continue
             remember(match.group(0), "variant", block, match.start(), match.end())
 
+        for match in _CONSTRUCT_RANGE_RE.finditer(text):
+            token = match.group(0)
+            if not any(ch.islower() for ch in token):
+                continue  # all-caps name + number (IL-17 …) is not this shape
+            remember(token, "construct", block, match.start(), match.end())
+
+    return sorted(by_name.values(), key=lambda e: e.name_raw)
+
+
+def entities_from_measurement_labels(
+    measurements: list[Measurement],
+    document_id: str,
+    *,
+    evidence_index: Any | None = None,
+    parser_run_id: str = "native",
+) -> list[Entity]:
+    """Non-sequence entities from explicit measurement labels (D04).
+
+    Assay tables name their tested objects as row labels (antibiotics such
+    as Vancomycin in a susceptibility matrix); those labels are explicit
+    surface forms and get real entities — registering them is what removes
+    the wall of "no linked entity" review reasons, WITHOUT demanding a
+    sequence link: antibiotics have activity results and no sequence by
+    design (plan §2.4). Evidence reuses the measurement's own entity_raw
+    span when registered, else an honest unlocated span.
+    """
+
+    by_name: dict[str, Entity] = {}
+    for measurement in measurements:
+        entity_raw = (measurement.entity_raw or "").strip()
+        if not entity_raw:
+            continue
+        if entity_raw in by_name:
+            continue
+        spanned = (measurement.field_evidence or {}).get("entity_raw") or []
+        if spanned:
+            evidence_ids = [spanned[0]]
+        elif evidence_index is not None:
+            from bio_pdf.extract.evidence import span_unlocated
+
+            span = span_unlocated(
+                document_id=document_id,
+                parser_run_id=parser_run_id,
+                raw_text=entity_raw,
+                source_locator=f"measurement-label:{measurement.measurement_id}",
+                source_parser="native",
+            )
+            evidence_index.add(span)
+            evidence_ids = [span.evidence_id]
+        else:
+            evidence_ids = []
+        by_name[entity_raw] = Entity(
+            entity_id=_entity_id(document_id, entity_raw),
+            document_id=document_id,
+            name_raw=entity_raw,
+            # Assay-row labels here are drug/compound names; the kind stays
+            # "compound" so the UI never implies these are sequences.
+            kind="compound",
+            evidence_ids=evidence_ids,
+        )
     return sorted(by_name.values(), key=lambda e: e.name_raw)
 
 
@@ -203,17 +271,21 @@ def entities_from_sequence_notes(
     evidence_index: Any | None = None,
     parser_run_id: str = "native",
 ) -> tuple[list[Entity], list[dict[str, Any]]]:
-    """Entities + note-derived links from ST.25 feature notes (C04).
+    """Entities + note-derived links from ST.25 feature notes (C04/D04).
 
     Notes like ``Synthetic sequence: #134 and 136 VH CDR 2 amino acid
-    sequence`` name a construct (#134/#136), a chain (VH/VL) and a CDR
-    number. Each becomes an entity linked to the declaring sequence with a
-    predicate (``has_cdr`` / ``heavy_chain`` / ``light_chain``); the note's
-    span is located in the real blocks and registered as evidence.
+    sequence`` name constructs (#134 AND #136 — each gets its own evidence
+    link, never only the first), a chain (VH/VL) and a CDR number. Role
+    separation (D04): the predicate follows WHAT THE TARGET RECORD IS —
+    a DNA ''nucleotide sequence'' of a domain is ``encodes`` (coding
+    sequence), a protein ''domain amino acid sequence'' is ``has_domain``,
+    a CDR is ``has_cdr``, and only an explicitly named full chain gets
+    ``heavy_chain``/``light_chain``. DNA is never presented as a chain
+    itself.
 
     Returns ``(entities, note_links)`` where each link is
     ``{entity_name, entity_kind, seq_no, predicate, chain, cdr, note,
-    evidence_id}``.
+    evidence_id}`` — ONE link entry per named subject.
     """
 
     by_name: dict[str, Entity] = {}
@@ -253,8 +325,22 @@ def entities_from_sequence_notes(
             elif re.search(r"\bVL\b", note_clean):
                 chain = "VL"
             cdr_match = re.search(r"\bCDR\s*(\d)?\b", note_clean)
-            if cdr_match:
+
+            # D04 role separation: predicate follows the TARGET record's
+            # molecule type and what the note actually names.
+            target_type = str(getattr(sequence, "molecule_type", "unknown"))
+            is_domain = bool(re.search(r"\bdomain\b", note_clean, re.IGNORECASE))
+            is_nucleotide = bool(
+                re.search(r"nucleotide|DNA|RNA", note_clean, re.IGNORECASE)
+            )
+            if target_type in ("DNA", "RNA") or is_nucleotide:
+                # A coding sequence ENCODES the protein/domain — it is not
+                # itself a heavy/light chain.
+                predicate = "encodes"
+            elif cdr_match:
                 predicate = "has_cdr"
+            elif is_domain:
+                predicate = "has_domain"
             elif chain == "VH":
                 predicate = "heavy_chain"
             elif chain == "VL":
@@ -306,24 +392,28 @@ def entities_from_sequence_notes(
                 elif evidence_id not in by_name[name].evidence_ids:
                     by_name[name].evidence_ids.append(evidence_id)
 
-            if chain and names:
-                # Chain membership on the named construct; an entity's chain
-                # map is what the relation linker consumes.
-                primary = by_name[names[0]]
-                primary.chain_map.setdefault(chain, str(seq_no))
+            if chain:
+                # Chain membership on EVERY named construct ("#134 and 136
+                # VH CDR") — the chain map is what the relation linker
+                # consumes, so dropping #136 here would lose its relation.
+                for name in names:
+                    by_name[name].chain_map.setdefault(chain, str(seq_no))
 
-            links.append(
-                {
-                    "entity_name": names[0],
-                    "entity_kind": by_name[names[0]].kind,
-                    "seq_no": str(seq_no),
-                    "predicate": predicate,
-                    "chain": chain,
-                    "cdr": cdr_match.group(1) if cdr_match else None,
-                    "note": note_clean,
-                    "evidence_id": evidence_id,
-                }
-            )
+            # D04: ONE link entry per named subject — "#134 and 136" both
+            # keep their explicit evidence relation.
+            for name in names:
+                links.append(
+                    {
+                        "entity_name": name,
+                        "entity_kind": by_name[name].kind,
+                        "seq_no": str(seq_no),
+                        "predicate": predicate,
+                        "chain": chain,
+                        "cdr": cdr_match.group(1) if cdr_match else None,
+                        "note": note_clean,
+                        "evidence_id": evidence_id,
+                    }
+                )
 
     return sorted(by_name.values(), key=lambda e: e.name_raw), links
 

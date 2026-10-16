@@ -128,6 +128,11 @@ def link_explicit_relations(
                 evidence_ids=[evidence_id],
                 validation_state="unchecked",
                 link_status="linked",
+                # D04: how well the TARGET was recovered, from the C02
+                # inventory — "linked" never implies completeness.
+                target_status=str(
+                    (inventory_status_by_seq or {}).get(seq_no, "unknown")
+                ),  # type: ignore[arg-type]
             )
         )
 
@@ -168,6 +173,9 @@ def link_explicit_relations(
                     evidence_ids=[f"{entity.document_id}:rel:{entity.entity_id}:{chain}"],
                     validation_state="unchecked",
                     link_status="linked",
+                    target_status=str(
+                        (inventory_status_by_seq or {}).get(seq_no, "unknown")
+                    ),  # type: ignore[arg-type]
                 )
             )
 

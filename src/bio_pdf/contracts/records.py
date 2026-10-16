@@ -60,6 +60,8 @@ RelationPredicate = Literal[
     "heavy_chain",
     "light_chain",
     "has_cdr",
+    "has_domain",
+    "encodes",
     "variant_of",
     "assayed_entity",
 ]
@@ -193,6 +195,11 @@ class SequenceRelation(_StrictModel):
     ``missing_sequence`` (target sequence not recovered), ``outside_scope``
     (target outside the requested page window), ``not_applicable`` (no
     sequence relation applies) or ``no_evidence`` (nothing supports it yet).
+
+    ``target_status`` (D04) is the TARGET RECORD's recovery state at link
+    time (from the C02 inventory) — a link can be real while the sequence
+    behind it is only partially recovered; ``linked`` never implies
+    completeness or human verification.
     """
 
     relation_id: NonEmptyStr
@@ -210,6 +217,14 @@ class SequenceRelation(_StrictModel):
         "not_applicable",
         "no_evidence",
     ] = "linked"
+    target_status: Literal[
+        "complete",
+        "partial",
+        "conflict",
+        "missing",
+        "outside_scope",
+        "unknown",
+    ] = "unknown"
 
 
 class Entity(_StrictModel):

@@ -147,6 +147,8 @@ export interface RelationData {
     | "outside_scope"
     | "not_applicable"
     | "no_evidence";
+  /** D04：目标记录的恢复状态（complete/partial/conflict/missing/…）。 */
+  target_status?: string;
 }
 
 /** C02 序列清点表：每个声明 SEQ ID 一行，状态固定词表，不冒充完整性。 */

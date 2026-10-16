@@ -41,6 +41,7 @@ from bio_pdf.errors import PageCoverageMismatchError, WorkflowError
 from bio_pdf.extract.activities.prose import extract_prose_measurements
 from bio_pdf.extract.activities.tables import extract_table_measurements
 from bio_pdf.extract.entities import (
+    entities_from_measurement_labels,
     entities_from_sequence_notes,
     extract_entities,
     link_measurements_to_entities,
@@ -962,7 +963,7 @@ def _table_rows(document: NormalizedDocument) -> list[tuple[Any, dict[str, str]]
 
 class ExtractStage(_FileStage):
     name = "extract"
-    implementation = "v6-entity-evidence"
+    implementation = "v7-d04-roles"
 
     def run(self, context: StageContext) -> StageOutcome:
         targets = set(
@@ -1361,17 +1362,27 @@ class ExtractStage(_FileStage):
             evidence_index=evidence,
             parser_run_id=parser_run_id,
         )
+        # D04: explicit assay-table labels (antibiotics, compounds) are real
+        # non-sequence entities — they get activity results and no sequence
+        # by design; registering them is what clears "no linked entity".
+        label_entities = entities_from_measurement_labels(
+            measurements,
+            doc_id,
+            evidence_index=evidence,
+            parser_run_id=parser_run_id,
+        )
         by_entity_id = {e.entity_id: e for e in entities}
-        for note_entity in note_entities:
-            existing = by_entity_id.get(note_entity.entity_id)
-            if existing is None:
-                by_entity_id[note_entity.entity_id] = note_entity
-            else:
-                for eid in note_entity.evidence_ids:
-                    if eid not in existing.evidence_ids:
-                        existing.evidence_ids.append(eid)
-                for chain, seq_no in note_entity.chain_map.items():
-                    existing.chain_map.setdefault(chain, seq_no)
+        for extra_entities in (note_entities, label_entities):
+            for extra in extra_entities:
+                existing = by_entity_id.get(extra.entity_id)
+                if existing is None:
+                    by_entity_id[extra.entity_id] = extra
+                else:
+                    for eid in extra.evidence_ids:
+                        if eid not in existing.evidence_ids:
+                            existing.evidence_ids.append(eid)
+                    for chain, seq_no in extra.chain_map.items():
+                        existing.chain_map.setdefault(chain, seq_no)
         entities = sorted(by_entity_id.values(), key=lambda e: e.name_raw)
 
         measurements, entity_reasons = link_measurements_to_entities(measurements, entities)
