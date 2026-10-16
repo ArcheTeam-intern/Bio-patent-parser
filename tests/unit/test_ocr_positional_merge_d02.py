@@ -126,7 +126,8 @@ def test_conflict_payload_is_json_serializable() -> None:
             "source_artifact_id": None,
         }
     ]
-    ocr = {32: [(float(np.float32(101.0)), float(np.float32(111.0)), "AGGT")]}
+    # region_ocr yields numpy-scaled floats: reproduce the real type here.
+    ocr = {32: [(np.float32(101.0), np.float32(111.0), "AGGT")]}
     _merged, conflicts = _merge_ocr_page_lines(blocks, ocr)
     assert conflicts
     # The exact failure mode: json.dumps of a numpy scalar raises TypeError.
