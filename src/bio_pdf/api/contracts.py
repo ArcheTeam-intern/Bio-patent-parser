@@ -154,6 +154,10 @@ class RecordsResponse(ApiEnvelope):
     #: Tables per page for the tables-tab overview; empty when the job has
     #: no normalized output yet.
     table_pages: dict[int, int] = Field(default_factory=dict)
+    #: C02 declaration-level sequence inventory (``{"entries", "summary"}``).
+    #: None for jobs extracted before the inventory existed — the UI shows
+    #: "未评估" rather than inventing numbers.
+    sequence_inventory: dict[str, Any] | None = None
 
 
 class PageResponse(ApiEnvelope):

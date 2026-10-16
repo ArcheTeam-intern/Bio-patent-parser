@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -101,7 +102,25 @@ def get_records(
             if record_id in visible_ids
         },
         table_pages=_table_pages(service, job_id),
+        sequence_inventory=_sequence_inventory(service, job_id),
     )
+
+
+def _sequence_inventory(service, job_id: str) -> dict[str, Any] | None:
+    """Declaration-level sequence inventory from the extract artifact (C02).
+
+    Missing/unreadable/older extract output degrades to None — the response
+    stays valid and the UI reports "未评估" instead of fabricating coverage.
+    """
+
+    from bio_pdf.errors import WorkflowError
+
+    try:
+        data = ResultReader(service.paths.artifact_root).read_json(job_id, "extract")
+    except WorkflowError:
+        return None
+    value = data.get("sequence_inventory")
+    return value if isinstance(value, dict) else None
 
 
 def _table_pages(service, job_id: str) -> dict[int, int]:

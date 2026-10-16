@@ -8,6 +8,7 @@ import { StageStrip, STAGE_GROUP_ORDER, stageGroup } from "./StageStrip";
 import { PageDistribution } from "./PageDistribution";
 import { PdfViewer } from "../pdf/PdfViewer";
 import { SequenceDetail } from "../sequences/SequenceList";
+import { SequenceInventoryPanel } from "../sequences/SequenceInventoryPanel";
 import { MeasurementDetail, CheckList } from "../activities/ActivityList";
 import { ReviewPanel } from "../reviews/ReviewPanel";
 import { ExportDialog } from "./ExportDialog";
@@ -319,13 +320,27 @@ export function WorkbenchPage() {
               </div>
             )}
             {tab === "sequences" && records.data && (
-              <SequenceTab
-                records={visibleSequences}
-                emptyMessage={scope === "page" ? `第 ${currentPage} 页没有序列候选。可切换“全部文档”查看其他页。` : "全文尚未提取到序列候选。"}
-                selectedId={recordId}
-                onSelect={(s: SequenceRecordData) => selectRecord(s.sequence_id)}
-                loading={records.isLoading}
-              />
+              <>
+                {records.data.sequence_inventory ? (
+                  <div style={{ padding: "4px 14px 0" }}>
+                    <SequenceInventoryPanel
+                      inventory={records.data.sequence_inventory}
+                      onJump={changePage}
+                    />
+                  </div>
+                ) : (
+                  <div className="wb-hint" style={{ padding: "4px 14px" }}>
+                    序列清单：该任务的结果早于清点功能（未评估），重新解析后可见每个声明编号的恢复状态。
+                  </div>
+                )}
+                <SequenceTab
+                  records={visibleSequences}
+                  emptyMessage={scope === "page" ? `第 ${currentPage} 页没有序列候选。可切换“全部文档”查看其他页。` : "全文尚未提取到序列候选。"}
+                  selectedId={recordId}
+                  onSelect={(s: SequenceRecordData) => selectRecord(s.sequence_id)}
+                  loading={records.isLoading}
+                />
+              </>
             )}
             {tab === "activities" && records.data && (
               <ActivityTab

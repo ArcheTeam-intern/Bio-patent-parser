@@ -44,7 +44,6 @@ from bio_pdf.extract.entities import extract_entities, link_measurements_to_enti
 from bio_pdf.extract.relations import link_explicit_relations
 from bio_pdf.extract.sequences.inline import extract_inline_sequences
 from bio_pdf.extract.sequences.references import extract_sequence_references
-from bio_pdf.extract.sequences.st25 import parse_st25_blocks
 from bio_pdf.ingest.inspector import inspect_pdf
 from bio_pdf.pdf.quality import classify_page, inspect_page_signals
 from bio_pdf.storage.artifacts import (
@@ -808,7 +807,7 @@ def _table_rows(document: NormalizedDocument) -> list[tuple[Any, dict[str, str]]
 
 class ExtractStage(_FileStage):
     name = "extract"
-    implementation = "v3"
+    implementation = "v4-inventory"
 
     def run(self, context: StageContext) -> StageOutcome:
         targets = set(
@@ -866,12 +865,60 @@ class ExtractStage(_FileStage):
 
         # ---- sequences ----------------------------------------------------
         sequences: list[SequenceRecord] = []
+        sequence_inventory: dict[str, Any] | None = None
         if "sequences" in targets:
-            sequences.extend(
-                parse_st25_blocks(
-                    blocks, doc_id, parser_run_id=parser_run_id, evidence_index=evidence
-                )
+            from bio_pdf.extract.sequences.inventory import (
+                build_sequence_inventory,
+                extract_declared_total,
             )
+            from bio_pdf.extract.sequences.st25 import parse_st25_blocks_with_scan
+
+            st25_sequences, st25_scan = parse_st25_blocks_with_scan(
+                blocks, doc_id, parser_run_id=parser_run_id, evidence_index=evidence
+            )
+            sequences.extend(st25_sequences)
+
+            # C02: the inventory is built from the declaration scan (every
+            # <210>), so "declared count" is reportable independently of
+            # how many residues were recovered. Full-document coverage is
+            # reported honestly: a partial page window never claims the
+            # whole listing.
+            document_page_count: int | None = None
+            try:
+                inspection = _read_input_json(
+                    context, "ingest.inspection.json", "ingest", "inspection.json"
+                )
+                document_page_count = int(inspection.get("page_count") or 0) or None
+            except WorkflowError:
+                document_page_count = None
+            sequence_inventory = build_sequence_inventory(
+                st25_scan,
+                requested_pages=context.page_numbers,
+                document_page_count=document_page_count,
+                declared_total=extract_declared_total(blocks),
+            )
+            for entry in sequence_inventory["entries"]:
+                if entry["status"] == "missing":
+                    _issue(
+                        "sequence",
+                        "SEQ_INVENTORY_MISSING",
+                        [entry.get("record_id") or f"st25:{entry.get('seq_id_no') or '?'}"],
+                        (
+                            f"SEQ ID {entry.get('seq_id_no')} (page {entry['declaration_page']}): "
+                            "residue region reached but no recoverable residues — needs region OCR"
+                        ),
+                    )
+                elif entry["status"] == "conflict":
+                    _issue(
+                        "sequence",
+                        "SEQ_INVENTORY_CONFLICT",
+                        [entry.get("record_id") or f"st25:{entry.get('seq_id_no') or '?'}"],
+                        (
+                            f"SEQ ID {entry.get('seq_id_no')} (page {entry['declaration_page']}): "
+                            + "; ".join(entry["reasons"])
+                        ),
+                    )
+
             st25_pages = {
                 b["page_number"]
                 for b in blocks
@@ -1090,6 +1137,9 @@ class ExtractStage(_FileStage):
                 m.model_dump(mode="json") if hasattr(m, "model_dump") else m
                 for m in raw_mentions
             ],
+            # C02: declaration-level inventory (every <210>, recovered or
+            # not). None when sequences are not a target of this run.
+            "sequence_inventory": sequence_inventory,
             "diagnostics": diagnostics,
             "issues": issues,
         }

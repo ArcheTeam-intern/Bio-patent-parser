@@ -36,6 +36,8 @@ from bio_pdf.extract.sequences.amino_acids import (
 
 #: Tag regexes. ``<400>`` must be matched before ``<4xx>`` fall-through.
 _TAG_RE = re.compile(r"^\s*<(\d{3})>\s*(.*)$")
+#: Any further tag embedded in the same line's remainder (C03 splitting).
+_INLINE_TAG_RE = re.compile(r"<\s*(\d{3})\s*>")
 
 _MOLECULE_TYPE: dict[str, MoleculeType] = {
     "PRT": "protein",
@@ -87,6 +89,8 @@ class _SequenceBuilder:
     # record their real page (plan B09/B02 — no reverse-engineered pages).
     residue_entries: list[tuple[int, str]] = field(default_factory=list)
     residue_page: int = 1
+    declaration_page: int = 1
+    saw_400: bool = False
     in_residues: bool = False
     raw_sequence: str = ""
     normalized_sequence: str = ""
@@ -106,6 +110,10 @@ class _St25StateMachine:
         #: Listings that closed with ZERO residues (B09): surfaced as
         #: unresolved issues instead of building an empty contract object.
         self.zero_residue_listings: list[tuple[str | None, int]] = []
+        #: Declaration scan (C02): one entry per ``<210>`` block with what
+        #: the listing pass observed — the sequence-inventory source. It is
+        #: recorded even when residue recovery failed or never started.
+        self.scan_entries: list[dict[str, Any]] = []
         self.current: _SequenceBuilder | None = None
         self.mapper = ResidueMapper()
 
@@ -124,11 +132,27 @@ class _St25StateMachine:
                     self.current.in_residues = False
             return
 
-        tag, rest = match.group(1), match.group(2).strip()
+        # C03: several ST.25 tags may sit on ONE line (real catalogs print
+        # "<210> 1 <211> 4 <212> PRT" as a single block). Split the line at
+        # every embedded tag so each tag receives only its own value —
+        # otherwise the SEQ ID swallows "<211> 4 <212> PRT".
+        tag, rest = match.group(1), match.group(2)
+        while True:
+            embedded = _INLINE_TAG_RE.search(rest)
+            if embedded is None:
+                self._apply_tag(tag, rest.strip(), page_number)
+                break
+            self._apply_tag(tag, rest[: embedded.start()].strip(), page_number)
+            tag, rest = embedded.group(1), rest[embedded.end():]
 
+    def _apply_tag(self, tag: str, rest: str, page_number: int) -> None:
         if tag == "210":
             self._close_current()
-            self.current = _SequenceBuilder(seq_id_no=rest or None, residue_page=page_number)
+            self.current = _SequenceBuilder(
+                seq_id_no=rest or None,
+                residue_page=page_number,
+                declaration_page=page_number,
+            )
             return
 
         if self.current is None:
@@ -139,6 +163,9 @@ class _St25StateMachine:
             try:
                 self.current.declared_length = int(rest)
             except ValueError:
+                # "<211> 364 <212> DNA" fragment leakage is prevented by
+                # the inline split above; a non-numeric rest is really the
+                # declaration being absent.
                 self.current.declared_length = None
         elif tag == "212":
             self.current.molecule_type = _MOLECULE_TYPE.get(rest.upper(), "unknown")
@@ -155,6 +182,7 @@ class _St25StateMachine:
             if rest:
                 self.current.feature_notes.append(rest)
         elif tag == "400":
+            self.current.saw_400 = True
             self.current.in_residues = True
             self.current.residue_page = page_number
             # The <400> line carries the sequence number, not a residue.
@@ -174,12 +202,28 @@ class _St25StateMachine:
     # ---- finalization ----------------------------------------------------
 
     def _finalize(self, builder: _SequenceBuilder) -> None:
+        # C02: every declaration leaves a scan entry, recovered or not —
+        # this is the sequence-inventory source of truth.
+        scan_entry: dict[str, Any] = {
+            "seq_id_no": builder.seq_id_no,
+            "declaration_page": builder.declaration_page,
+            "declared_length": builder.declared_length,
+            "molecule_type": builder.molecule_type,
+            "organism_raw": builder.organism_raw,
+            "saw_400": builder.saw_400,
+            "residue_pages": [],
+            "observed_length": None,
+            "has_unresolved": False,
+            "is_complete": None,
+            "record_id": None,
+        }
         raw = "\n".join(line.rstrip() for line in builder.residue_lines)
         if not raw.strip():
             # A declared listing with no residues: keep an explicit issue
             # (the record contract forbids empty sequences) instead of
             # crashing the whole job on a Zero-length NonEmptyStr.
             self.zero_residue_listings.append((builder.seq_id_no, builder.residue_page))
+            self.scan_entries.append(scan_entry)
             return
         if builder.molecule_type in ("DNA", "RNA"):
             normalized, residues = self._normalize_nucleic(raw, builder.molecule_type)
@@ -218,6 +262,17 @@ class _St25StateMachine:
                 pages.append(page)
         if not pages and builder.residue_page:
             pages = [builder.residue_page]
+
+        scan_entry.update(
+            {
+                "residue_pages": pages,
+                "observed_length": observed_length,
+                "has_unresolved": has_unresolved,
+                "is_complete": is_complete,
+                "record_id": f"{self.document_id}:seq:{builder.seq_id_no or 'unnamed'}",
+            }
+        )
+        self.scan_entries.append(scan_entry)
 
         self.record_pages.append(pages)
         record = SequenceRecord(
@@ -398,6 +453,32 @@ def parse_st25_blocks(
         accumulate residues until the next ``<210>`` (no duplication).
     """
 
+    records, _scan = parse_st25_blocks_with_scan(
+        blocks,
+        document_id,
+        parser_run_id=parser_run_id,
+        evidence_index=evidence_index,
+        issues=issues,
+    )
+    return records
+
+
+def parse_st25_blocks_with_scan(
+    blocks: list[dict[str, Any]],
+    document_id: str,
+    *,
+    parser_run_id: str = "native",
+    evidence_index: Any | None = None,
+    issues: list[dict[str, Any]] | None = None,
+) -> tuple[list[SequenceRecord], list[dict[str, Any]]]:
+    """Same as :func:`parse_st25_blocks`, plus the C02 declaration scan.
+
+    Returns ``(records, scan_entries)`` where each scan entry describes one
+    ``<210>`` declaration — including the ones that recovered no residues —
+    with its page, declared metadata and recovery outcome. That list is the
+    input of the sequence inventory (``build_sequence_inventory``).
+    """
+
     machine = _St25StateMachine(document_id=document_id, default_page=1)
     # Per-page raw residue text, captured while feeding (plan B09): each
     # page's evidence carries ITS OWN fragment, not a copied full sequence.
@@ -456,7 +537,7 @@ def parse_st25_blocks(
                 new_ids.append(span.evidence_id)
             # Assign once: the strict contract forbids an empty intermediate.
             record.evidence_ids = new_ids
-    return machine.records
+    return machine.records, machine.scan_entries
 
 
 def _join_lines(lines: list[str]) -> str:
@@ -474,4 +555,4 @@ def _record_page(record: SequenceRecord) -> int:
     return 1
 
 
-__all__ = ["parse_st25_text", "parse_st25_blocks"]
+__all__ = ["parse_st25_text", "parse_st25_blocks", "parse_st25_blocks_with_scan"]

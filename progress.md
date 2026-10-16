@@ -296,3 +296,8 @@
 
 ### C01 完成：评测基线冻结（plan 2026-10-16_domain_review_display_comparison_plan）
 - scripts/freeze_eval_baseline.py → reports/baselines/2026-10-16_eval_baseline.json：三样本（论文 d927d1c3/12 页、EP3027649B1 ffb2e5bb/195 页、WO2020156367A1 e25a5881/25 页）SHA-256、git rev、docling/rapidocr/onnxruntime 版本、configs/demo.toml 哈希、各样本已登记 jobs 与已发布基线 id、逐阶段 implementation_version。只读脚本，不写任务状态。MINERU_TOKEN 未配置（云实测按方案记为未完成）。
+
+### C02 完成：序列清点表与范围状态（真实验收）
+- 新增 `extract/sequences/inventory.py`（声明级清点：每个 `<210>` 一行，状态 declared/missing/partial/complete/conflict/outside_scope，理由含"需 OCR"候选）+ ST.25 状态机补 `scan_entries`/`saw_400`/同块多标签切分（`<210> 1 <211> 4 <212> PRT` 不再让 SEQ ID 吞标签）+ ExtractStage v4-inventory 写 `sequence_inventory` + `/records` 透出 + 前端"序列清单"面板（统计 chips+逐条表格，非完整项默认置顶，点击跳页）。
+- 真实验收（EP3027649B1，195 页全文 native 任务 job-10fbff9f5374）：observed_declarations=82 = `<160>` 82，unseen=0；complete 0 / partial 39 / missing 43 —— SEQ ID 7（p32, DNA, 声明 364）如实为 missing"文本层为空需区域 OCR"（正是 C03 目标）。40 页范围任务（job-0b05fe714374）：范围内 32 声明（与方案核查一致）/ 全文 82 / 未覆盖 50 / covers_full_document=false —— 不冒充全文。
+- 发现并修复运行期陷阱：worker/API 在改码后未重启导致新字段缺失（runbook 已记）。18 单测全绿（新增 8）。

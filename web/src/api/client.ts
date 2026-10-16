@@ -106,6 +106,46 @@ export interface RecordsResponse {
   measurements: MeasurementData[];
   record_pages: Record<string, number[]>;
   table_pages: Record<string, number>;
+  sequence_inventory?: SequenceInventory | null;
+}
+
+/** C02 序列清点表：每个声明 SEQ ID 一行，状态固定词表，不冒充完整性。 */
+export interface SequenceInventoryEntry {
+  seq_id_no: string | null;
+  declaration_page: number;
+  declared_length: number | null;
+  molecule_type: string;
+  organism_raw: string | null;
+  saw_residue_region: boolean;
+  residue_pages: number[];
+  observed_length: number | null;
+  has_unresolved: boolean;
+  recovery_source: string | null;
+  record_id: string | null;
+  status: "declared" | "missing" | "partial" | "complete" | "conflict" | "outside_scope";
+  reasons: string[];
+}
+
+export interface SequenceInventory {
+  entries: SequenceInventoryEntry[];
+  summary: {
+    declared_total: number | null;
+    declared_total_unseen: number | null;
+    observed_declarations: number;
+    located: number;
+    complete: number;
+    partial: number;
+    conflict: number;
+    missing: number;
+    declared_only: number;
+    outside_scope: number;
+    scope: {
+      requested_pages: number[] | null;
+      document_page_count: number | null;
+      observed_pages: number[];
+      covers_full_document: boolean;
+    };
+  };
 }
 
 export interface ActivityValue {
