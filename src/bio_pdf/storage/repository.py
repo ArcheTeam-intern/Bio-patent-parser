@@ -200,6 +200,32 @@ CREATE TABLE IF NOT EXISTS publications (
     baseline_id     TEXT NOT NULL,
     published_at    TEXT NOT NULL
 );
+
+-- C11/D07: engine comparison experiments. Deliberately SEPARATE from jobs:
+-- an experiment never writes review items or a publication, so it cannot
+-- pollute the formal review queue.
+CREATE TABLE IF NOT EXISTS comparisons (
+    comparison_id TEXT PRIMARY KEY,
+    document_id   TEXT NOT NULL,
+    source_path   TEXT NOT NULL,
+    pages_json    TEXT NOT NULL DEFAULT '[]',
+    engines_json  TEXT NOT NULL DEFAULT '[]',
+    status        TEXT NOT NULL DEFAULT 'queued',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS comparison_sides (
+    comparison_id TEXT NOT NULL REFERENCES comparisons(comparison_id),
+    side          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'queued',
+    error         TEXT,
+    artifact_dir  TEXT,
+    summary_json  TEXT NOT NULL DEFAULT '{}',
+    started_at    TEXT,
+    ended_at      TEXT,
+    PRIMARY KEY (comparison_id, side)
+);
 """
 
 
@@ -239,7 +265,7 @@ class LeaseToken:
         )
 
 
-def _connect(database: Path | str) -> sqlite3.Connection:
+def _connect(database: Path | str, *, check_same_thread: bool = True) -> sqlite3.Connection:
     """Open a SQLite connection with the recommended pragmas.
 
     Foreign keys are enabled per-connection. ``busy_timeout`` makes us wait
@@ -257,7 +283,9 @@ def _connect(database: Path | str) -> sqlite3.Connection:
     return conn
 
 
-def init_repository(database: Path | str) -> sqlite3.Connection:
+def init_repository(
+    database: Path | str, *, check_same_thread: bool = True
+) -> sqlite3.Connection:
     """Open (or create) the repository database and apply migrations.
 
     The schema is idempotent (``CREATE TABLE IF NOT EXISTS``), so calling
@@ -266,7 +294,7 @@ def init_repository(database: Path | str) -> sqlite3.Connection:
 
     if isinstance(database, Path):
         database.parent.mkdir(parents=True, exist_ok=True)
-    conn = _connect(database)
+    conn = _connect(database, check_same_thread=check_same_thread)
     try:
         conn.executescript(SCHEMA_SQL)
         # Additive migration for pre-B08 databases (CREATE IF NOT EXISTS
@@ -338,8 +366,9 @@ class Repository:
     just provides typed CRUD for the design-defined tables.
     """
 
-    def __init__(self, database: Path | str) -> None:
-        self._conn = init_repository(database)
+    def __init__(self, database: Path | str, *, check_same_thread: bool = True) -> None:
+        self._conn = init_repository(database, check_same_thread=check_same_thread)
+        self.database_path = Path(database)
 
     @property
     def connection(self) -> sqlite3.Connection:

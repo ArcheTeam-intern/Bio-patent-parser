@@ -395,6 +395,57 @@ export function submitBatchDecisions(
   });
 }
 
+// ---- C11/D07 comparisons -------------------------------------------------
+
+export interface ComparisonSide {
+  side: string;
+  status: "queued" | "running" | "done" | "failed";
+  error: string | null;
+  artifact_dir: string | null;
+  summary: Record<string, unknown>;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface ComparisonInfo {
+  comparison_id: string;
+  document_id: string;
+  pages: number[];
+  engines: string[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+  sides: ComparisonSide[];
+}
+
+export function createComparison(body: {
+  document_id: string;
+  pages: number[];
+  engines: string[];
+}): Promise<ComparisonInfo> {
+  return request(`/comparisons`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function listComparisons(): Promise<{ comparisons: ComparisonInfo[] }> {
+  return request(`/comparisons`);
+}
+
+export function getComparison(comparisonId: string): Promise<ComparisonInfo> {
+  return request(`/comparisons/${encodeURIComponent(comparisonId)}`);
+}
+
+export function getComparisonDiff(comparisonId: string): Promise<Record<string, unknown>> {
+  return request(`/comparisons/${encodeURIComponent(comparisonId)}/diff`);
+}
+
+export function retryComparison(comparisonId: string): Promise<ComparisonInfo> {
+  return request(`/comparisons/${encodeURIComponent(comparisonId)}/retry`, { method: "POST" });
+}
+
 export function documentSourceUrl(documentId: string): string {
   return `${API_PREFIX}/documents/${encodeURIComponent(documentId)}/source`;
 }

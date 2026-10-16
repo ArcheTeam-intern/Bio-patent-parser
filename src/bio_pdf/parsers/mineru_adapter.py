@@ -73,6 +73,36 @@ def _write_identity(path: Path, identity: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _source_page_geometry(
+    source_path: Path, pages: list[int]
+) -> dict[int, tuple[float, float, int]]:
+    """Real page size + rotation from the SOURCE PDF (D07).
+
+    Returns ``{page_number: (width_pt, height_pt, rotation_deg)}`` for the
+    requested pages. Missing/unreadable source or pages degrade to an empty
+    map — the caller then falls back to neutral defaults and the manifest
+    records that the geometry basis is unverified, never a guessed size.
+    """
+
+    out: dict[int, tuple[float, float, int]] = {}
+    try:
+        import pypdfium2 as pdfium
+
+        doc = pdfium.PdfDocument(str(source_path))
+        try:
+            for page_number in pages:
+                if 1 <= page_number <= len(doc):
+                    page = doc[page_number - 1]
+                    width, height = page.get_size()
+                    rotation = int(page.get_rotation() or 0)
+                    out[page_number] = (float(width), float(height), rotation)
+        finally:
+            doc.close()
+    except Exception:  # noqa: BLE001 — geometry is best-effort, never fatal
+        return {}
+    return out
+
+
 class MinerUAdapter:
     """Parser adapter for the MinerU V1 SaaS HTTP API."""
 
@@ -509,8 +539,13 @@ class MinerUAdapter:
         # MinerU's payload is structurally different (it carries
         # ``full_md_link`` and ``content_list`` rather than ``pages``), so we
         # project it into a Docling-shaped document before normalising.
+        ordered_pages = sorted(int(p) for p in request.page_numbers)
+        page_sizes = _source_page_geometry(request.source_path, ordered_pages)
         projected = _project_mineru_payload(
-            result_payload, page_numbers=set(request.page_numbers)
+            result_payload,
+            page_numbers=set(request.page_numbers),
+            page_order=ordered_pages or None,
+            page_sizes=page_sizes,
         )
         document = normalize_docling_document(
             projected,
@@ -982,8 +1017,13 @@ class MinerUAdapter:
     ) -> ParseArtifacts:
         """Shared tail: project → normalize → filter pages → write manifest."""
 
+        ordered_pages = sorted(int(p) for p in request.page_numbers)
+        page_sizes = _source_page_geometry(request.source_path, ordered_pages)
         projected = _project_mineru_payload(
-            result_payload, page_numbers=set(request.page_numbers)
+            result_payload,
+            page_numbers=set(request.page_numbers),
+            page_order=ordered_pages or None,
+            page_sizes=page_sizes,
         )
         document = normalize_docling_document(
             projected,
@@ -1013,6 +1053,18 @@ class MinerUAdapter:
             normalized_path=normalized_path,
             source_identity_verified=source_identity_verified,
         )
+        # D07: how the page geometry was obtained — source-PDF sizes when
+        # available, neutral defaults (recorded as UNVERIFIED) otherwise.
+        manifest["page_geometry"] = {
+            "basis": "source-pdf" if page_sizes else "unknown-defaults",
+            "verified": bool(page_sizes),
+            "page_count": len(document.pages),
+            "rotated_pages": sorted(
+                page_no
+                for page_no, (_w, _h, rotation) in (page_sizes or {}).items()
+                if rotation
+            ),
+        }
         if extra_manifest:
             manifest.update(extra_manifest)
         manifest_path.write_text(
@@ -1076,6 +1128,8 @@ def _project_mineru_payload(
     payload: dict[str, Any],
     *,
     page_numbers: set[int],
+    page_order: list[int] | None = None,
+    page_sizes: dict[int, tuple[float, float, int]] | None = None,
 ) -> dict[str, Any]:
     """Map MinerU's result envelope into a Docling-shaped dict.
 
@@ -1092,7 +1146,11 @@ def _project_mineru_payload(
     """
 
     if "content_list" in payload and isinstance(payload["content_list"], list):
-        return _project_content_list(payload["content_list"])
+        return _project_content_list(
+            payload["content_list"],
+            page_order=page_order,
+            page_sizes=page_sizes,
+        )
 
     if "markdown" in payload and isinstance(payload["markdown"], str) and payload["markdown"].strip():
         # C10 (plan §5.4): markdown alone carries NO per-page structure.
@@ -1219,8 +1277,21 @@ def _project_table_item(item: dict[str, Any], page_no: int, seq: int) -> dict[st
     return table
 
 
-def _project_content_list(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build a Docling-shaped pages dict from a MinerU ``content_list``."""
+def _project_content_list(
+    items: list[dict[str, Any]],
+    *,
+    page_order: list[int] | None = None,
+    page_sizes: dict[int, tuple[float, float, int]] | None = None,
+) -> dict[str, Any]:
+    """Build a Docling-shaped pages dict from a MinerU ``content_list`` (D07).
+
+    - ``page_idx`` is 0-based in the SUBMITTED page set: with a range like
+      ``30-33,40`` it maps to ``page_order[idx]``. Labelling idx+1 directly
+      (the old behaviour) put MinerU's own numbering onto the document —
+      wrong for any non-contiguous request.
+    - Page size comes from the SOURCE PDF (``page_sizes``), not a fixed
+      612x792; each page's rotation is carried along.
+    """
 
     pages: dict[int, dict[str, Any]] = {}
     for item in items:
@@ -1228,16 +1299,26 @@ def _project_content_list(items: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         page_idx = item.get("page_idx")
         try:
-            page_no = int(page_idx) + 1 if page_idx is not None else 1
+            idx = int(page_idx) if page_idx is not None else 0
         except (TypeError, ValueError):
-            page_no = 1
+            idx = 0
+        if page_order:
+            # An index outside the submitted set cannot be mapped back to a
+            # real document page; keep it on a clearly-marked synthetic
+            # number so the mismatch is visible, never a guessed real page.
+            page_no = page_order[idx] if 0 <= idx < len(page_order) else (10_000 + idx)
+        else:
+            page_no = idx + 1
+
+        width, height, rotation = (page_sizes or {}).get(page_no, (612.0, 792.0, 0))
         page = pages.setdefault(
             page_no,
             {
                 "page": page_no,
-                "size": {"width": 612.0, "height": 792.0},
-                "width": 612.0,
-                "height": 792.0,
+                "size": {"width": width, "height": height},
+                "width": width,
+                "height": height,
+                "rotation": rotation,
                 "texts": [],
                 "tables": [],
             },
