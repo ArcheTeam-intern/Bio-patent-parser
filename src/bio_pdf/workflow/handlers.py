@@ -875,8 +875,8 @@ def _merge_ocr_page_lines(
                 conflicts.append(
                     {
                         "page_number": page,
-                        "y_top": round(y_top, 1),
-                        "y_bottom": round(y_bottom, 1),
+                        "y_top": float(round(y_top, 1)),
+                        "y_bottom": float(round(y_bottom, 1)),
                         "native_text": overlapping[0][1],
                         "ocr_text": text,
                     }

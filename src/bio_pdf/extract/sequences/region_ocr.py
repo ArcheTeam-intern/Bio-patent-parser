@@ -70,7 +70,11 @@ def ocr_residue_pages(
                 if not text or not text.strip() or _TAG_LINE_RE.match(text):
                     continue
                 ys = [point[1] for point in box]
-                lines.append((min(ys) / scale, max(ys) / scale, text.strip()))
+                # Plain Python floats: numpy scalars would poison JSON
+                # payloads downstream (issue region coordinates).
+                lines.append(
+                    (float(min(ys)) / float(scale), float(max(ys)) / float(scale), text.strip())
+                )
             lines.sort(key=lambda item: item[0])
             if lines:
                 out[page_number] = lines[:_MAX_OCR_LINES]

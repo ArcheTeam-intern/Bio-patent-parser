@@ -103,3 +103,32 @@ def test_conflict_page_downgrades_complete_declarations() -> None:
         if entry["status"] == "complete" and conflict_pages & set(entry["residue_pages"]):
             entry["status"] = "conflict"
     assert inventory["entries"][0]["status"] == "conflict"
+
+def test_conflict_payload_is_json_serializable() -> None:
+    """D10 regression: numpy float32 from OCR boxes must not leak into the
+    issue payload (an EP full-text extract crashed on JSON serialization)."""
+
+    import json
+
+    import numpy as np
+
+    blocks = [
+        {
+            "text": "ACGT",
+            "kind": "text",
+            "semantic_role": "unknown",
+            "page_number": 32,
+            "bbox": [np.float32(88.0), np.float32(100.0), np.float32(500.0), np.float32(112.0)],
+            "block_id": "n1",
+            "source_refs": [],
+            "source_aliases": [],
+            "source_parser": "native",
+            "source_artifact_id": None,
+        }
+    ]
+    ocr = {32: [(float(np.float32(101.0)), float(np.float32(111.0)), "AGGT")]}
+    _merged, conflicts = _merge_ocr_page_lines(blocks, ocr)
+    assert conflicts
+    # The exact failure mode: json.dumps of a numpy scalar raises TypeError.
+    dumped = json.dumps(conflicts)
+    assert "AGGT" in dumped
