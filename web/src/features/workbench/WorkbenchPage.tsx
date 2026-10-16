@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cancelJob, getJob, getRecords, MeasurementData, resumeJob, SequenceRecordData } from "../../api/client";
+import { cancelJob, getJob, getRecords, listFigures, MeasurementData, resumeJob, SequenceRecordData } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
 import { WorkerHint } from "../../components/WorkerHint";
 import { StageStrip, STAGE_GROUP_ORDER, stageGroup } from "./StageStrip";
@@ -48,6 +48,21 @@ export function WorkbenchPage() {
       (job.data?.status === "succeeded" ||
         job.data?.status === "succeeded_with_review"),
   });
+  // Shared with FiguresTab (same query key): the unified distribution needs
+  // per-page figure counts on every results tab, not only on 图表.
+  const figures = useQuery({
+    queryKey: ["figures", jobId],
+    queryFn: () => listFigures(jobId!),
+    enabled: !!jobId && !isActive(job.data?.status),
+  });
+  const figureCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const f of figures.data?.figures ?? []) {
+      const key = String(f.page_number);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [figures.data]);
 
   const selected = useMemo(() => {
     if (!records.data || !recordId) return null;
@@ -270,17 +285,20 @@ export function WorkbenchPage() {
                 )}
               </div>
             )}
-            {(tab === "sequences" || tab === "activities" || tab === "tables") &&
-              records.data &&
-              !isActive(job.data?.status) && (
+            {/* 统一结果分布：四个结果 tab（序列/活性/表格/图表）看到的是
+                同一份完整分布——序列+活性+表格+图表，任何一页都有全部计数。 */}
+            {(tab === "sequences" || tab === "activities" || tab === "tables" || tab === "figures") &&
+              !isActive(job.data?.status) &&
+              (records.data || Object.keys(figureCounts).length > 0) && (
                 <div style={{ padding: "12px 14px 6px", borderBottom: "1px solid var(--border-soft)" }}>
                   <PageDistribution
                     pageCount={0}
-                    recordPages={records.data.record_pages ?? {}}
+                    recordPages={records.data?.record_pages ?? {}}
                     kinds={kindsById}
                     currentPage={currentPage}
                     onJump={changePage}
-                    tableCounts={tab === "tables" ? records.data.table_pages : undefined}
+                    tableCounts={records.data?.table_pages}
+                    figureCounts={figureCounts}
                   />
                 </div>
               )}

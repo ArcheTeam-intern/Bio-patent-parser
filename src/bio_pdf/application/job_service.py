@@ -302,6 +302,31 @@ class JobService:
         self._repository.set_job_config(job_id, config)
         self._repository.update_job_status(job_id, "queued")
 
+    def delete_job(self, job_id: str) -> str:
+        """Delete a terminal job: DB rows first, then the artifact tree.
+
+        Returns ``"deleted"`` / ``"missing"`` / ``"active"``. A queued or
+        running job must be cancelled first — see
+        :meth:`Repository.delete_job`. Filesystem cleanup happens after the
+        commit and is idempotent: a failed rmtree leaves only orphan files,
+        never half-deleted state rows.
+        """
+
+        import shutil
+
+        outcome = self._repository.delete_job(job_id)
+        if outcome != "deleted":
+            return outcome
+        job_dir = self.paths.artifact_root / "jobs" / job_id
+        if job_dir.is_dir():
+            # jobs/<job_id> comes from our own runner; resolve() guards
+            # against a symlinked data dir making rmtree walk elsewhere.
+            resolved = job_dir.resolve()
+            root = self.paths.artifact_root.resolve()
+            if root in resolved.parents:
+                shutil.rmtree(job_dir, ignore_errors=True)
+        return "deleted"
+
     # ---- queries ---------------------------------------------------------
 
     def get_job(self, job_id: str) -> Job | None:

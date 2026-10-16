@@ -758,6 +758,10 @@ dialog::backdrop {
   background: #2563eb;
 }
 
+.pd-bar .pd-fig {
+  background: #059669;
+}
+
 .pd-counts {
   display: flex;
   gap: 4px;
@@ -785,6 +789,11 @@ dialog::backdrop {
 .pd-chip.tab {
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+.pd-chip.fig {
+  background: #d1fae5;
+  color: #047857;
 }
 
 .pd-chip.muted {

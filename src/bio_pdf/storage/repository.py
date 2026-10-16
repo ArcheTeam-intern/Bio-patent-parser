@@ -743,6 +743,61 @@ class Repository:
             self._conn.execute("ROLLBACK")
             raise
 
+    def delete_job(self, job_id: str) -> str:
+        """Delete a job and every dependent row in one transaction.
+
+        Returns ``"deleted"``, ``"missing"`` or ``"active"`` — a queued or
+        running job must be cancelled first: deleting a live job behind the
+        worker's back would contradict the fencing story. The source document
+        row is kept (content-addressed, possibly shared by other jobs).
+        """
+
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._conn.execute(
+                "SELECT status FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                self._conn.execute("ROLLBACK")
+                return "missing"
+            if row["status"] in ("queued", "running"):
+                self._conn.execute("ROLLBACK")
+                return "active"
+            # review_decisions has no job_id column (it joins via review_id),
+            # so it must go before review_items via a subquery.
+            self._conn.execute(
+                "DELETE FROM review_decisions WHERE review_id IN "
+                "(SELECT review_id FROM review_items WHERE job_id = ?)",
+                (job_id,),
+            )
+            # artifacts has no job_id column either: job files live under
+            # the relative-path prefix jobs/<job_id>/.
+            self._conn.execute(
+                "DELETE FROM artifacts WHERE relative_path LIKE ?",
+                (f"jobs/{job_id}/%",),
+            )
+            for table in (
+                "stage_runs",
+                "review_items",
+                "job_configs",
+                "worker_leases",
+                "lease_counters",
+                "record_versions",
+                "record_heads",
+                "exports",
+                "parse_issues",
+                "publications",
+            ):
+                self._conn.execute(
+                    f"DELETE FROM {table} WHERE job_id = ?", (job_id,)
+                )
+            self._conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+            self._conn.execute("COMMIT")
+            return "deleted"
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
     def set_current_stage_fenced(
         self,
         job_id: str,

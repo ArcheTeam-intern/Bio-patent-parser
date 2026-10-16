@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { getReviews, listJobs } from "../../api/client";
+import { getRecords, getReviews, listJobs } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
 
 /**
  * 审核队列（design §8）：跨任务的全部待审核记录，按任务可筛选、
  * 分页加载。“总数”是真实匹配数——一个几何重建的药敏矩阵可能产生
  * 上百条单元格审核项，截断的页面不允许冒充整个队列。
+ *
+ * 每行加“记录”摘要：同一任务里几十条同样原因（如缺单位+实体未关联）
+ * 的活性项单看原因列完全一样，会被误当成重复审核项——摘要（值/单位/
+ * 靶标、序列片段）让每一行可区分。摘要按 record_id 从 records API
+ * 真实数据拼接，拿不到时如实显示记录 id，不编造。
  */
 
 const REASON_LABELS: Record<string, string> = {
@@ -27,6 +32,38 @@ const REASON_LABELS: Record<string, string> = {
 
 const PAGE_SIZE = 100;
 
+function measurementSummary(m: {
+  value: { raw: string };
+  unit_raw: string | null;
+  unit_normalized: string | null;
+  target_raw: string | null;
+}): string {
+  const value = m.value?.raw ?? "";
+  const unit = m.unit_normalized || m.unit_raw || "";
+  const parts = [`${value}${unit ? ` ${unit}` : ""}`.trim() || "（无值）"];
+  if (m.target_raw) parts.push(`→ ${m.target_raw}`);
+  return parts.join("  ");
+}
+
+/** 几何重建的矩阵细胞：record id 里带 meas:<页>:grid:<rNcM>，坐标即身份。 */
+function gridBadge(recordId: string): string {
+  const m = recordId.match(/:meas:(\d+):grid:(r\d+c\d+)$/);
+  return m ? `第${m[1]}页 矩阵${m[2]}` : "";
+}
+
+function sequenceSummary(s: {
+  seq_id_no: string | null;
+  observed_length: number | null;
+  normalized_sequence: string;
+}): string {
+  const id = s.seq_id_no ? `SEQ ID ${s.seq_id_no}` : "序列";
+  const len = s.observed_length != null ? `${s.observed_length} aa` : "";
+  const head = s.normalized_sequence?.slice(0, 12) ?? "";
+  return [id, len, head && `${head}${s.normalized_sequence.length > 12 ? "…" : ""}`]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function ReviewQueuePage() {
   const [params, setParams] = useSearchParams();
   const jobFilter = params.get("job_id") ?? "";
@@ -42,6 +79,31 @@ export function ReviewQueuePage() {
   const items = reviews.data?.reviews ?? [];
   const total = reviews.data?.total ?? 0;
   const jobsWithReviews = (jobs.data ?? []).filter((j) => j.status !== "queued" || j.open_reviews > 0);
+
+  // 摘要映射：值→展示文本。per-job 容错——结果未发布的 job 直接跳过。
+  const queueJobIds = [...new Set(items.map((r) => r.job_id))].sort();
+  const summaries = useQuery({
+    queryKey: ["queue-records", queueJobIds],
+    queryFn: async () => {
+      const map: Record<string, string> = {};
+      for (const jobId of queueJobIds) {
+        try {
+          const rec = await getRecords(jobId);
+          for (const s of rec.sequences) map[s.sequence_id] = sequenceSummary(s);
+          for (const m of rec.measurements) {
+            map[m.measurement_id] = [gridBadge(m.measurement_id), measurementSummary(m)]
+              .filter(Boolean)
+              .join(" · ");
+          }
+        } catch {
+          // 无已发布结果的任务：摘要留空，行显示记录 id。
+        }
+      }
+      return map;
+    },
+    enabled: queueJobIds.length > 0,
+    staleTime: 60_000,
+  });
 
   return (
     <div>
@@ -85,6 +147,7 @@ export function ReviewQueuePage() {
             <table className="data">
               <thead>
                 <tr>
+                  <th>记录</th>
                   <th>原因</th>
                   <th>记录类型</th>
                   <th>任务</th>
@@ -98,6 +161,13 @@ export function ReviewQueuePage() {
                     className="clickable"
                     onClick={() => navigate(`/jobs/${r.job_id}/workbench?record=${encodeURIComponent(r.record_id)}`)}
                   >
+                    <td>
+                      {summaries.data?.[r.record_id] ? (
+                        <span>{summaries.data[r.record_id]}</span>
+                      ) : (
+                        <span className="mono dim">{r.record_id.slice(0, 20)}…</span>
+                      )}
+                    </td>
                     <td>
                       {r.reason_codes.map((code, i) => (
                         <span key={i} className="status review" style={{ marginRight: 4 }}>

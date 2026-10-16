@@ -292,6 +292,11 @@ export function cancelJob(jobId: string): Promise<Job> {
   return request(`/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
 }
 
+/** Delete a terminal job (results, review items, artifacts). 409 if active. */
+export function deleteJob(jobId: string): Promise<void> {
+  return request(`/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+}
+
 export function artifactContentUrl(jobId: string, artifactId: string): string {
   return `${API_PREFIX}/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
 }

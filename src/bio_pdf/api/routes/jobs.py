@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from bio_pdf.api.contracts import (
     JobCreateRequest,
@@ -176,6 +177,31 @@ def cancel_job(service: ServiceDep, job_id: str) -> JobResponse:
             },
         )
     return _job_response(service, service.get_job(job_id))
+
+
+@router.delete("/{job_id}", status_code=204)
+def delete_job(service: ServiceDep, job_id: str) -> Response:
+    """Delete a terminal job and everything it produced.
+
+    Queued/running jobs must be cancelled first (409, JOB_ACTIVE) — deleting
+    behind a live worker's back would break the lease-fencing story. The
+    source document stays: it is content-addressed and may be shared.
+    """
+
+    outcome = service.delete_job(job_id)
+    if outcome == "missing":
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
+    if outcome == "active":
+        job = service.get_job(job_id)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "JOB_ACTIVE",
+                "message": "cancel the job before deleting it",
+                "details": {"status": job.status if job else "unknown"},
+            },
+        )
+    return Response(status_code=204)
 
 
 @router.post("/{job_id}/resume", status_code=202)

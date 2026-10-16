@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
-import { cancelJob, getSamples, listJobs, resumeJob } from "../../api/client";
+import { useEffect, useState } from "react";
+import { cancelJob, deleteJob, getSamples, listJobs, resumeJob } from "../../api/client";
 import { StatusLabel } from "../../components/StatusLabel";
 import { WorkerHint } from "../../components/WorkerHint";
 import { UploadDialog } from "./UploadDialog";
@@ -10,6 +10,7 @@ import { UploadDialog } from "./UploadDialog";
 
 export function JobsPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const jobs = useQuery({
@@ -28,6 +29,21 @@ export function JobsPage() {
     mutationFn: (id: string) => resumeJob(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   });
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteJob(id),
+    onSuccess: () => {
+      setConfirmingId(null);
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+    },
+  });
+
+  // 确认态自动过期，避免误点后一直悬在"确认删除"。
+  useEffect(() => {
+    if (!confirmingId) return;
+    const t = setTimeout(() => setConfirmingId(null), 4000);
+    return () => clearTimeout(t);
+  }, [confirmingId]);
 
   const jobsList = jobs.data ?? [];
 
@@ -41,6 +57,13 @@ export function JobsPage() {
       </div>
 
       <WorkerHint active={activeJobs(jobsList)} />
+
+      {deleteMutation.isError && (
+        <div className="banner error" style={{ marginBottom: 8 }}>
+          删除失败：{String((deleteMutation.error as Error)?.message ?? deleteMutation.error)}
+          （活动中任务需先"停止"）
+        </div>
+      )}
 
       {jobsList.length === 0 && !jobs.isLoading ? (        <EmptyJobs samples={samples.data?.samples ?? []} onUpload={() => setUploadOpen(true)} />
       ) : (
@@ -95,6 +118,45 @@ export function JobsPage() {
                         >
                           重新解析
                         </button>
+                      )}
+                      {/* 删除只对终止态任务开放（删除结果+审核项+工件；
+                          活动中任务须先"停止"）。两段确认避免误删。 */}
+                      {job.status !== "queued" && job.status !== "running" && (
+                        confirmingId === job.job_id ? (
+                          <>
+                            <button
+                              disabled={deleteMutation.isPending}
+                              style={{ borderColor: "var(--red)", color: "var(--red)" }}
+                              title="确认删除：结果、审核项与工件一并移除，源文档保留"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteMutation.mutate(job.job_id);
+                              }}
+                            >
+                              {deleteMutation.isPending ? "删除中…" : "确认删除？"}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmingId(null);
+                              }}
+                            >
+                              取消
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            style={{ color: "var(--red)" }}
+                            title="删除任务：结果、审核项与工件一并移除（源文档保留）"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteMutation.reset();
+                              setConfirmingId(job.job_id);
+                            }}
+                          >
+                            删除
+                          </button>
+                        )
                       )}
                       <button
                         onClick={(e) => {
