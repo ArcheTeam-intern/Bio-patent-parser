@@ -108,6 +108,9 @@ def _register_match_span(
                 bbox=tuple(block["bbox"]) if block.get("bbox") else None,
                 source_parser=str(block.get("source_parser") or "unknown"),
                 source_artifact_id=block.get("source_artifact_id"),
+                # H07/P04: never drop the frame-trust flag on the way
+                # into evidence construction.
+                bbox_verified=block.get("bbox_verified"),
             ),
             text_raw=match_text,
             char_start=char_start,

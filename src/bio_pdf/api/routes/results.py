@@ -626,44 +626,10 @@ def list_issues(
 
     _job_or_404(service, job_id)
     rows = service.repository.list_issues(job_id, state=state)
-    issues: list[dict[str, Any]] = []
-    for row in rows:
-        issue = {
-            "issue_id": row["issue_id"],
-            "job_id": row["job_id"],
-            "scope": row["scope"],
-            "reason_code": row["reason_code"],
-            "source_ids": json.loads(row["source_json"] or "[]"),
-            "detail": row["detail"],
-            "state": row["state"],
-            "baseline_id": row["baseline_id"],
-            "created_at": row["created_at"],
-        }
-        issue["severity"] = _ISSUE_SEVERITY.get(str(row["reason_code"]), "warning")
-        # D09: prefer the page/region captured at creation time; the
-        # fallbacks below only serve historical rows.
-        row_keys = row.keys()
-        if "region_json" in row_keys and row["region_json"]:
-            try:
-                issue["region"] = json.loads(row["region_json"])
-            except json.JSONDecodeError:
-                issue["region"] = None
-        if "page_number" in row_keys and row["page_number"] is not None:
-            issue["page_number"] = int(row["page_number"])
-        else:
-            issue["page_number"] = _issue_page(issue)
-        issued_guidance = _ISSUE_GUIDANCE.get(str(row["reason_code"]))
-        if issued_guidance:
-            issue.update(issued_guidance)
-        else:
-            issue.update(
-                {
-                    "title": str(row["reason_code"]),
-                    "impact": "见详情",
-                    "suggestion": "按详情人工核对",
-                }
-            )
-        issues.append(issue)
+    # H08/P05: the list uses the SAME view builder as the single-issue
+    # endpoint — one serializer, so capabilities can never drift between
+    # the list the panel renders and the detail the route enforces.
+    issues: list[dict[str, Any]] = [_issue_view(service, row) for row in rows]
 
     if severity:
         issues = [i for i in issues if i["severity"] == severity]
@@ -1048,6 +1014,21 @@ class _IssueActionRequest(BaseModel):
     note: str | None = None
 
 
+#: H08/P05: the SINGLE source of truth for which issues have a bounded
+#: page-level reparse path. The issue view exposes it as a capability so the
+#: frontend never keeps a second, drifting copy.
+_REPARSE_PAGE_CODES = {
+    "SEQ_INVENTORY_MISSING",
+    "ZERO_RESIDUE_LISTING",
+    "SOURCE_CONFLICT",
+    # G11/P07: a distorted table grid invites a bounded region re-parse.
+    "TABLE_STRUCTURE_NO_EXTRACTION",
+    "TABLE_STRUCTURE_SUSPECT",
+    # Real legacy/structural table issues with a known page.
+    "TABLE_STRUCTURE",
+}
+
+
 def _issue_or_404(service, job_id: str, issue_id: str):
     """E4/S04: an issue is addressed by ITS JOB. Reading it through another
     job's URL is a 404 with zero writes — never a cross-job mutation, and
@@ -1091,6 +1072,43 @@ def _issue_view(service, row) -> dict[str, Any]:
             {"title": str(row["reason_code"]), "impact": "见详情", "suggestion": "按详情人工核对"},
         )
     )
+    # H08/P05: server-driven capabilities — the frontend renders exactly the
+    # actions the backend can execute, with the artifact each one produces.
+    reason = str(row["reason_code"])
+    page = issue.get("page_number")
+    actions: list[dict[str, Any]] = [
+        {"action": "dismiss", "supported": True, "label": "标记非目标（需原因）", "requires_reason": True},
+        {"action": "note", "supported": True, "label": "保留未解决（加说明）"},
+        {"action": "reopen", "supported": True, "label": "恢复为待处理"},
+    ]
+    if reason in _REPARSE_PAGE_CODES and page is not None:
+        actions.append(
+            {
+                "action": "reparse",
+                "supported": True,
+                "label": "区域复解析",
+                "produces": (
+                    "region OCR text candidate for this page (bounded reparse; "
+                    "table GRID structure is NOT reconstructed — a human check "
+                    "of the grid is still required)"
+                ),
+                "endpoint": f"POST /jobs/{row['job_id']}/issues/{row['issue_id']}/reparse",
+            }
+        )
+    else:
+        actions.append(
+            {
+                "action": "reparse",
+                "supported": False,
+                "label": "区域复解析（不可用）",
+                "reason": (
+                    "issue has no known page"
+                    if page is None
+                    else "this issue scope has no bounded region-reparse path"
+                ),
+            }
+        )
+    issue["allowed_actions"] = actions
     return issue
 
 
@@ -1205,14 +1223,7 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
     page = view.get("page_number")
     reason = str(row["reason_code"])
 
-    reparse_pages = {
-        "SEQ_INVENTORY_MISSING",
-        "ZERO_RESIDUE_LISTING",
-        "SOURCE_CONFLICT",
-        # G11/P07: a distorted table grid invites a bounded region re-parse.
-        "TABLE_STRUCTURE_NO_EXTRACTION",
-        "TABLE_STRUCTURE_SUSPECT",
-    }
+    reparse_pages = _REPARSE_PAGE_CODES
     if reason not in reparse_pages or page is None:
         raise HTTPException(
             status_code=422,
@@ -1517,6 +1528,23 @@ def issue_adopt(
         )
 
     pages = [int(p) for p in (request.pages or [int(meta.get("page_number", 1))]) if int(p) > 0]
+    # H02/S02: the adopted page MUST be inside the requested page set —
+    # otherwise the worker would silently skip the candidate while the API
+    # still reported success. Reject BEFORE the job is created and before
+    # any adopted event is written.
+    candidate_page = int(meta.get("page_number", pages[0]))
+    if candidate_page not in pages:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ADOPT_PAGE_OUT_OF_SCOPE",
+                "message": (
+                    f"candidate targets page {candidate_page}, which is not in the "
+                    f"requested page set {pages} — the adoption would never be consumed"
+                ),
+                "details": {"candidate_page": candidate_page, "requested_pages": pages},
+            },
+        )
     candidate_text = artifact.read_text(encoding="utf-8", errors="replace")
     # F09: adoption is REAL consumption — the candidate (id, content hash,
     # source SHA, origin baseline, page/region) becomes part of the new
@@ -1561,7 +1589,11 @@ def issue_adopt(
             "candidate_id": str(chosen["candidate_id"]),
             "candidate_rel": chosen["artifact_rel"],
             "content_sha256": actual_content_sha,
-            "consumed_by_new_job": True,
+            # H02/S02: enqueueing is NOT consumption. The job is SCHEDULED
+            # to consume this candidate; the proof lives in the published
+            # artifact (extract.adopted_candidates with merged_block_ids).
+            "status": "scheduled",
+            "consumption_proof": "jobs/<job_id> extract artifact: adopted_candidates[].merged_block_ids",
             "new_job_id": new_job.job_id,
             "pages": list(pages),
         },

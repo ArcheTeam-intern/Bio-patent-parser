@@ -132,13 +132,24 @@ def pair_measurements(ms_a: list[dict[str, Any]], ms_b: list[dict[str, Any]]) ->
         text = _re.sub("mcg", "ug", text, flags=_re.IGNORECASE)
         return text
 
+    #: H06/P03: only these fields are EXPERIMENT SEMANTICS. Evidence ids,
+    #: block ids, source labels and engine names differ between engines for
+    #: the very same condition — including them in the key made identical
+    #: 1 h conditions unpairable. They stay in the payload for traceability.
+    _CONDITION_SEMANTIC_KEYS = ("kind", "value", "unit", "operator")
+
     def conditions_key(m: dict[str, Any]) -> tuple:
         items = []
         for cond in m.get("conditions") or []:
             if isinstance(cond, dict):
-                items.append(
-                    tuple(sorted((norm_text(k), norm_text(v)) for k, v in cond.items()))
+                semantic = tuple(
+                    sorted(
+                        (key, norm_text(cond.get(key)))
+                        for key in _CONDITION_SEMANTIC_KEYS
+                        if cond.get(key) is not None
+                    )
                 )
+                items.append(semantic)
             else:
                 items.append((norm_text(cond),))
         return tuple(sorted(items, key=str))
@@ -745,11 +756,18 @@ class ComparisonService:
                 "remote_state_dir": str(remote_state_dir),
             }
             kind, summary, error = self._execute_governed(
-                spec, budget=float(self.execution_budget_seconds)
+                spec,
+                budget=float(self.execution_budget_seconds),
+                lease_lost=lease_lost,
             )
             stop_beat.set()
             beat.join(timeout=5.0)
 
+            if kind == "aborted":
+                # H01/S01: the lease was taken while running — the tree is
+                # already cleaned; publish NOTHING (the new holder owns the
+                # state and a fenced write would be refused anyway).
+                continue
             if kind == "timeout":
                 # Budget expiry: renewals have stopped (heartbeat is off)
                 # and the unit is gone/fenced; the completion write makes
@@ -786,15 +804,21 @@ class ComparisonService:
         self._refresh_status(comparison_id)
 
     def _execute_governed(
-        self, spec: dict[str, Any], *, budget: float
+        self,
+        spec: dict[str, Any],
+        *,
+        budget: float,
+        lease_lost: "threading.Event | None" = None,
     ) -> tuple[str, dict[str, Any] | None, str | None]:
-        """Run one side under the budget watchdog (G03/S03).
+        """Run one side under the budget watchdog (G03+H01).
 
         Returns ``("done", summary, None)`` | ``("error", None, text)`` |
-        ``("timeout", None, None)``. On timeout the unit is terminated (or
-        abandoned in thread mode) BEFORE returning; the caller has already
-        stopped the heartbeat, and only the caller ever publishes — a late
-        unit result is structurally unable to appear as a success.
+        ``("timeout", None, None)`` | ``("aborted", None, None)``.
+
+        H01: the execution UNIT is the whole process TREE — on timeout and
+        on lease loss the tree (including the engine's own inference child)
+        is terminated, and every live tree is swept at interpreter shutdown.
+        A late unit result can never publish: only the caller writes status.
         """
 
         if self.run_mode == "thread":
@@ -838,28 +862,49 @@ class ComparisonService:
                 pass
             return "error", None, _side_error_text(exc)
         child_conn.close()
-        completed = parent_conn.poll(timeout=max(0.1, float(budget)))
-        if completed:
-            try:
-                message = parent_conn.recv()
-            except EOFError:
-                message = {"ok": False, "error": "side process exited without reporting a result"}
-            proc.join(timeout=10)
-            try:
-                parent_conn.close()
-            except Exception:  # noqa: BLE001 — closing a dead pipe is best-effort
-                pass
-            if isinstance(message, dict) and message.get("ok"):
-                return "done", message.get("summary"), None
-            return (
-                "error",
-                None,
-                str((message or {}).get("error") or "side process failed without a reason"),
-            )
-        # Budget exceeded: terminate the supervised unit (Windows-safe),
-        # then report the timeout — the caller stops renewals and fences
-        # the side failed.
-        proc.terminate()
+        _register_live_child(int(proc.pid or 0), str(spec.get("engine") or ""))
+        try:
+            # H01: poll in short slices so a lease loss aborts (and cleans)
+            # the tree mid-flight instead of running to the budget.
+            import time as _time
+
+            deadline = _time.monotonic() + max(0.1, float(budget))
+            completed = False
+            while _time.monotonic() < deadline:
+                if parent_conn.poll(timeout=min(0.5, max(0.05, deadline - _time.monotonic()))):
+                    completed = True
+                    break
+                if lease_lost is not None and lease_lost.is_set():
+                    _kill_process_tree(int(proc.pid or 0))
+                    proc.join(timeout=10)
+                    return "aborted", None, None
+            if completed:
+                try:
+                    message = parent_conn.recv()
+                except EOFError:
+                    message = {
+                        "ok": False,
+                        "error": "side process exited without reporting a result",
+                    }
+                proc.join(timeout=10)
+                try:
+                    parent_conn.close()
+                except Exception:  # noqa: BLE001 — closing a dead pipe is best-effort
+                    pass
+                if isinstance(message, dict) and message.get("ok"):
+                    return "done", message.get("summary"), None
+                return (
+                    "error",
+                    None,
+                    str((message or {}).get("error") or "side process failed without a reason"),
+                )
+        finally:
+            _unregister_live_child(int(proc.pid or 0))
+
+        # Budget exceeded: terminate the WHOLE TREE — the middle process AND
+        # the engine's own inference child (H01) — then report the timeout;
+        # the caller stops renewals and fences the side failed.
+        _kill_process_tree(int(proc.pid or 0))
         proc.join(timeout=10)
         try:
             parent_conn.close()
@@ -1050,6 +1095,67 @@ class ComparisonService:
         }
 
 
+#: H01/S01: live comparison child PIDs → engine label. Registered while a
+#: supervised side runs; the tree-kill sweeps them on timeout, lease loss
+#: and interpreter shutdown (atexit).
+_LIVE_SIDE_CHILDREN: dict[int, str] = {}
+_LIVE_SIDE_LOCK = __import__("threading").Lock()
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Terminate a process AND its descendants (H01/S01).
+
+    ``Process.terminate()`` kills only the middle process: the chain here
+    is comparison thread → spawn child → engine inference child (Docling
+    runs its converter in its own subprocess), and the grandchild would
+    keep burning CPU after the budget fired. ``taskkill /T`` walks the
+    live tree from the given PID — so it must run BEFORE the middle
+    process is gone."""
+
+    if pid <= 0:
+        return
+    import subprocess as _sp
+    import sys as _sys
+
+    try:
+        if _sys.platform == "win32":
+            _sp.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=20,
+            )
+        else:
+            _sp.run(["pkill", "-TERM", "-P", str(pid)], capture_output=True, timeout=20)
+            _sp.run(["kill", "-TERM", str(pid)], capture_output=True, timeout=20)
+    except Exception:  # noqa: BLE001 — best-effort cleanup, never fatal
+        pass
+
+
+def _register_live_child(pid: int, engine: str) -> None:
+    with _LIVE_SIDE_LOCK:
+        _LIVE_SIDE_CHILDREN[pid] = engine
+
+
+def _unregister_live_child(pid: int) -> None:
+    with _LIVE_SIDE_LOCK:
+        _LIVE_SIDE_CHILDREN.pop(pid, None)
+
+
+def _kill_all_live_children() -> None:
+    """atexit: service shutdown cleans the same execution scope."""
+
+    with _LIVE_SIDE_LOCK:
+        pids = list(_LIVE_SIDE_CHILDREN)
+        _LIVE_SIDE_CHILDREN.clear()
+    for pid in pids:
+        _kill_process_tree(pid)
+
+
+import atexit as _atexit
+
+_atexit.register(_kill_all_live_children)
+
+
 def _side_error_text(exc: BaseException) -> str:
     text = f"{type(exc).__name__}: {exc}"[:500]
     details = getattr(exc, "details", None) or {}
@@ -1167,7 +1273,9 @@ def _domain_pass_spec(
         # G11/P07: a distorted grid is skipped exactly like production —
         # never diffed as if it were a healthy matrix.
         if any(
-            str(issue).startswith(("GRID_SIZE_SUSPECT", "RAGGED_ROWS_SEVERE"))
+            str(issue).startswith(
+                ("GRID_SIZE_SUSPECT", "RAGGED_ROWS_SEVERE", "HEADER_SEMANTICS_BROKEN")
+            )
             for issue in table.structure_issues
         ):
             continue

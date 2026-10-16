@@ -54,26 +54,31 @@ def test_real_ep_30_33_replay_recovers_seq1_through_the_margin_lexer() -> None:
     assert len(sequences) >= 8, sorted(sequences)
 
 
-def test_real_paper_table3_is_classified_susceptible_but_flagged_distorted() -> None:
+def test_real_paper_table3_is_classified_susceptible_but_header_semantics_broken() -> None:
     """The REAL page-9 TABLE 3 (129 td, 70 S/R/I, no th): it must NOT be
-    silently classified as an inventory, and its genuinely distorted grid
-    (row widths 19/18/10/1, S/R/I values inside the header row) must be a
-    VISIBLE severe issue that refuses fabricated activity extraction — the
-    reviewer's own reading of this response."""
+    silently classified as an inventory. Its rows are actually uniform in
+    width (H04: the old per-cell check falsely blamed raggedness), but the
+    header row itself contains S/R/I VALUES — pairing values under an "R"
+    header would fabricate drug→strain relations, so the table carries a
+    VISIBLE header-semantics issue and its extraction is refused."""
 
     from bio_pdf.extract.activities.table_classifier import TableKind, classify_table
 
     document, summary = _replay("mineru_paper_8_9_content_list.json")
     page9 = next(p for p in document.pages if p.page_number == 2)
     suspect = next(
-        t for t in page9.tables if "RAGGED_ROWS_SEVERE" in " ".join(t.structure_issues)
+        t for t in page9.tables if "HEADER_SEMANTICS_BROKEN" in " ".join(t.structure_issues)
     )
+    # H04: a consistent row-width grid must NOT carry a raggedness issue.
+    assert not any(
+        "RAGGED" in issue for issue in suspect.structure_issues
+    ), suspect.structure_issues
     assert classify_table(suspect) is TableKind.SUSCEPTIBILITY, (
         "a td-only S/R/I matrix is never an inventory"
     )
     assert all(
         m["metric"] != "antimicrobial_susceptibility" for m in summary["measurements"]
-    ), "a severely distorted grid must not be converted into activities"
+    ), "a header-mangled grid must not be converted into fabricated activities"
 
     # TABLE 4 (scoring) stays zero — its values are not S/R/I.
     assert all(

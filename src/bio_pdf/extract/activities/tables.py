@@ -387,12 +387,13 @@ def _extract_susceptibility(
     def _drug_score(labels: list[str]) -> int:
         return sum(1 for t in labels if _DRUG_HINT.search(t))
 
-    flipped = _drug_score(
-        [c.text_raw for c in table.cells if c.header_role == "row"]
-    ) >= 2 and _drug_score(
-        [c.text_raw for c in table.cells if c.header_role == "row"]
-    ) > _drug_score(
-        [c.text_raw for c in table.cells if c.header_role == "column"]
+    row_score = _drug_score([c.text_raw for c in table.cells if c.header_role == "row"])
+    column_score = _drug_score([c.text_raw for c in table.cells if c.header_role == "column"])
+    # H04: a SINGLE unambiguous drug row (e.g. the reviewer's 2x6 case:
+    # Vancomycin as the only row label, strain-like column headers) must
+    # flip too — requiring >=2 drug rows lost the axes for small tables.
+    flipped = (row_score >= 1 and column_score == 0) or (
+        row_score >= 2 and row_score > column_score
     )
 
     measurements: list[Measurement] = []
@@ -410,6 +411,12 @@ def _extract_susceptibility(
             strain_cell = path.row_headers[-1] if path.row_headers else None
         if drug_cell is None or strain_cell is None:
             continue  # axes unknown → do not transpose or guess
+        # H04: a value cell as the "drug" axis means the header row was
+        # mangled (S/R/I leaked into it) — never emit a fabricated entity.
+        if _SRI_VALUE.match(drug_cell.text_raw.strip()):
+            continue
+        if _SRI_VALUE.match(strain_cell.text_raw.strip()):
+            continue
 
         field_evidence: dict[str, list[str]] = {"value": _ev(data_cell)}
         field_evidence["entity_raw"] = _ev(drug_cell)

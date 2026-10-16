@@ -948,3 +948,139 @@ def test_mcg_alias_is_explicitly_equivalent() -> None:
 
     out = pair_measurements([_mic("1", "1h", unit="mcg/mL")], [_mic("1", "1h", unit="ug/mL")])
     assert out["value_diffs"] == []
+
+# ---- H03/S03: allocation/upload split — a lost PUT response recovers -----
+
+
+def test_lost_put_response_reuses_the_same_batch(tmp_path: Path) -> None:
+    """The reviewer's repro: POST returned the batch/slot, the PUT response
+    was lost (server may have received the bytes). The retry must re-PUT the
+    SAME slot — allocation (POST) count stays 1."""
+
+    import io
+    import zipfile
+
+    from bio_pdf.errors import NetworkTransientError
+    from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+    posts = {"file_urls": 0, "puts": 0, "zip_downloads": 0}
+    zip_bytes = _a4_zip_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            posts["file_urls"] += 1
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "batch_id": "bh03",
+                        "file_urls": ["https://oss.example/put/h03"],
+                    }
+                },
+            )
+        if request.method == "PUT":
+            posts["puts"] += 1
+            if posts["puts"] == 1:
+                raise httpx.ReadTimeout("lost PUT response")
+            return httpx.Response(200)
+        if "/extract-results/batch/" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {"file_name": "source.pdf", "state": "done",
+                             "full_zip_url": "https://oss.example/zip/h03"}
+                        ]
+                    }
+                },
+            )
+        if url == "https://oss.example/zip/h03":
+            posts["zip_downloads"] += 1
+            return httpx.Response(200, content=zip_bytes)
+        raise AssertionError(url)
+
+    adapter = MinerUAdapter(token="t", transport=httpx.MockTransport(handler), poll_interval=0.0)
+
+    first = _job_request(tmp_path, "attempt-1")
+    try:
+        adapter.parse(first, local_file=first.source_path)
+    except NetworkTransientError:
+        pass  # the lost PUT response surfaces as a transient failure
+    else:
+        raise AssertionError("the first attempt must report the lost PUT response")
+
+    # The identity was persisted BEFORE the PUT: batch known, phase allocated.
+    identity_path = tmp_path / "jobs" / "job-x" / "mineru_remote_identity.json"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert identity["batch_id"] == "bh03"
+    assert identity["phase"] == "allocated"
+    assert posts["file_urls"] == 1 and posts["puts"] == 1
+
+    # The retry (new attempt dir) continues on the SAME batch/slot.
+    second = _job_request(tmp_path, "attempt-2")
+    try:
+        adapter.parse(second, local_file=second.source_path)
+    except Exception:  # noqa: BLE001 — zip download may still use this helper
+        raise
+    assert posts["file_urls"] == 1, "a retry must NOT allocate a second batch"
+    assert posts["puts"] == 2, "the retry re-PUTs the same slot"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert identity["phase"] == "completed"
+
+
+def test_process_exit_after_upload_skips_the_put(tmp_path: Path) -> None:
+    """A crash AFTER the upload persists phase='uploaded' — the retry goes
+    straight to polling (no second PUT, no second POST)."""
+
+    from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+    posts = {"file_urls": 0, "puts": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            posts["file_urls"] += 1
+            return httpx.Response(
+                200,
+                json={"data": {"batch_id": "bh04", "file_urls": ["https://oss.example/put/h04"]}},
+            )
+        if request.method == "PUT":
+            posts["puts"] += 1
+            return httpx.Response(200)
+        if "/extract-results/batch/" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {"file_name": "source.pdf", "state": "running"}
+                        ]
+                    }
+                },
+            )
+        raise AssertionError(url)
+
+    adapter = MinerUAdapter(token="t", transport=httpx.MockTransport(handler), poll_interval=0.0)
+    first = _job_request(tmp_path, "attempt-1")
+    from bio_pdf.errors import EngineTimeoutError
+
+    # Drain polls until the adapter gives up on the "running" state.
+    adapter.max_polls = 2
+    try:
+        adapter.parse(first, local_file=first.source_path)
+    except Exception:  # noqa: BLE001 — running-forever surfaces as a timeout
+        pass
+    assert posts["file_urls"] == 1 and posts["puts"] == 1
+    identity_path = tmp_path / "jobs" / "job-x" / "mineru_remote_identity.json"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert identity["batch_id"] == "bh04"
+
+    second = _job_request(tmp_path, "attempt-2")
+    try:
+        adapter.parse(second, local_file=second.source_path)
+    except Exception:  # noqa: BLE001
+        pass
+    assert posts["file_urls"] == 1, "no re-allocation"
+    assert posts["puts"] == 1, "the uploaded phase skips the PUT entirely"

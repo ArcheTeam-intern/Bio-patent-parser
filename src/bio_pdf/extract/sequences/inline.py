@@ -366,6 +366,9 @@ def extract_inline_sequences(
                         bbox=tuple(block["bbox"]) if block["bbox"] else None,
                         source_parser=str(block.get("source_parser") or "unknown"),
                         source_artifact_id=block.get("source_artifact_id"),
+                        # H07/P04: keep the frame-trust flag on the way
+                        # into evidence construction.
+                        bbox_verified=block.get("bbox_verified"),
                     ),
                     alias_block_refs=[
                         a["block_id"]
@@ -449,6 +452,9 @@ def _raw_letter_mention(
                     bbox=tuple(block["bbox"]) if block.get("bbox") else None,
                     source_parser=str(block.get("source_parser") or "unknown"),
                     source_artifact_id=block.get("source_artifact_id"),
+                    # H07/P04: keep the frame-trust flag on the way
+                    # into evidence construction.
+                    bbox_verified=block.get("bbox_verified"),
                 ),
                 text_raw=run,
                 char_start=m_start,

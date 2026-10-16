@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getIssues, issueAction, reparseIssue } from "../../api/client";
+import { getIssues, issueAction, reparseIssue, type IssueAction } from "../../api/client";
 
 /**
  * Issues 面板（plan B12 / C09）：结构化处理问题的可审计视图。
@@ -125,7 +125,12 @@ export function IssuePanel({ jobId }: { jobId: string }) {
                 来源：{issue.source_ids.slice(0, 6).join(", ")}
               </div>
             )}
-            <IssueActions jobId={jobId} issueId={issue.issue_id} state={issue.state} reasonCode={issue.reason_code} />
+            <IssueActions
+              jobId={jobId}
+              issueId={issue.issue_id}
+              state={issue.state}
+              allowedActions={issue.allowed_actions}
+            />
           </div>
         ))
       )}
@@ -135,20 +140,48 @@ export function IssuePanel({ jobId }: { jobId: string }) {
 }
 
 
-const REPARSE_SCOPES = new Set(["SEQ_INVENTORY_MISSING", "ZERO_RESIDUE_LISTING", "SOURCE_CONFLICT"]);
+/** H08/P05：把服务端 capability 映射为按钮状态（纯函数，便于锁定行为）。
+ * 不支持的动作用服务端给出的原因禁用展示——绝不硬显示一个执行不了的按钮。 */
+export function reparseButtonFor(
+  allowedActions: IssueAction[] | undefined,
+  state: string,
+): { visible: boolean; enabled: boolean; label: string; title?: string } {
+  const capability = (allowedActions ?? []).find((a) => a.action === "reparse");
+  if (!capability || state === "dismissed") {
+    return { visible: false, enabled: false, label: "", title: undefined };
+  }
+  if (capability.supported) {
+    return {
+      visible: true,
+      enabled: true,
+      label: capability.label || "区域复解析",
+      title:
+        capability.produces ??
+        "对该问题所在页执行区域 OCR，产出候选文本（不自动采用）",
+    };
+  }
+  return {
+    visible: true,
+    enabled: false,
+    label: capability.label || "区域复解析（不可用）",
+    title: capability.reason ?? "该问题没有可用的有界复解析路径",
+  };
+}
 
-/** D09：动作全部有后端与审计日志——标记非目标需原因，保留未解决带说明，
- * 区域复解析产出候选制品（不自动采用）。 */
+/** D09 + H08：动作全部有后端与审计日志——按钮严格由服务端 capability
+ * （issue.allowed_actions）驱动，前端不再维护第二份 reason 清单；不支持时
+ * 显示服务端给出的原因。区域复解析产出候选文本制品（不自动采用），表格
+ * 网格结构不会被重建。 */
 function IssueActions({
   jobId,
   issueId,
   state,
-  reasonCode,
+  allowedActions,
 }: {
   jobId: string;
   issueId: string;
   state: string;
-  reasonCode: string;
+  allowedActions?: IssueAction[];
 }) {
   const [note, setNote] = useState("");
   const [open, setOpen] = useState(false);
@@ -168,7 +201,7 @@ function IssueActions({
     onError: (error) => setGuess(String(error)),
   });
 
-  const reparse = useMutation({
+  const reparseRun = useMutation({
     mutationFn: () => reparseIssue(jobId, issueId),
     onSuccess: (result) => {
       setReparseResult({ preview: result.candidate.preview, note: result.candidate.note });
@@ -177,22 +210,26 @@ function IssueActions({
     onError: (error) => setGuess(String(error)),
   });
 
-  const canReparse = REPARSE_SCOPES.has(reasonCode) && state !== "dismissed";
+  const dismissCapability = (allowedActions ?? []).find((a) => a.action === "dismiss");
+  const reparse = reparseButtonFor(allowedActions, state);
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         {!open && (
           <>
-            <button onClick={() => setOpen(true)}>标记非目标 / 加说明…</button>
-            {canReparse && (
-              <button
-                disabled={reparse.isPending}
-                title="对该问题所在页执行区域 OCR，产出候选文本（不自动采用）"
-                onClick={() => reparse.mutate()}
-              >
-                {reparse.isPending ? "复解析中…" : "区域复解析"}
-              </button>
-            )}
+            <button onClick={() => setOpen(true)}>
+              {dismissCapability?.label ?? "标记非目标 / 加说明…"}
+            </button>
+            {reparse.visible &&
+              (reparse.enabled ? (
+                <button disabled={reparseRun.isPending} title={reparse.title} onClick={() => reparseRun.mutate()}>
+                  {reparseRun.isPending ? "复解析中…" : reparse.label}
+                </button>
+              ) : (
+                <button disabled title={reparse.title}>
+                  {reparse.label}
+                </button>
+              ))}
             {state === "dismissed" && (
               <button onClick={() => action.mutate({ action: "reopen" })}>恢复为待处理</button>
             )}

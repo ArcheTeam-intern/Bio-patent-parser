@@ -278,6 +278,31 @@ class JobService:
 
         page_count = inspection.page_count
         pages = validate_page_selection(page_numbers, page_count)
+        # H02/S02: an adopted candidate whose target page is outside the
+        # job's page set would be a silent no-op — refuse at creation.
+        for adopted in cfg.adopted_candidates:
+            if pages and adopted.page_number not in pages:
+                raise WorkflowError(
+                    f"adopted candidate {adopted.candidate_id} targets page "
+                    f"{adopted.page_number}, outside the requested pages {list(pages)}",
+                    details={
+                        "candidate_id": adopted.candidate_id,
+                        "candidate_page": adopted.page_number,
+                        "requested_pages": list(pages),
+                        "code": "ADOPT_PAGE_OUT_OF_SCOPE",
+                    },
+                )
+            if not pages and adopted.page_number > page_count:
+                raise WorkflowError(
+                    f"adopted candidate {adopted.candidate_id} targets page "
+                    f"{adopted.page_number}, beyond the document's {page_count} pages",
+                    details={
+                        "candidate_id": adopted.candidate_id,
+                        "candidate_page": adopted.page_number,
+                        "document_page_count": page_count,
+                        "code": "ADOPT_PAGE_OUT_OF_SCOPE",
+                    },
+                )
         cfg = cfg.model_copy(update={"pages": list(pages)})
 
         effective = {

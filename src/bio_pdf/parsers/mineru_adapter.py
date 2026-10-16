@@ -317,7 +317,7 @@ class MinerUAdapter:
 
     # ---- v4 batch protocol (C10) -----------------------------------------
 
-    def request_upload_slots(
+    def allocate_upload_slot(
         self,
         file_path: Path,
         *,
@@ -330,11 +330,10 @@ class MinerUAdapter:
     ) -> tuple[str, list[str], str]:
         """``POST /file-urls/batch`` → ``(batch_id, signed_put_urls, file_name)``.
 
-        The signed PUT URL is an *upload* slot only. The old flow treated it
-        as a public read URL and re-submitted it to the parse endpoint — the
-        v4 contract is: PUT the bytes, and the batch result is polled by
-        ``batch_id``. This method returns the batch identity, never a
-        pretend-public URL.
+        H03/S03: ALLOCATION ONLY — no bytes are uploaded here. The caller
+        persists the batch/slot identity (with its fingerprint) BEFORE the
+        PUT, so a lost PUT response still recovers as "already allocated:
+        re-PUT the same slot" instead of allocating a second batch.
 
         D06: the caller's effective parameters (language / table / OCR /
         page ranges) travel into the request — real options in, not silent
@@ -397,30 +396,37 @@ class MinerUAdapter:
                     "MinerU file-urls slot is not a URL",
                     details={"slot": upload_url[:200]},
                 )
-
-            # PUT the bytes. No Content-Type (the OSS signature was computed
-            # without it) and — critically — no MinerU auth header: signed
-            # URLs must never see the platform token. A bare client keeps the
-            # injected transport (tests) while dropping the auth headers.
-            try:
-                with httpx.Client(
-                    timeout=self.timeout, transport=self._transport
-                ) as raw_client:
-                    put_resp = raw_client.put(
-                        upload_url,
-                        content=file_path.read_bytes(),
-                    )
-            except httpx.HTTPError as exc:
-                raise NetworkTransientError(
-                    f"failed to PUT file to MinerU: {exc}",
-                    details={"upload_url": upload_url[:200]},
-                ) from exc
-            if put_resp.status_code not in (200, 201, 204):
-                raise EngineUnavailableError(
-                    f"MinerU file PUT returned {put_resp.status_code}",
-                    details={"upload_url": upload_url[:200], "body": put_resp.text[:200]},
-                )
         return batch_id, [str(u) for u in file_urls], file_name
+
+    def upload_to_slot(self, upload_url: str, file_path: Path) -> None:
+        """``PUT`` the file bytes to an ALREADY-ALLOCATED slot (H03).
+
+        Idempotent by design: re-PUTting the same slot after a lost response
+        is the recovery path, never a fresh allocation. No Content-Type (the
+        OSS signature was computed without it) and — critically — no MinerU
+        auth header: signed URLs must never see the platform token. A bare
+        client keeps the injected transport (tests) while dropping the auth
+        headers.
+        """
+
+        if not upload_url.startswith(("http://", "https://")):
+            raise EngineProtocolUnsupportedError(
+                "MinerU file-urls slot is not a URL",
+                details={"slot": upload_url[:200]},
+            )
+        try:
+            with httpx.Client(timeout=self.timeout, transport=self._transport) as raw_client:
+                put_resp = raw_client.put(upload_url, content=file_path.read_bytes())
+        except httpx.HTTPError as exc:
+            raise NetworkTransientError(
+                f"failed to PUT file to MinerU: {exc}",
+                details={"upload_url": upload_url[:200]},
+            ) from exc
+        if put_resp.status_code not in (200, 201, 204):
+            raise EngineUnavailableError(
+                f"MinerU file PUT returned {put_resp.status_code}",
+                details={"upload_url": upload_url[:200], "body": put_resp.text[:200]},
+            )
 
     def poll_batch_entry(
         self,
@@ -1144,7 +1150,12 @@ class MinerUAdapter:
                 identity = loaded
 
         if identity is None:
-            batch_id, _slots, file_name = self.request_upload_slots(
+            # H03/S03: ALLOCATE the slot first and persist the identity
+            # (phase="allocated") BEFORE the PUT. If the PUT response is
+            # lost while the server already received the file, the retry
+            # recovers here, re-PUTs the SAME slot and never allocates a
+            # second batch.
+            batch_id, slots, file_name = self.allocate_upload_slot(
                 local_file,
                 data_id=local_sha[:16],
                 language=str(params["language"]),
@@ -1157,15 +1168,49 @@ class MinerUAdapter:
                 "batch_id": batch_id,
                 "data_id": local_sha[:16],
                 "file_name": file_name,
+                "upload_url": str(slots[0]),
                 "base_url": self.base_url,
                 "fingerprint": fingerprint,
                 "source_sha256": local_sha,
                 "pages": fingerprint_payload["pages"],
                 "profile": request.profile,
                 "params": params,
-                "phase": "uploaded",
+                "phase": "allocated",
                 "submitted_at": datetime.now(tz=timezone.utc).isoformat(),
             }
+            _write_identity(identity_path, identity)
+
+        if identity.get("phase") == "allocated":
+            # PUT the bytes (idempotent): a lost response lands here again.
+            try:
+                self.upload_to_slot(str(identity.get("upload_url") or ""), local_file)
+            except EngineUnavailableError:
+                # An expired/invalid slot cannot be reused — allocate a
+                # FRESH batch with a documented reason instead of retrying
+                # a dead URL forever.
+                identity["phase"] = "slot_expired"
+                identity["slot_expired_reason"] = "PUT slot rejected (expired or invalid)"
+                _write_identity(identity_path, identity)
+                batch_id, slots, file_name = self.allocate_upload_slot(
+                    local_file,
+                    data_id=local_sha[:16],
+                    language=str(params["language"]),
+                    enable_table=bool(params["enable_table"]),
+                    enable_formula=bool(params["enable_formula"]),
+                    is_ocr=bool(params["is_ocr"]),
+                    page_ranges=params["page_ranges"],
+                )
+                identity.update(
+                    {
+                        "batch_id": batch_id,
+                        "file_name": file_name,
+                        "upload_url": str(slots[0]),
+                        "phase": "allocated",
+                    }
+                )
+                _write_identity(identity_path, identity)
+                self.upload_to_slot(str(identity["upload_url"]), local_file)
+            identity["phase"] = "uploaded"
             _write_identity(identity_path, identity)
 
         identity["phase"] = "polling"
@@ -1703,23 +1748,55 @@ def _project_table_item(
             f"GRID_SIZE_SUSPECT: {row_count}x{col_count} grid with {len(cells)} cells "
             "(possible colspan/rowspan mis-parse — region re-parse or human check required)"
         )
-    row_ends = sorted(
-        {c["start_col_offset_idx"] + c.get("col_span", 1) for c in cells}
-    )
-    if len(row_ends) > 2 and (row_ends[-1] - row_ends[0]) > 3:
-        # G11/P07: a severe width spread means the HTML grid is distorted
-        # (merge/split mis-parse, rotated continuations) — activities from
-        # it would be fabricated pairings, so extraction is refused for
-        # this table and the issue invites a region re-parse.
+    # H04/P07-adjacent: an S/R/I VALUE inside the header row means the
+    # drug/strain axes of this grid are semantically mangled (real rotated
+    # TABLE 3 case) — pairing values under an "R" header would fabricate
+    # relations, so this is a visible structural refusal.
+    header_value_cells = [
+        c
+        for c in cells
+        if c["start_row_offset_idx"] == 0
+        and str(c.get("text") or "").strip() in ("S", "R", "I", "SDD")
+    ]
+    if header_value_cells:
         structure_issues.append(
-            f"RAGGED_ROWS_SEVERE: row widths range {row_ends[0]}..{row_ends[-1]} "
-            "(structure distorted — no activity extraction; region re-parse or human check)"
+            f"HEADER_SEMANTICS_BROKEN: {len(header_value_cells)} S/R/I value(s) inside the "
+            "header row — drug/strain axes cannot be trusted "
+            "(no activity extraction; region re-parse or human check)"
         )
-    elif len(row_ends) > 2:
-        structure_issues.append(
-            f"RAGGED_ROWS: row widths range {row_ends[0]}..{row_ends[-1]} "
-            "(structure may be distorted)"
-        )
+
+    # H04/P01: raggedness is a property of ROWS, not cells. The old check
+    # collected each CELL's end column — a perfectly regular 2x6 rectangle
+    # produced ends {1..6} and was flagged severely distorted (killing its
+    # legitimate activities). Effective width per row = the farthest end
+    # column INCLUDING span coverage rows (a rowspan cell occupies the rows
+    # below it, so those rows count as covered, not short).
+    row_widths: dict[int, int] = {}
+    for c in cells:
+        end_col = c["start_col_offset_idx"] + c.get("col_span", 1)
+        for covered_row in range(
+            c["start_row_offset_idx"], c["start_row_offset_idx"] + c.get("row_span", 1)
+        ):
+            row_widths[covered_row] = max(row_widths.get(covered_row, 0), end_col)
+    distinct_widths = sorted({row_widths[r] for r in sorted(row_widths)})
+    if len(distinct_widths) > 1:
+        spread = distinct_widths[-1] - distinct_widths[0]
+        if spread > 3:
+            # A severe width spread means the HTML grid is distorted
+            # (merge/split mis-parse, rotated continuations) — activities
+            # from it would be fabricated pairings, so extraction is
+            # refused for this table and the issue invites a re-parse.
+            structure_issues.append(
+                f"RAGGED_ROWS_SEVERE: row widths range {distinct_widths[0]}..{distinct_widths[-1]} "
+                "(structure distorted — no activity extraction; region re-parse or human check)"
+            )
+        elif spread > 1:
+            # A one/two-column difference is usually a header/caption row,
+            # NOT evidence of distortion — warn but keep extracting.
+            structure_issues.append(
+                f"RAGGED_ROWS: row widths range {distinct_widths[0]}..{distinct_widths[-1]} "
+                "(minor row-width variation)"
+            )
 
     table: dict[str, Any] = {
         "self_ref": f"mineru:table:{page_no}:{seq}",

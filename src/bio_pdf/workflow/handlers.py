@@ -870,6 +870,24 @@ def _merge_ocr_page_lines(
     def letter_len(fp: str) -> int:
         return len(_re.sub(r"\d+", "", fp))
 
+    _tag_capture = _re.compile(r"<\s*(\d{3})\s*>\s*([^<]*)")
+
+    def tag_signature(text: str) -> tuple[tuple[str, str], ...] | None:
+        """H05/P02: ST.25 declaration signature — tag number + field value.
+
+        ``<210> 1`` and ``<210> 12`` are DIFFERENT declarations; their
+        fingerprints are not in a containment relation either, but the
+        generic substring path would treat ``<210>1`` as covered by
+        ``<210>12``. Declaration-bearing lines therefore never take the
+        substring cover/supersede route — only an identical signature may
+        merge. None = the text carries no tag (residues/paragraphs keep the
+        normal containment behaviour)."""
+
+        matches = _tag_capture.findall(text)
+        if not matches:
+            return None
+        return tuple((num, value.strip()) for num, value in matches)
+
     def _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
         return a0 - 2.0 <= b1 and b0 - 2.0 <= a1
 
@@ -912,6 +930,7 @@ def _merge_ocr_page_lines(
                 ),
                 fingerprint(str(b.get("text") or "")),
                 loose_fingerprint(str(b.get("text") or "")),
+                tag_signature(str(b.get("text") or "")),
                 str(b.get("text") or ""),
                 str(b.get("block_id") or ""),
             )
@@ -922,15 +941,23 @@ def _merge_ocr_page_lines(
         for order, (x0, y0, x1, y1, text) in enumerate(lines):
             fp = fingerprint(text)
             ocr_loose = loose_fingerprint(text)
+            ocr_sig = tag_signature(text)
             if letter_len(fp) < 2:
                 continue
             overlapping = [
-                (item_index, n_fp, n_loose, n_text, n_block_id)
-                for item_index, n_box, n_fp, n_loose, n_text, n_block_id in natives
+                (item_index, n_fp, n_loose, n_sig, n_text, n_block_id)
+                for item_index, n_box, n_fp, n_loose, n_sig, n_text, n_block_id in natives
                 if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
             ]
             # Exact (digit-preserving) equality merges — tags included.
-            merge_equal = any(n_fp == fp for _i, n_fp, _nl, _t, _b in overlapping)
+            merge_equal = any(n_fp == fp for _i, n_fp, _nl, _ns, _t, _b in overlapping)
+            # H05/P02: identical DECLARATION signatures also merge (the
+            # same tag/value pair from both channels).
+            if not merge_equal and ocr_sig is not None:
+                merge_equal = any(
+                    n_sig is not None and n_sig == ocr_sig
+                    for _i, _nfp, _nl, n_sig, _t, _b in overlapping
+                )
             # G06/P01: count-marker tolerance applies ONLY to tag-free texts
             # and ONLY when the difference is standalone integer tokens (the
             # 1 5 10… margin counters of residue rows). ``<210> 1`` vs
@@ -938,19 +965,25 @@ def _merge_ocr_page_lines(
             if not merge_equal and ocr_loose is not None:
                 merge_equal = any(
                     n_loose is not None and n_loose == ocr_loose
-                    for _i, n_fp, n_loose, _t, _b in overlapping
+                    for _i, n_fp, n_loose, _ns, _t, _b in overlapping
                 )
-            # F05: only retained content that FULLY COVERS the OCR text may
-            # consume it; equal already merged above.
-            covered = any(
-                n_fp and n_fp != fp and fp in n_fp for _i, n_fp, _nl, _t, _b in overlapping
+            # F05 + H05: the substring cover/supersede route is for
+            # tag-FREE content only — ``<210> 1`` ⊂ ``<210> 12`` is digit
+            # coincidence, not coverage. Declaration lines with different
+            # signatures fall through to the conflict path below.
+            containment_allowed = ocr_sig is None and all(
+                n_sig is None for _i, _nfp, _nl, n_sig, _t, _b in overlapping
+            )
+            covered = containment_allowed and any(
+                n_fp and n_fp != fp and fp in n_fp
+                for _i, n_fp, _nl, _ns, _t, _b in overlapping
             )
             if merge_equal or covered:
                 continue  # nothing beyond the retained text could be lost
             supersedes = [
                 (item_index, n_fp, n_text, n_block_id)
-                for item_index, n_fp, _n_loose, n_text, n_block_id in overlapping
-                if n_fp and n_fp != fp and n_fp in fp  # native fragment ⊂ OCR
+                for item_index, n_fp, _n_loose, _n_sig, n_text, n_block_id in overlapping
+                if containment_allowed and n_fp and n_fp != fp and n_fp in fp
             ]
             if supersedes:
                 superseded_native = []
@@ -988,7 +1021,7 @@ def _merge_ocr_page_lines(
             # recorded as a content conflict, never merged.
             disagree = [
                 (n_fp, n_text)
-                for _i, n_fp, _nl, n_text, _b in overlapping
+                for _i, n_fp, _nl, _ns, n_text, _b in overlapping
                 if max(letter_len(fp), letter_len(n_fp))
                 <= 2 * max(min(letter_len(fp), letter_len(n_fp)), 1)
             ]
@@ -1393,13 +1426,20 @@ class ExtractStage(_FileStage):
                     artifact_name = str(spec.get("artifact_name") or "candidate.txt")
                     page_no = int(spec.get("page_number") or 0)
                     if page_no <= 0 or (in_scope is not None and page_no not in in_scope):
-                        diagnostics.append(
-                            {
+                        # H02/S02: a MANDATORY adopted input that this run
+                        # cannot consume is a structural failure — skipping
+                        # it would publish a "success" that never adopted
+                        # anything.
+                        raise WorkflowError(
+                            f"adopted candidate {candidate_id} targets page {page_no}, "
+                            "outside this run's requested pages",
+                            details={
+                                "candidate_id": candidate_id,
+                                "candidate_page": page_no,
+                                "run_pages": list(context.page_numbers),
                                 "code": "ADOPTED_CANDIDATE_OUT_OF_SCOPE",
-                                "detail": f"{candidate_id} targets page {page_no}, outside this run's pages",
-                            }
+                            },
                         )
-                        continue
                     artifact_path = (
                         _Path2(context.output_dir) / "adopted" / candidate_id / artifact_name
                     )
@@ -1792,7 +1832,9 @@ class ExtractStage(_FileStage):
                 fatal_structure = [
                     str(issue)
                     for issue in table.structure_issues
-                    if str(issue).startswith(("GRID_SIZE_SUSPECT", "RAGGED_ROWS_SEVERE"))
+                    if str(issue).startswith(
+                        ("GRID_SIZE_SUSPECT", "RAGGED_ROWS_SEVERE", "HEADER_SEMANTICS_BROKEN")
+                    )
                 ]
                 if fatal_structure:
                     # G11/P07: a structurally distorted grid must not be

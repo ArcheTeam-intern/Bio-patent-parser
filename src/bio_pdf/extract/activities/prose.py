@@ -170,6 +170,9 @@ def extract_prose_measurements(
                         bbox=tuple(block["bbox"]) if block.get("bbox") else None,
                         source_parser=str(block.get("source_parser") or "unknown"),
                         source_artifact_id=block.get("source_artifact_id"),
+                        # H07/P04: keep the frame-trust flag on the way
+                        # into evidence construction.
+                        bbox_verified=block.get("bbox_verified"),
                     ),
                     alias_block_refs=[
                         a["block_id"]

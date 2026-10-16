@@ -177,3 +177,48 @@ def test_column_header_conditions_belong_to_their_own_column() -> None:
     assert any(c["value"] == "1 h" for c in one_h["conditions"])
     assert any(c["value"] == "2 h" for c in two_h["conditions"])
     assert not any(c["value"] == "2 h" for c in one_h["conditions"])
+
+
+# ---- H06/P03: condition identity is semantic, evidence is traceability ---
+
+
+def test_same_condition_different_evidence_still_pairs() -> None:
+    """The reviewer's production repro: identical '1 h' header conditions
+    extracted via two engines (different evidence ids) must pair — and both
+    sides keep their evidence references in the payload."""
+
+    same_doc = _doc(caption=None, document_id="sha256:h06")
+    same_doc["pages"][0]["tables"][0] = _mic_table(table_id="1:t0", caption=None)
+    same_doc["pages"][0]["tables"][0]["cells"][1] = _cell(
+        "1:t0:r0c1", 0, 1, "MIC at 1 h (µg/mL)", role="column"
+    )
+    a = _domain_pass_spec(same_doc, document_id="sha256:h06", engine="docling")
+    b = _domain_pass_spec(same_doc, document_id="sha256:h06", engine="mineru_http")
+    # The two engines produce different evidence ids for the same header.
+    ev_a = [c["evidence"] for m in a["measurements"] for c in m["conditions"] if "evidence" in c]
+    ev_b = [c["evidence"] for m in b["measurements"] for c in m["conditions"] if "evidence" in c]
+    assert (ev_a != ev_b) or not ev_a, "repro requires engine-specific evidence ids"
+
+    out = pair_measurements(a["measurements"], b["measurements"])
+    assert out["paired"] == 1
+    assert out["keys_only_a"] == [] and out["keys_only_b"] == []
+    # Evidence references are NOT deleted to make pairing work — the
+    # payloads still carry them on both sides.
+    assert ev_a or ev_b
+    assert any("evidence" in c for m in a["measurements"] for c in m["conditions"])
+
+
+def test_condition_value_difference_still_unpairs() -> None:
+    a = _domain_pass_spec(
+        _doc(caption="MIC after incubation for 1 h", document_id="sha256:a"),
+        document_id="sha256:a",
+        engine="docling",
+    )
+    b = _domain_pass_spec(
+        _doc(caption="MIC after incubation for 2 h", document_id="sha256:b"),
+        document_id="sha256:b",
+        engine="mineru_http",
+    )
+    out = pair_measurements(a["measurements"], b["measurements"])
+    assert out["paired"] == 0
+    assert out["value_diffs"] == []

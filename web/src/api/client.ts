@@ -678,6 +678,18 @@ export interface ParseIssueData {
   title?: string;
   impact?: string;
   suggestion?: string;
+  /** H08/P05：服务端返回的可执行动作（前端不维护第二份 reason 清单）。 */
+  allowed_actions?: IssueAction[];
+}
+
+export interface IssueAction {
+  action: "dismiss" | "note" | "reopen" | "reparse";
+  supported: boolean;
+  label: string;
+  requires_reason?: boolean;
+  produces?: string;
+  endpoint?: string;
+  reason?: string;
 }
 
 export function getIssues(

@@ -88,7 +88,9 @@ def test_adopt_records_candidate_as_new_job_input(client, monkeypatch) -> None:
     adopted = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/adopt", json={"actor": "reviewer"})
     assert adopted.status_code == 201, adopted.text
     body = adopted.json()["adopted"]
-    assert body["consumed_by_new_job"] is True
+    # H02/S02: enqueueing = scheduled; consumption is proven by the run.
+    assert body["status"] == "scheduled"
+    assert "consumption_proof" in body
     assert body["candidate_id"] == candidate["candidate_id"]
     new_job_id = body["new_job_id"]
 
@@ -392,4 +394,129 @@ def test_legit_adopted_candidate_still_recovers_through_a_real_worker(tmp_path: 
     config = svc.repository.get_job_config(job.job_id)
     spec = config["effective_config"]["adopted_candidates"][0]
     assert spec["content_sha256"] and spec["meta_sha256"]
+    svc.close()
+
+
+# ---- H02/S02: the adopted page must be inside the job's scope ---------------
+
+
+def test_adopt_rejects_a_candidate_page_outside_the_requested_pages(client, monkeypatch) -> None:
+    """The reviewer's repro: candidate meta page = 2, request pages = [1] —
+    the old flow queued the job, the worker silently skipped the candidate,
+    and the job still published success. Now rejected BEFORE any write."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(c, tmp_path)
+
+    from bio_pdf.extract.sequences import region_ocr
+
+    monkeypatch.setattr(
+        region_ocr,
+        "ocr_residue_pages",
+        lambda pdf_path, pages: {int(pages[0]): [(40.0, 700.0, 200.0, 710.0, "MKTG")]},
+    )
+    rep = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert rep.status_code == 200
+
+    rejected = c.post(
+        f"/api/v1/jobs/{job_id}/issues/{issue_id}/adopt",
+        json={"actor": "reviewer", "pages": [1]},
+    )  # candidate meta page is 1 here → allowed; force the mismatch instead:
+    if rejected.status_code == 201:
+        # page 1 IS in [1] — verify the guard through the SERVICE layer with
+        # an explicit out-of-scope page set instead.
+        pass
+
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    conn.row_factory = sqlite3.Row
+    before_jobs = conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"]
+    before_events = conn.execute(
+        "SELECT COUNT(*) AS n FROM issue_events WHERE action = 'adopted'"
+    ).fetchone()["n"]
+    conn.close()
+
+    strictly_out = c.post(
+        f"/api/v1/jobs/{job_id}/issues/{issue_id}/adopt",
+        json={"actor": "reviewer", "pages": [9]},
+    )
+    assert strictly_out.status_code == 422, strictly_out.text
+    detail = strictly_out.json()["error"]
+    assert detail["code"] == "ADOPT_PAGE_OUT_OF_SCOPE"
+    assert detail["details"]["candidate_page"] == 1
+
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    conn.row_factory = sqlite3.Row
+    after_jobs = conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"]
+    after_events = conn.execute(
+        "SELECT COUNT(*) AS n FROM issue_events WHERE action = 'adopted'"
+    ).fetchone()["n"]
+    conn.close()
+    assert after_jobs == before_jobs, "no job may be created for a doomed adoption"
+    assert after_events == before_events, "no adopted event may be written"
+
+
+def test_create_job_refuses_an_adopted_page_outside_its_pages(tmp_path: Path) -> None:
+    from bio_pdf.application.job_service import JobPaths, JobService
+
+    data_dir = tmp_path / "data2"
+    svc = JobService(JobPaths.under(data_dir))
+    pdf = _sample_pdf(tmp_path / "h02.pdf")
+    import hashlib as _h
+
+    text = "Ala Gly Leu Lys"
+    candidate = tmp_path / "cand-h02.txt"
+    candidate.write_text(text, encoding="utf-8")
+    meta = {
+        "candidate_id": "cand-h02",
+        "page_number": 2,
+        "lines": [{"x0": 40.0, "y0": 700.0, "x1": 200.0, "y1": 710.0, "text": text}],
+    }
+    from bio_pdf.errors import WorkflowError
+
+    import pytest as _pytest
+
+    with _pytest.raises(WorkflowError) as excinfo:
+        svc.create_job(
+            pdf,
+            engine="native",
+            page_numbers=(1,),
+            adopted_candidates=[
+                {
+                    "candidate_id": "cand-h02",
+                    "artifact_path": str(candidate),
+                    "content_sha256": _h.sha256(text.encode("utf-8")).hexdigest(),
+                    "meta_json": json.dumps(meta),
+                    "page_number": 2,
+                }
+            ],
+        )
+    assert excinfo.value.details.get("code") == "ADOPT_PAGE_OUT_OF_SCOPE"
+    svc.close()
+
+
+def test_worker_structurally_fails_on_an_out_of_scope_adopted_input(tmp_path: Path) -> None:
+    """Defense in depth: even if a config carries an out-of-scope candidate
+    (e.g. hand-edited), the worker FAILS the job — no silent skip, no
+    success publication."""
+
+    svc, job, _adopted_dir = _create_adopted_job(tmp_path)
+    # Rewrite the persisted config to move the candidate to page 2 while the
+    # job only parses page 1.
+    config = svc.repository.get_job_config(job.job_id)
+    specs = config["effective_config"]["adopted_candidates"]
+    specs[0]["page_number"] = 2
+    svc.repository.set_job_config(job.job_id, config)
+
+    from bio_pdf.workflow.queue_worker import run_worker
+
+    run_worker(svc.paths.artifact_root, once=True)
+    done = svc.get_job(job.job_id)
+    assert done is not None and done.status == "failed", done
+    assert svc.repository.get_publication(job.job_id) is None
+    row = svc.repository.connection.execute(
+        "SELECT error_json FROM stage_runs WHERE job_id = ? AND stage_name = 'extract'"
+        " ORDER BY attempt DESC LIMIT 1",
+        (job.job_id,),
+    ).fetchone()
+    assert "ADOPTED_CANDIDATE_OUT_OF_SCOPE" in str(row["error_json"])
     svc.close()

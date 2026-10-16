@@ -48,7 +48,15 @@ def client(tmp_path: Path):
         yield c, tmp_path
 
 
-def _seed_issue(c: TestClient, tmp_path: Path, *, reason_code: str, source_ids: list[str], detail: str) -> tuple[str, str]:
+def _seed_issue(
+    c: TestClient,
+    tmp_path: Path,
+    *,
+    reason_code: str,
+    source_ids: list[str],
+    detail: str,
+    issue_id: str = "iss-d09",
+) -> tuple[str, str]:
     pdf = _sample_pdf(tmp_path / "i.pdf")
     doc = c.post(
         "/api/v1/documents",
@@ -62,12 +70,12 @@ def _seed_issue(c: TestClient, tmp_path: Path, *, reason_code: str, source_ids: 
     conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
     conn.execute(
         "INSERT INTO parse_issues (issue_id, job_id, scope, reason_code, source_json, detail, state, created_at)"
-        " VALUES ('iss-d09', ?, 'table', ?, ?, ?, 'open', '2026-10-16T00:00:00+00:00')",
-        (job_id, reason_code, json.dumps(source_ids), detail),
+        " VALUES (?, ?, 'table', ?, ?, ?, 'open', '2026-10-16T00:00:00+00:00')",
+        (issue_id, job_id, reason_code, json.dumps(source_ids), detail),
     )
     conn.commit()
     conn.close()
-    return job_id, "iss-d09"
+    return job_id, issue_id
 
 
 def test_table_issue_with_docling_id_prefix_locates_page(client) -> None:
@@ -486,3 +494,102 @@ def test_failed_reparse_consumes_its_reserved_identity(client, monkeypatch) -> N
     assert second.status_code == 200
     assert second.json()["candidate"]["attempt"] == 2, "the failed identity must not be reused"
     assert second.json()["candidate"]["candidate_id"] != failed_candidate
+
+
+# ---- H08/P05: server-driven action capabilities ---------------------------
+
+
+def test_table_issue_capability_exposes_reparse_with_its_artifact(client) -> None:
+    """The reviewer's gap: backend allowed table-issue reparse but the UI
+    kept its own scope list. The capability now travels WITH the issue."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c,
+        tmp_path,
+        reason_code="TABLE_STRUCTURE",
+        source_ids=["7:t0"],
+        detail="TABLE_GRID_OVERLAP at r0c0",
+    )
+    view = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["issue"]
+    actions = {a["action"]: a for a in view["allowed_actions"]}
+    assert actions["reparse"]["supported"] is True
+    assert "candidate" in actions["reparse"]["produces"]
+    assert "NOT reconstructed" in actions["reparse"]["produces"]
+    assert actions["dismiss"]["supported"] is True
+    assert actions["dismiss"]["requires_reason"] is True
+
+
+def test_unsupported_reparse_capability_carries_the_reason(client) -> None:
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c,
+        tmp_path,
+        reason_code="RESULT_WITHOUT_METRIC",
+        source_ids=["span-1"],
+        detail="value without a registered metric",
+    )
+    view = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["issue"]
+    actions = {a["action"]: a for a in view["allowed_actions"]}
+    assert actions["reparse"]["supported"] is False
+    assert actions["reparse"]["reason"]
+
+
+def test_reparse_capability_matches_the_route_decision(client, monkeypatch) -> None:
+    """Capability and endpoint use the SAME code set: whenever the view says
+    supported, the route accepts; when it says unsupported, the route 422s
+    (the reviewer's exact failure was a UI/back-end mismatch)."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c,
+        tmp_path,
+        reason_code="TABLE_STRUCTURE",
+        source_ids=["7:t0"],
+        detail="TABLE_GRID_OVERLAP at r0c0",
+    )
+    from bio_pdf.extract.sequences import region_ocr
+
+    monkeypatch.setattr(
+        region_ocr,
+        "ocr_residue_pages",
+        lambda pdf_path, pages: {int(pages[0]): [(40.0, 700.0, 200.0, 710.0, "TXT")]},
+    )
+    view = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["issue"]
+    supported = next(a for a in view["allowed_actions"] if a["action"] == "reparse")["supported"]
+    resp = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert supported is True and resp.status_code == 200, resp.text
+    # And the audit trail records the produced candidate.
+    events = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["events"]
+    assert any(e["action"] == "reparse_candidate" for e in events)
+
+    other_job, other_issue = _seed_issue(
+        c,
+        tmp_path,
+        reason_code="RESULT_WITHOUT_METRIC",
+        source_ids=["span-2"],
+        detail="value without a registered metric",
+        issue_id="iss-d09-other",
+    )
+    view2 = c.get(f"/api/v1/jobs/{other_job}/issues/{other_issue}").json()["issue"]
+    supported2 = next(a for a in view2["allowed_actions"] if a["action"] == "reparse")["supported"]
+    resp2 = c.post(f"/api/v1/jobs/{other_job}/issues/{other_issue}/reparse")
+    assert supported2 is False and resp2.status_code == 422, resp2.text
+
+
+def test_issues_list_carries_the_same_capabilities_as_the_detail(client) -> None:
+    """H08 follow-up: the panel renders the LIST — if only the detail
+    endpoint carried allowed_actions the button would never appear."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c,
+        tmp_path,
+        reason_code="TABLE_STRUCTURE",
+        source_ids=["7:t0"],
+        detail="TABLE_GRID_OVERLAP at r0c0",
+    )
+    listed = c.get(f"/api/v1/jobs/{job_id}/issues").json()["issues"][0]
+    detail = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["issue"]
+    assert listed["allowed_actions"] == detail["allowed_actions"]
+    assert any(a["action"] == "reparse" and a["supported"] for a in listed["allowed_actions"])
