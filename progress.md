@@ -293,3 +293,6 @@
 - ①审核"重复"：实测根因两条——(a) 同一篇论文 d927d1c3 被解析 7 次，7 个 job 各出一份审核队列（全库 0 组真重复行；771 条大头是这 7 份叠加）；(b) 同一任务内药敏矩阵几十个细胞行，原因列全同（缺单位+实体未关联+需人工核对）且无区分信息，观感即"重复审核请求"。修复：队列行新增"记录"摘要列（值/单位/靶标、序列片段、矩阵坐标"第9页 矩阵r14c6"从 record_id 解析），每行唯一可辨；配合 ② 可删掉旧解析任务清理重复队列。
 - ②任务删除：后端 DELETE /jobs/{id}（repository.delete_job 单事务清 11 张依赖表 + artifacts 按 jobs/<id>/ 前缀清 + review_decisions 子查询；活动中任务 409 JOB_ACTIVE；源文档内容寻址保留）+ JobService 连带清磁盘 jobs/<id>/ 目录（resolve 防symlink逃逸）+ 4 个 API 测试；前端任务列表"删除"按钮两段确认（4s 自动过期，避开 webview 原生对话框）。浏览器 E2E 实测：新建任务→删除→列表消失→API 404→磁盘目录/DB 行全清、document 保留。
 - ③结果分布统一：PageDistribution 增加图表序列（绿色；图表计数来自 figures API）；序列/活性/表格/图表四个 tab 现在渲染同一份完整分布（此前表格 tab 独有表格计数、图表 tab 无分布）。浏览器实测两 tab 分布文本完全一致（含"图表 1/2"、"表格 1/2"、"活性 192"、"序列 2"计数）。481 backend + 28 vitest + build 全绿。
+
+### C01 完成：评测基线冻结（plan 2026-10-16_domain_review_display_comparison_plan）
+- scripts/freeze_eval_baseline.py → reports/baselines/2026-10-16_eval_baseline.json：三样本（论文 d927d1c3/12 页、EP3027649B1 ffb2e5bb/195 页、WO2020156367A1 e25a5881/25 页）SHA-256、git rev、docling/rapidocr/onnxruntime 版本、configs/demo.toml 哈希、各样本已登记 jobs 与已发布基线 id、逐阶段 implementation_version。只读脚本，不写任务状态。MINERU_TOKEN 未配置（云实测按方案记为未完成）。

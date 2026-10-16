@@ -1,0 +1,590 @@
+{
+  "generated_at": "2026-10-16T04:56:57.437457+00:00",
+  "git_rev": "20681504fa65737a4139b71762e90038e184aea7",
+  "data_dir": "data\\post-m1-demo",
+  "config": {
+    "path": "configs/demo.toml",
+    "sha256": "d2e9a79cd89286405862562ee64ec8aacf9abae4ee8d78274f95a35425756b6c"
+  },
+  "versions": {
+    "python": "3.12.8",
+    "docling": "2.138.0",
+    "docling_core": "unknown",
+    "rapidocr": "unknown",
+    "onnxruntime": "1.31.0",
+    "torch": "2.14.1+cpu",
+    "pypdfium2": "unknown"
+  },
+  "mineru_token_present": false,
+  "samples": [
+    {
+      "path": "pdf/paper_TAT-RasGAP_broad_antimicrobial_2017.pdf",
+      "sha256": "d927d1c3d8f80fe396d1090190bac25e944ade61b74683fffcab382cc596da35",
+      "bytes": 2894915,
+      "page_count": 12,
+      "document_id": "sha256:d927d1c3d8f80fe396d1090190bac25e944ade61b74683fffcab382cc596da35",
+      "jobs": [
+        {
+          "job_id": "job-5ef2b03776b4",
+          "status": "succeeded",
+          "created_at": "2026-10-14T14:52:24.096729+00:00",
+          "publication": {
+            "baseline_id": "e3d4047ea17feff2",
+            "manifest_sha256": "e3d4047ea17feff21b40704a7bce6453d40d18b3c04164af7b04826fbde7494a",
+            "manifest_rel": "jobs/job-5ef2b03776b4/published/result-manifest-20261014T145248.5936420000.json",
+            "published_at": "2026-10-14T14:52:48.613624+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "483b64f0f9fd68eb"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "dec7c72e2985977f"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0287e1fe6623924c"
+            },
+            "layout_parse": {
+              "implementation_version": "v5-ocr-selection",
+              "cache_key": "8881856824904cab"
+            },
+            "normalize": {
+              "implementation_version": "v4",
+              "cache_key": "4983a5102dfe6462"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "210e88406a751b4a"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "09a58578045fb341"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "50b8820af4b49411"
+            }
+          }
+        },
+        {
+          "job_id": "job-89234adfe1b6",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T02:28:08.351518+00:00",
+          "publication": {
+            "baseline_id": "f7a278e9235f950e",
+            "manifest_sha256": "f7a278e9235f950e300cd916abc3ec7021f0c3c42db6cc17f21b6727619f133e",
+            "manifest_rel": "jobs/job-89234adfe1b6/published/result-manifest-20261015T022904.2518850000.json",
+            "published_at": "2026-10-15T02:29:04.266824+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v5-ocr-selection",
+              "cache_key": "99b74db5f1cdfa9b"
+            },
+            "normalize": {
+              "implementation_version": "v4",
+              "cache_key": "698ed103715523e4"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "7554660613c224f3"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "77e88c872bfc93f1"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "922992c6239c474a"
+            }
+          }
+        },
+        {
+          "job_id": "job-a33f9d7dc580",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T05:15:05.461084+00:00",
+          "publication": {
+            "baseline_id": "b38489a3854b7f38",
+            "manifest_sha256": "b38489a3854b7f3832d7868b076fe06886b7a65c550ff17bed7d24a3ffd5231c",
+            "manifest_rel": "jobs/job-a33f9d7dc580/published/result-manifest-20261015T051606.1486070000.json",
+            "published_at": "2026-10-15T05:16:06.163436+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v5-ocr-selection",
+              "cache_key": "6befee0f18eaafc0"
+            },
+            "normalize": {
+              "implementation_version": "v5",
+              "cache_key": "b770da3854f0545d"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "74853065fd2ead18"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "ee65d9ac15aef7eb"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "1719049f08797124"
+            }
+          }
+        },
+        {
+          "job_id": "job-5798c1a5449c",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T05:34:23.606516+00:00",
+          "publication": {
+            "baseline_id": "722025664ffb81d9",
+            "manifest_sha256": "722025664ffb81d9dd5d7d9e985e5abd8fd0268e966f42894ba669b9a6dc816e",
+            "manifest_rel": "jobs/job-5798c1a5449c/published/result-manifest-20261015T053521.6023320000.json",
+            "published_at": "2026-10-15T05:35:21.616843+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v5-ocr-selection",
+              "cache_key": "23fefdf367a33973"
+            },
+            "normalize": {
+              "implementation_version": "v5",
+              "cache_key": "e5208bc357d77a5c"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "7b8d855db926af15"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "f742c0f74b73df3b"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "aa920cc8eb0069d5"
+            }
+          }
+        },
+        {
+          "job_id": "job-1f9fd9ee5386",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T05:44:03.167798+00:00",
+          "publication": {
+            "baseline_id": "ad8dc345c0fee1b2",
+            "manifest_sha256": "ad8dc345c0fee1b20891507abb99385f511da05646479fa136a975afef731707",
+            "manifest_rel": "jobs/job-1f9fd9ee5386/published/result-manifest-20261015T054452.7807500000.json",
+            "published_at": "2026-10-15T05:44:52.794751+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v5-ocr-selection",
+              "cache_key": "010a5f9f5fd65a80"
+            },
+            "normalize": {
+              "implementation_version": "v5",
+              "cache_key": "8f627ac6581cd096"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "ff70c8040a88184b"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "6ecd91baf6d9315f"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "867e916b790636bc"
+            }
+          }
+        },
+        {
+          "job_id": "job-8fd1cea6292e",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T06:41:26.837035+00:00",
+          "publication": {
+            "baseline_id": "10e8b6bbc3739d1d",
+            "manifest_sha256": "10e8b6bbc3739d1d953bd16691a0ae69768a24ba0269a16ce47d33a25a116462",
+            "manifest_rel": "jobs/job-8fd1cea6292e/published/result-manifest-20261015T064217.0491770000.json",
+            "published_at": "2026-10-15T06:42:17.063175+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v5-ocr-selection",
+              "cache_key": "47728c5a2e5e0940"
+            },
+            "normalize": {
+              "implementation_version": "v5",
+              "cache_key": "d7dc016bb4bf2b54"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "56bcee27a5e49e0e"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "10004ff193fa1fb1"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "4be3d028829df72f"
+            }
+          }
+        },
+        {
+          "job_id": "job-878e3a8443b7",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T08:46:13.103912+00:00",
+          "publication": {
+            "baseline_id": "ec237cee221b2b2c",
+            "manifest_sha256": "ec237cee221b2b2ceca40a1b03b7174623ae798a358a442eb6bd4e6aadcece75",
+            "manifest_rel": "jobs/job-878e3a8443b7/published/result-manifest-20261015T084708.9206310000.json",
+            "published_at": "2026-10-15T08:47:08.935376+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v6-figures",
+              "cache_key": "a30a7097d0da97cc"
+            },
+            "normalize": {
+              "implementation_version": "v5",
+              "cache_key": "941da77a3bfaf623"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "efd7205f835f67ed"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "b6fa300b44b7fa96"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "0e1fa5d4abcfe054"
+            }
+          }
+        },
+        {
+          "job_id": "job-5ccbaf5f28fe",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T09:59:31.513024+00:00",
+          "publication": {
+            "baseline_id": "e3a1484df0127e1b",
+            "manifest_sha256": "e3a1484df0127e1b18e3a6a17956ee7ba0676055107a9cb014eb73d2d04c49ec",
+            "manifest_rel": "jobs/job-5ccbaf5f28fe/published/result-manifest-20261015T100025.7656100000.json",
+            "published_at": "2026-10-15T10:00:25.781548+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v7-figure-filter",
+              "cache_key": "a2fd9697fc0a4b7d"
+            },
+            "normalize": {
+              "implementation_version": "v6",
+              "cache_key": "ea14503e6d6a6f8c"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "0935610559bbea60"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "ae44cba17bf406a5"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "d76643df4172ec0e"
+            }
+          }
+        },
+        {
+          "job_id": "job-464cbf0f0341",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T13:19:17.292208+00:00",
+          "publication": {
+            "baseline_id": "c64843543fb5a8b1",
+            "manifest_sha256": "c64843543fb5a8b12c836c9431a86bac997ccf8f2dafb347cf5854793964925d",
+            "manifest_rel": "jobs/job-464cbf0f0341/published/result-manifest-20261015T132129.5570020000.json",
+            "published_at": "2026-10-15T13:21:29.572001+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v7-figure-filter",
+              "cache_key": "3d50acc9720cf491"
+            },
+            "normalize": {
+              "implementation_version": "v7-native-call-seeds",
+              "cache_key": "43679f38a17d24e9"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "4b44faec4e650ae8"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "fba2e1514c2da467"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "56522db352fc3a15"
+            }
+          }
+        },
+        {
+          "job_id": "job-62f430801980",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T13:25:31.652194+00:00",
+          "publication": {
+            "baseline_id": "e586756900f240e3",
+            "manifest_sha256": "e586756900f240e3deeb328c3229b89997cce9a97a5accfafcaefa0e5ed6bb80",
+            "manifest_rel": "jobs/job-62f430801980/published/result-manifest-20261015T132740.1837730000.json",
+            "published_at": "2026-10-15T13:27:40.197777+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "b7e89f99caa76e69"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "2b89f931692c4843"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "0480b8fbe568b857"
+            },
+            "layout_parse": {
+              "implementation_version": "v7-figure-filter",
+              "cache_key": "1be441cffc45647b"
+            },
+            "normalize": {
+              "implementation_version": "v7-native-call-seeds",
+              "cache_key": "f41055cce6e8da34"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "f4dcf1caf4467021"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "e581b19df6848484"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "c44e7bf113df8239"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "pdf/patent_EP3027649B1_TNFa_IL17_bispecific_antibodies.pdf",
+      "sha256": "ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "bytes": 3372673,
+      "page_count": 195,
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "jobs": [
+        {
+          "job_id": "job-1fe8b7f2cc62",
+          "status": "cancelled",
+          "created_at": "2026-10-15T02:03:55.216250+00:00",
+          "publication": null,
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "c7f651bab21f8bfb"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "1e935ebd92a13013"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "4d1980be60ce5e43"
+            }
+          }
+        },
+        {
+          "job_id": "job-f5d57ca907b7",
+          "status": "succeeded_with_review",
+          "created_at": "2026-10-15T02:30:29.691040+00:00",
+          "publication": {
+            "baseline_id": "9af1673e8ff8fea9",
+            "manifest_sha256": "9af1673e8ff8fea9671aa68dc36901a8f6e5b1cabf323b03af2f712e8c8da6f1",
+            "manifest_rel": "jobs/job-f5d57ca907b7/published/result-manifest-20261015T024453.6108030000.json",
+            "published_at": "2026-10-15T02:44:53.625999+00:00"
+          },
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "df31978599b25263"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "18843f475013c20c"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "83b21e3dbc43e01a"
+            },
+            "layout_parse": {
+              "implementation_version": "v5-ocr-selection",
+              "cache_key": "08faa3e5185b0bdb"
+            },
+            "normalize": {
+              "implementation_version": "v4",
+              "cache_key": "cd86c1a73359521d"
+            },
+            "extract": {
+              "implementation_version": "v3",
+              "cache_key": "81db733f3bdcd2d9"
+            },
+            "validate": {
+              "implementation_version": "v3",
+              "cache_key": "19cc6a4982556168"
+            },
+            "export": {
+              "implementation_version": "v3",
+              "cache_key": "80b74268a5f36e62"
+            }
+          }
+        },
+        {
+          "job_id": "job-2ec4941e47d5",
+          "status": "failed",
+          "created_at": "2026-10-16T02:52:17.283094+00:00",
+          "publication": null,
+          "stage_implementations": {
+            "ingest": {
+              "implementation_version": "v3",
+              "cache_key": "c7f651bab21f8bfb"
+            },
+            "inspect": {
+              "implementation_version": "v3",
+              "cache_key": "1e935ebd92a13013"
+            },
+            "native_parse": {
+              "implementation_version": "v3",
+              "cache_key": "4d1980be60ce5e43"
+            },
+            "layout_parse": {
+              "implementation_version": "v7-figure-filter",
+              "cache_key": "6e5d976fb01ad257"
+            },
+            "normalize": {
+              "implementation_version": "v7-native-call-seeds",
+              "cache_key": "f767d1903fef1494"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "pdf/patent_WO2020156367A1_rice_RAY1_zh.pdf",
+      "sha256": "e25a58817192b93301cd91a8ad1ebf2162fe147b6cc1f2e0a699e00363f9b3e0",
+      "bytes": 1613678,
+      "page_count": 25,
+      "document_id": "sha256:e25a58817192b93301cd91a8ad1ebf2162fe147b6cc1f2e0a699e00363f9b3e0",
+      "jobs": []
+    }
+  ]
+}
