@@ -232,6 +232,10 @@ class ReviewDecisionRequest(BaseModel):
     reason: str | None = None
     patch: dict[str, Any] | None = None
     evidence_ids: list[str] = Field(default_factory=list)
+    #: E1/S01: the baseline the client made its decision against. When
+    #: given it must equal the live publication baseline, checked inside
+    #: the decision transaction (409 REVIEW_BASELINE_CONFLICT otherwise).
+    baseline_id: str | None = None
 
 
 class ReviewDecisionResponse(ApiEnvelope):

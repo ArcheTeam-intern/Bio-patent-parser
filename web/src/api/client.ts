@@ -381,7 +381,12 @@ export function getReviews(
 
 /** C06 批量决定：全部预检查通过才提交；任一冲突整体失败（409）。 */
 export function submitBatchDecisions(
-  decisions: { review_id: string; action: "confirm" | "correct" | "reject"; base_revision: number }[],
+  decisions: {
+    review_id: string;
+    action: "confirm" | "correct" | "reject";
+    base_revision: number;
+    baseline_id?: string | null;
+  }[],
   actor = "local-operator",
 ): Promise<{
   status: string;
@@ -512,6 +517,8 @@ export function submitDecision(
     reason?: string;
     patch?: Record<string, unknown>;
     evidence_ids?: string[];
+    /** E1/S01: the baseline this decision was made against. */
+    baseline_id?: string | null;
   },
 ): Promise<DecisionResponse> {
   return request(`/reviews/${encodeURIComponent(reviewId)}/decisions`, {

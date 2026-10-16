@@ -951,6 +951,7 @@ class Repository:
         manifest_sha: str,
         review_items: list["ReviewItem"],
         issues: list[Any] | None = None,
+        baseline_id: str | None = None,
     ) -> bool:
         """Atomically publish: status + manifest pointer + review items.
 
@@ -966,7 +967,10 @@ class Repository:
                 self._conn.execute("ROLLBACK")
                 return False
             now = _utcnow_iso()
-            baseline_id = manifest_sha[:16]
+            # E1/S01: the validate stage's content-addressed baseline when
+            # present (it is what review_id digests embed); the manifest
+            # hash only serves legacy plans.
+            baseline_id = baseline_id or manifest_sha[:16]
             self._conn.execute(
                 "UPDATE jobs SET status = ?, current_stage = NULL, updated_at = ? WHERE job_id = ?",
                 (final_status, now, job_id),
@@ -1037,7 +1041,7 @@ class Repository:
                         _json_dumps(issue.get("source_ids") or []),
                         issue.get("detail", ""),
                         issue.get("state", "open"),
-                        manifest_sha[:16],
+                        baseline_id,
                         now,
                         issue.get("page_number"),
                         _json_dumps(issue.get("region")) if issue.get("region") else None,
@@ -1053,7 +1057,7 @@ class Repository:
                     baseline_id = excluded.baseline_id,
                     published_at = excluded.published_at
                 """,
-                (job_id, manifest_rel, manifest_sha, manifest_sha[:16], now),
+                (job_id, manifest_rel, manifest_sha, baseline_id, now),
             )
             self._conn.execute("COMMIT")
             return True

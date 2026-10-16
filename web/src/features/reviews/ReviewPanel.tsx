@@ -38,6 +38,7 @@ export function ReviewPanel({ jobId, recordId, currentRecord }: Props) {
         patch: args.patch,
         reason: args.reason,
         evidence_ids: (currentRecord["evidence_ids"] as string[]) ?? [],
+        baseline_id: reviewItemQuery.baselineId,
       }),
     onSuccess: (res) => {
       setConflict(null);
@@ -288,16 +289,20 @@ function useOpenReview(jobId: string, recordId: string) {
     queryKey: ["reviews", jobId, recordId],
     queryFn: () => getReviews(jobId, { recordId }),
   });
-  const [version, setVersion] = useState<{ reviewId: string | null; recordRevision: number }>({
-    reviewId: null,
-    recordRevision: 1,
-  });
+  const [version, setVersion] = useState<{
+    reviewId: string | null;
+    recordRevision: number;
+    baselineId: string | null;
+  }>({ reviewId: null, recordRevision: 1, baselineId: null });
   useEffect(() => {
     const items = query.data?.reviews ?? [];
     const match = items.find((r) => r.record_id === recordId);
     setVersion({
       reviewId: match?.review_id ?? null,
       recordRevision: match?.record_revision ?? 1,
+      // E1/S01: remember which baseline the panel is looking at; the server
+      // refuses the decision if a new baseline was published meanwhile.
+      baselineId: match?.baseline_id ?? null,
     });
   }, [query.data, recordId]);
   return { ...version, refresh: () => query.refetch() };

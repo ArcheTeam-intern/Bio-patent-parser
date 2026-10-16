@@ -148,12 +148,19 @@ class ReviewItem(_StrictModel):
     ``record_revision`` is the snapshot of the record that was being
     reviewed; review APIs reject decisions whose ``base_revision`` does
     not match the current record revision.
+
+    ``baseline_id`` (E1/S01): the publication baseline the item was
+    derived from. It is part of the review_id digest, so a re-published
+    baseline can never REBIND an old review_id onto new records, and
+    decision commands carry the baseline the client is looking at and
+    are refused in-transaction when it no longer matches.
     """
 
     review_id: NonEmptyStr
     job_id: NonEmptyStr
     record_id: NonEmptyStr
     record_revision: int = Field(ge=1)
+    baseline_id: str | None = None
     reason_codes: list[NonEmptyStr] = Field(default_factory=list)
     evidence_ids: list[NonEmptyStr] = Field(default_factory=list)
     proposed_actions: list[NonEmptyStr] = Field(default_factory=list)

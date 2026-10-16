@@ -373,6 +373,15 @@ class WorkflowRunner:
         manifest_path = self.artifact_root / manifest_rel
         manifest_sha = self._sha256(manifest_path)
 
+        # E1/S01: the review items already carry the validate stage's
+        # content-addressed baseline (it is baked into their ids); read it
+        # off the plan instead of re-reading artifacts. Manifest hash is
+        # only the fallback for plans without items.
+        baseline_id = (
+            str(getattr(review_plan[0], "baseline_id", "") or "") or manifest_sha[:16]
+            if review_plan
+            else manifest_sha[:16]
+        )
         ok = self.repository.publish_result_fenced(
             token=self.lease_token,
             job_id=job.job_id,
@@ -381,6 +390,7 @@ class WorkflowRunner:
             manifest_sha=manifest_sha,
             review_items=review_plan,
             issues=issue_plan,
+            baseline_id=baseline_id,
         )
         if not ok:
             return RunResult(
@@ -614,6 +624,19 @@ class WorkflowRunner:
         planned = len(review_plan) if review_plan else 0
         open_reviews = max(review_total, planned, self.repository_open_reviews(job_id))
         return "succeeded_with_review" if open_reviews > 0 else "succeeded"
+
+    def _baseline_of(self, published: dict[str, dict[str, Any]]) -> str | None:
+        entry = (published.get("validate") or {}).get("validation.json")
+        if entry is None:
+            return None
+        try:
+            payload = json.loads(
+                (self.artifact_root / entry["relative_path"]).read_text(encoding="utf-8")
+            )
+        except (KeyError, OSError, json.JSONDecodeError):
+            return None
+        value = payload.get("baseline_id")
+        return str(value) if value else None
 
     def _load_review_plan(
         self, job_id: str, published: dict[str, dict[str, Any]]

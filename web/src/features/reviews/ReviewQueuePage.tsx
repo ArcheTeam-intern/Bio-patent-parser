@@ -122,6 +122,8 @@ export function ReviewQueuePage() {
             review_id: r.review_id,
             action: "confirm" as const,
             base_revision: r.record_revision,
+            // E1/S01: every item carries the baseline it came from.
+            baseline_id: r.baseline_id ?? null,
           })),
       ),
     onSuccess: (result) => {

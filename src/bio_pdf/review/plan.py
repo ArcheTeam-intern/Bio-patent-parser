@@ -33,6 +33,8 @@ def _priority(reason_codes: list[str]) -> int:
 def build_review_plan(
     records: list[dict[str, Any]],
     budget: int,
+    *,
+    baseline_id: str | None = None,
 ) -> list[ReviewItem]:
     """Build an ordered review plan within ``budget`` items.
 
@@ -75,8 +77,11 @@ def build_review_plan(
         # yields the same ids, so a resumed/re-run job never reopens a
         # resolved review item (plan T03).
         revision = int(record.get("record_revision", 1) or 1)
+        # E1/S01: baseline in the identity — a new baseline re-derives
+        # DIFFERENT ids, so publish-time upserts can never rebind a stale
+        # review onto new content.
         digest = hashlib.sha256(
-            f"{job_id}|{record_id}|{revision}".encode("utf-8")
+            f"{job_id}|{baseline_id or ''}|{record_id}|{revision}".encode("utf-8")
         ).hexdigest()[:16]
         items.append(
             ReviewItem(
@@ -84,6 +89,7 @@ def build_review_plan(
                 job_id=job_id,
                 record_id=str(record_id),
                 record_revision=revision,
+                baseline_id=baseline_id,
                 reason_codes=list(record.get("reason_codes", []) or []),
                 evidence_ids=list(record.get("evidence_ids", []) or []),
                 proposed_actions=list(record.get("proposed_actions", []) or []),

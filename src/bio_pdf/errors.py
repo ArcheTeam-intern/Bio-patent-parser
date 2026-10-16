@@ -134,6 +134,12 @@ class ReviewRevisionConflictError(WorkflowError):
     code = "REVIEW_REVISION_CONFLICT"
 
 
+class ReviewBaselineConflictError(WorkflowError):
+    """E1/S01: the decision targets a different baseline than the live one."""
+
+    code = "REVIEW_BASELINE_CONFLICT"
+
+
 class JobRunningError(WorkflowError):
     """Resume attempted on a job whose lease is still valid (plan T03)."""
 

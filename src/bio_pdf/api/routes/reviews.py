@@ -21,7 +21,11 @@ from pydantic import BaseModel, Field
 from bio_pdf.api.contracts import ReviewDecisionRequest, ReviewDecisionResponse, ReviewItemView, ReviewsResponse
 from bio_pdf.api.dependencies import ServiceDep
 from bio_pdf.application.review_service import ReviewService
-from bio_pdf.errors import ReviewRevisionConflictError, WorkflowError
+from bio_pdf.errors import (
+    ReviewBaselineConflictError,
+    ReviewRevisionConflictError,
+    WorkflowError,
+)
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
 
@@ -153,6 +157,8 @@ class BatchDecisionItem(BaseModel):
     base_revision: int
     reason: str | None = None
     patch: dict = Field(default_factory=dict)
+    #: E1/S01: client's expected baseline for this item.
+    baseline_id: str | None = None
 
 
 class BatchDecisionRequest(BaseModel):
@@ -175,7 +181,7 @@ def submit_batch_decision(service: ServiceDep, request: BatchDecisionRequest) ->
             decisions=[d.model_dump() for d in request.decisions],
             actor=request.actor,
         )
-    except ReviewRevisionConflictError as exc:
+    except (ReviewRevisionConflictError, ReviewBaselineConflictError) as exc:
         raise HTTPException(
             status_code=409,
             detail={
@@ -229,8 +235,9 @@ def submit_decision(
             reason=request.reason,
             patch=request.patch,
             evidence_ids=request.evidence_ids,
+            expected_baseline=request.baseline_id,
         )
-    except ReviewRevisionConflictError as exc:
+    except (ReviewRevisionConflictError, ReviewBaselineConflictError) as exc:
         raise HTTPException(
             status_code=409,
             detail={

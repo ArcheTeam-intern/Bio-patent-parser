@@ -24,6 +24,7 @@ Artifact layout under ``artifact_root/jobs/<job_id>/``::
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -1529,7 +1530,7 @@ def _page_from_legacy_id(evidence_id: str) -> int:
 
 class ValidateStage(_FileStage):
     name = "validate"
-    implementation = "v3"
+    implementation = "v4-baseline"
 
     def run(self, context: StageContext) -> StageOutcome:
         from bio_pdf.review.plan import build_review_plan
@@ -1599,7 +1600,18 @@ class ValidateStage(_FileStage):
                 }
             )
 
-        items = build_review_plan(review_records, budget=0)
+        # E1/S01: the baseline identity is fixed HERE (content-addressed
+        # over the artifacts being published, independent of the manifest's
+        # wall-clock timestamp) and baked into every review id and into the
+        # publish transaction.
+        baseline_digest = hashlib.sha256()
+        for ref_key in sorted(context.inputs):
+            ref = context.inputs[ref_key]
+            baseline_digest.update(f"{ref_key}={ref.sha256}".encode("utf-8"))
+            baseline_digest.update(b"\n")
+        baseline_id = baseline_digest.hexdigest()[:16]
+
+        items = build_review_plan(review_records, budget=0, baseline_id=baseline_id)
 
         # B03: the validate stage produces the review PLAN only. Review
         # items are registered by the runner inside the lease-verified
@@ -1609,6 +1621,7 @@ class ValidateStage(_FileStage):
             "schema_version": "1.1.0",
             "sequences": sequences,
             "measurements": measurements,
+            "baseline_id": baseline_id,
             "review_count": len(items),
             "review_plan": [json.loads(item.model_dump_json()) for item in items],
             "issue_plan": list(extract.get("issues", [])),

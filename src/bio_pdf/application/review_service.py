@@ -25,7 +25,11 @@ from pathlib import Path
 from typing import Any
 
 from bio_pdf.contracts import Measurement, ReviewDecision, SequenceRecord
-from bio_pdf.errors import ReviewRevisionConflictError, WorkflowError
+from bio_pdf.errors import (
+    ReviewBaselineConflictError,
+    ReviewRevisionConflictError,
+    WorkflowError,
+)
 from bio_pdf.storage.repository import Repository
 from bio_pdf.storage.result_reader import ResultReader
 from bio_pdf.validation.activities import validate_measurement
@@ -72,6 +76,7 @@ class ReviewService:
         reason: str | None = None,
         patch: dict[str, Any] | None = None,
         evidence_ids: list[str] | None = None,
+        expected_baseline: str | None = None,
     ) -> DecisionOutcome:
         self._validate_action(action, reason)
         conn = self.repository.connection
@@ -85,6 +90,7 @@ class ReviewService:
                 reason=reason,
                 patch=patch,
                 evidence_ids=evidence_ids,
+                expected_baseline=expected_baseline,
             )
             conn.execute("COMMIT")
         except Exception:
@@ -126,6 +132,7 @@ class ReviewService:
         reason: str | None,
         patch: dict[str, Any] | None,
         evidence_ids: list[str] | None,
+        expected_baseline: str | None = None,
     ) -> dict[str, Any]:
         """One decision's full validation + writes. MUST be inside a caller
         transaction — never issues BEGIN/COMMIT itself, so a batch can wrap
@@ -151,6 +158,44 @@ class ReviewService:
                     "review_id": review_id,
                     "live_revision": current_revision,
                     "base_revision": base_revision,
+                },
+            )
+        # E1/S01: the decision must target the CURRENT publication baseline.
+        # A stale browser page (old baseline) or a command carrying a
+        # different expected baseline is refused inside this transaction —
+        # never silently applied to new content.
+        publication = self.repository.get_publication(job_id)
+        live_baseline = str(publication["baseline_id"]) if publication else None
+        item_baseline = (
+            str(item["baseline_id"])
+            if "baseline_id" in item.keys() and item["baseline_id"]
+            else None
+        )
+        if (
+            expected_baseline is not None
+            and live_baseline is not None
+            and expected_baseline != live_baseline
+        ):
+            raise ReviewBaselineConflictError(
+                f"decision was made against baseline {expected_baseline[:16]}"
+                f" but the live baseline is {live_baseline[:16]}",
+                details={
+                    "review_id": review_id,
+                    "expected_baseline": expected_baseline,
+                    "live_baseline": live_baseline,
+                },
+            )
+        if (
+            item_baseline is not None
+            and live_baseline is not None
+            and item_baseline != live_baseline
+        ):
+            raise ReviewBaselineConflictError(
+                f"review item belongs to superseded baseline {item_baseline[:16]}",
+                details={
+                    "review_id": review_id,
+                    "item_baseline": item_baseline,
+                    "live_baseline": live_baseline,
                 },
             )
         self._ensure_open(item)
@@ -267,6 +312,7 @@ class ReviewService:
                     reason=d.get("reason"),
                     patch=d.get("patch"),
                     evidence_ids=d.get("evidence_ids"),
+                    expected_baseline=d.get("baseline_id"),
                 )
                 applied.append(
                     {
