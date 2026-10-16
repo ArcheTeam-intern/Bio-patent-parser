@@ -944,3 +944,8 @@ dialog::backdrop {
   background: var(--border-soft);
   font-size: 12px;
 }
+
+.status.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}

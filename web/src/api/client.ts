@@ -521,10 +521,24 @@ export interface ParseIssueData {
   state: string;
   baseline_id: string | null;
   created_at: string;
+  /** C09：严重程度（info/warning/error）、真实页码（可能为 null）与指导。 */
+  severity?: "info" | "warning" | "error";
+  page_number?: number | null;
+  title?: string;
+  impact?: string;
+  suggestion?: string;
 }
 
-export function getIssues(jobId: string): Promise<{ issues: ParseIssueData[]; total: number }> {
-  return request(`/jobs/${encodeURIComponent(jobId)}/issues`);
+export function getIssues(
+  jobId: string,
+  filters?: { state?: string; severity?: string; pageNumber?: number },
+): Promise<{ issues: ParseIssueData[]; total: number; severity_counts?: Record<string, number> }> {
+  const params = new URLSearchParams();
+  if (filters?.state) params.set("state", filters.state);
+  if (filters?.severity) params.set("severity", filters.severity);
+  if (filters?.pageNumber !== undefined) params.set("page_number", String(filters.pageNumber));
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return request(`/jobs/${encodeURIComponent(jobId)}/issues${suffix}`);
 }
 
 // ---- queue status (live-ops) ---------------------------------------------

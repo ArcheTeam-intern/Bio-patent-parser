@@ -464,14 +464,104 @@ def _legacy_geometry_precision(span: dict) -> str:
     return "none"
 
 
+#: C09 severity by reason code — 残基缺失/长度与结构冲突 = warning/error，
+#: "评分表""菌株目录"类分类结论 = info（提示，不是错误）。未知代码保守给 warning。
+_ISSUE_SEVERITY: dict[str, str] = {
+    "SEQ_INVENTORY_CONFLICT": "error",
+    "SEQ_LENGTH_CONFLICT": "error",
+    "VALIDATION_CONFLICT": "error",
+    "SOURCE_CONFLICT": "error",
+    "TEXT_CONFLICT": "error",
+    "MISSING_TABLE": "error",
+    "TABLE_GRID_OVERLAP": "error",
+    "ZERO_RESIDUE_LISTING": "warning",
+    "SEQ_INVENTORY_MISSING": "warning",
+    "TABLE_GEOMETRY_RECONSTRUCTED": "warning",
+    "TABLE_STRUCTURE": "warning",
+    "RESULT_WITHOUT_METRIC": "warning",
+    "REPARSE_EXHAUSTED": "warning",
+    "TABLE_SCORING": "info",
+    "TABLE_INVENTORY": "info",
+    "TABLE_UNCLASSIFIED": "info",
+    "TABLE_ASSAY_CONDITIONS": "info",
+    "TABLE_SEQUENCE": "info",
+}
+
+#: C09 为什么 / 影响什么 / 下一步怎么办 模板（按代码；detail 提供具体对象）。
+_ISSUE_GUIDANCE: dict[str, dict[str, str]] = {
+    "SEQ_INVENTORY_MISSING": {
+        "title": "序列残基未恢复",
+        "impact": "完整性未知，暂不能导出完整 FASTA 或建立确认的序列关联",
+        "suggestion": "对该区域做区域 OCR，并人工核对长度与字符",
+    },
+    "SEQ_INVENTORY_CONFLICT": {
+        "title": "序列声明冲突",
+        "impact": "同一 SEQ ID 的声明与恢复结果互相矛盾，不能据此导出",
+        "suggestion": "人工核对原文与恢复长度，确认以哪一侧为准",
+    },
+    "ZERO_RESIDUE_LISTING": {
+        "title": "清单声明无残基",
+        "impact": "该声明编号没有可用的残基内容",
+        "suggestion": "检查渲染区域是否需要 OCR，或确认该声明在原文中即为空",
+    },
+    "TABLE_GEOMETRY_RECONSTRUCTED": {
+        "title": "表格为几何重建",
+        "impact": "结构与轴标签由坐标聚类重建，可能错位",
+        "suggestion": "对照原图逐格核对后再接受",
+    },
+    "RESULT_WITHOUT_METRIC": {
+        "title": "结果缺少可解析指标",
+        "impact": "该活性描述没有匹配到已注册指标",
+        "suggestion": "人工确认指标，或在指标注册表补充该写法",
+    },
+    "TABLE_SCORING": {
+        "title": "评分表（提示）",
+        "impact": "结构化保留、不做活性提取——通常是评分标准而非实验结果",
+        "suggestion": "如需提取请人工标注目标列",
+    },
+    "TABLE_INVENTORY": {
+        "title": "清单/目录表（提示）",
+        "impact": "结构化保留、不做活性提取",
+        "suggestion": "无需处理；如含实验结果请人工标注",
+    },
+}
+
+
+def _issue_page(issue: dict[str, Any]) -> int | None:
+    """Page from REAL fields only: detail text or source ids — never guessed."""
+
+    import re as _re
+
+    for pattern in (r"\bpage\s+(\d+)\b", r"第\s*(\d+)\s*页", r":p(\d+)[:\-]"):
+        match = _re.search(pattern, str(issue.get("detail") or ""))
+        if match:
+            return int(match.group(1))
+    for source_id in issue.get("source_ids") or []:
+        match = _re.search(r":p(\d+)[:\-]", str(source_id))
+        if match:
+            return int(match.group(1))
+    return None
+
+
 @router.get("/issues")
-def list_issues(service: ServiceDep, job_id: str, state: str | None = None) -> dict:
-    """Structured parse issues (plan B06): scope/reason/sources/state."""
+def list_issues(
+    service: ServiceDep,
+    job_id: str,
+    state: str | None = None,
+    severity: str | None = None,
+    page_number: int | None = None,
+) -> dict:
+    """Structured parse issues with C09 detail (severity / page / guidance).
+
+    Filters: ``state`` (open/dismissed/…), ``severity`` (info/warning/error)
+    and ``page_number`` (位置来自真实 detail/source 字段，不从 id 猜页号).
+    """
 
     _job_or_404(service, job_id)
     rows = service.repository.list_issues(job_id, state=state)
-    issues = [
-        {
+    issues: list[dict[str, Any]] = []
+    for row in rows:
+        issue = {
             "issue_id": row["issue_id"],
             "job_id": row["job_id"],
             "scope": row["scope"],
@@ -482,9 +572,35 @@ def list_issues(service: ServiceDep, job_id: str, state: str | None = None) -> d
             "baseline_id": row["baseline_id"],
             "created_at": row["created_at"],
         }
-        for row in rows
-    ]
-    return {"api_version": "v1", "job_id": job_id, "issues": issues, "total": len(issues)}
+        issue["severity"] = _ISSUE_SEVERITY.get(str(row["reason_code"]), "warning")
+        issue["page_number"] = _issue_page(issue)
+        issued_guidance = _ISSUE_GUIDANCE.get(str(row["reason_code"]))
+        if issued_guidance:
+            issue.update(issued_guidance)
+        else:
+            issue.update(
+                {
+                    "title": str(row["reason_code"]),
+                    "impact": "见详情",
+                    "suggestion": "按详情人工核对",
+                }
+            )
+        issues.append(issue)
+
+    if severity:
+        issues = [i for i in issues if i["severity"] == severity]
+    if page_number is not None:
+        issues = [i for i in issues if i["page_number"] == page_number]
+    counts: dict[str, int] = {"info": 0, "warning": 0, "error": 0}
+    for i in issues:
+        counts[i["severity"]] = counts.get(i["severity"], 0) + 1
+    return {
+        "api_version": "v1",
+        "job_id": job_id,
+        "issues": issues,
+        "total": len(issues),
+        "severity_counts": counts,
+    }
 
 
 @router.get("/artifacts", response_model=ArtifactsResponse)

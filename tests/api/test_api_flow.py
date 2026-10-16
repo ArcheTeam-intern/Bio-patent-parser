@@ -421,3 +421,56 @@ def test_figures_page_filter_reports_total_and_scope_note(client) -> None:
     page9 = c.get(f"/api/v1/jobs/{job_id}/figures?page_number=9").json()
     assert page9["figures"] == []
     assert "全文共 2 个" in page9["note"]
+
+
+def test_issues_carry_severity_page_and_guidance_with_filters(client) -> None:
+    """C09: issues answer why/impact/next-step and filter by severity/page."""
+
+    c, tmp_path = client
+    import sqlite3
+
+    pdf = _sample_pdf(tmp_path / "issues.pdf")
+    doc = c.post(
+        "/api/v1/documents",
+        files={"file": ("issues.pdf", pdf.read_bytes(), "application/pdf")},
+    ).json()
+    job = c.post(
+        "/api/v1/jobs",
+        json={"document_id": doc["document_id"], "parser": "native"},
+    ).json()
+    job_id = job["job_id"]
+
+    # Seed issues directly (the endpoint reads the repository rows).
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    conn.execute(
+        "INSERT INTO parse_issues (issue_id, job_id, scope, reason_code, source_json, detail, state, created_at)"
+        " VALUES ('iss-1', ?, 'sequence', 'SEQ_INVENTORY_MISSING', '[\"st25:7\"]',"
+        " 'SEQ ID 7 (page 32): residue region reached but no recoverable residues', 'open', '2026-10-16T00:00:00+00:00')",
+        (job_id,),
+    )
+    conn.execute(
+        "INSERT INTO parse_issues (issue_id, job_id, scope, reason_code, source_json, detail, state, created_at)"
+        " VALUES ('iss-2', ?, 'table', 'TABLE_SCORING', '[\"t1\"]', 'page 8: classified scoring; structure preserved', 'open', '2026-10-16T00:00:00+00:00')",
+        (job_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    body = c.get(f"/api/v1/jobs/{job_id}/issues").json()
+    assert body["total"] == 2
+    by_id = {i["issue_id"]: i for i in body["issues"]}
+    missing = by_id["iss-1"]
+    assert missing["severity"] == "warning"
+    assert missing["page_number"] == 32
+    assert missing["title"] == "序列残基未恢复"
+    assert "OCR" in missing["suggestion"]
+    scoring = by_id["iss-2"]
+    assert scoring["severity"] == "info"
+    assert scoring["page_number"] == 8
+    assert body["severity_counts"] == {"info": 1, "warning": 1, "error": 0}
+
+    only_warn = c.get(f"/api/v1/jobs/{job_id}/issues?severity=warning").json()
+    assert [i["issue_id"] for i in only_warn["issues"]] == ["iss-1"]
+
+    page32 = c.get(f"/api/v1/jobs/{job_id}/issues?page_number=32").json()
+    assert [i["issue_id"] for i in page32["issues"]] == ["iss-1"]
