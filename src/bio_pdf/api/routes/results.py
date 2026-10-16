@@ -18,6 +18,7 @@ from bio_pdf.api.contracts import (
     RecordsResponse,
 )
 from bio_pdf.api.dependencies import ServiceDep, SettingsDep
+from bio_pdf.errors import WorkflowError
 from bio_pdf.storage.result_reader import ResultReader
 from bio_pdf.contracts import NormalizedDocument
 
