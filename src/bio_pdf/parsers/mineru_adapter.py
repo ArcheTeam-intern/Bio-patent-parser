@@ -23,6 +23,7 @@ PDFs must first be uploaded to a reachable bucket / tunnel.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -57,6 +58,19 @@ DEFAULT_POLL_INTERVAL = 3.0
 #: remote job is *not* cancelled by this; the runner can resume with the
 #: same ``task_id``.
 DEFAULT_MAX_POLLS = 600  # ~30 min at the default interval
+
+
+def _write_identity(path: Path, identity: dict[str, Any]) -> None:
+    """Atomic-ish identity write (completes in one call; readers tolerate
+    a partial file by treating a JSON error as "no usable identity")."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    tmp.replace(path)
 
 
 class MinerUAdapter:
@@ -117,6 +131,7 @@ class MinerUAdapter:
         enable_table: bool = True,
         language: str = "en",
         is_ocr: bool = True,
+        page_ranges: str | None = None,
     ) -> tuple[str, list[str], str]:
         """``POST /file-urls/batch`` → ``(batch_id, signed_put_urls, file_name)``.
 
@@ -125,21 +140,26 @@ class MinerUAdapter:
         v4 contract is: PUT the bytes, and the batch result is polled by
         ``batch_id``. This method returns the batch identity, never a
         pretend-public URL.
+
+        D06: the caller's effective parameters (language / table / OCR /
+        page ranges) travel into the request — real options in, not silent
+        defaults.
         """
 
         file_name = file_path.name
+        files_entry: dict[str, Any] = {
+            "name": file_name,
+            "is_ocr": is_ocr,
+            "data_id": data_id,
+        }
+        if page_ranges:
+            files_entry["page_ranges"] = page_ranges
         body = {
             "enable_formula": enable_formula,
             "enable_table": enable_table,
             "language": language,
             "model_version": self.model_version,
-            "files": [
-                {
-                    "name": file_name,
-                    "is_ocr": is_ocr,
-                    "data_id": data_id,
-                }
-            ],
+            "files": [files_entry],
         }
 
         with self._client() as client:
@@ -748,13 +768,78 @@ class MinerUAdapter:
             "markdown": full_md,
         }
 
+    def _effective_remote_params(self, request: ParseRequest) -> dict[str, Any]:
+        """D06: map the effective local options onto MinerU's protocol.
+
+        The acceptance found the upload body stuck on defaults (en / table /
+        ocr always on) while the request asked for ``ocr_lang=ch``,
+        ``do_table_structure=false`` and ``layout_native`` — parameters must
+        travel, not be silently replaced.
+        """
+
+        options = dict(request.parser_options or {})
+        language = str(options.get("ocr_lang") or options.get("language") or "en")
+        # Map common language tags onto MinerU's codes.
+        lang_lower = language.lower()
+        if lang_lower.startswith("zh") or lang_lower in ("chinese", "ch"):
+            language = "ch"
+        elif lang_lower.startswith("en") or lang_lower in ("english", "en"):
+            language = "en"
+        enable_table = bool(options.get("do_table_structure", True))
+        # OCR follows the PROFILE: layout_ocr pages exist precisely because
+        # the text layer is untrusted for them.
+        is_ocr = request.profile == "layout_ocr"
+        enable_formula = bool(options.get("enable_formula", True))
+
+        pages = sorted(int(p) for p in request.page_numbers)
+        page_ranges: str | None = None
+        if pages:
+            # Compact runs: "30-33,40".
+            runs: list[str] = []
+            start = prev = pages[0]
+            for p in pages[1:]:
+                if p == prev + 1:
+                    prev = p
+                    continue
+                runs.append(f"{start}-{prev}" if start != prev else str(start))
+                start = prev = p
+            runs.append(f"{start}-{prev}" if start != prev else str(start))
+            page_ranges = ",".join(runs)
+
+        return {
+            "language": language,
+            "enable_table": enable_table,
+            "enable_formula": enable_formula,
+            "is_ocr": is_ocr,
+            "page_ranges": page_ranges,
+            "model_version": self.model_version,
+        }
+
+    def _stable_job_dir(self, request: ParseRequest) -> Path:
+        """D06: the cross-attempt state directory for this job.
+
+        Attempt dirs (``jobs/<job>/stage_runs/<run>/run-N``) are recreated on
+        every workflow retry, so the remote identity must live one level up
+        at ``jobs/<job_id>/`` — otherwise every real retry re-submitted the
+        document to the cloud.
+        """
+
+        for candidate in (request.output_dir, *request.output_dir.parents):
+            if candidate.name == request.job_id:
+                return candidate
+        return request.output_dir
+
     def _parse_via_batch(self, request: ParseRequest, local_file: Path) -> ParseArtifacts:
-        """C10: the v4 batch flow for local files (upload → poll → zip).
+        """C10/D06: the v4 batch flow for local files (upload → poll → zip).
 
         - SHA-256 is verified BEFORE anything is uploaded.
-        - The remote identity (batch_id / data_id / file name) is persisted
-          in the output dir, so a retry or resume POLLS the existing batch
-          instead of re-creating the remote task.
+        - The remote identity lives in a CROSS-ATTEMPT stable directory
+          (``jobs/<job_id>/mineru_remote_identity.json``) and is bound to a
+          fingerprint of the full request identity — source SHA, page set,
+          engine/model and effective parameters. A retry with an identical
+          fingerprint POLLS the existing batch; ANY difference (re-uploaded
+          source, changed pages, changed options, different engine version)
+          submits a fresh remote task instead of mislabelling the old result.
         - ``full_zip_url`` is downloaded with the plain (non-authenticated)
           client, mirroring the upload path: signed URLs never see the
           platform token.
@@ -778,37 +863,58 @@ class MinerUAdapter:
         raw_path = request.output_dir / "raw_response.json"
         normalized_path = request.output_dir / "normalized.json"
         manifest_path = request.output_dir / "manifest.json"
-        identity_path = request.output_dir / "remote_identity.json"
+
+        params = self._effective_remote_params(request)
+        fingerprint_payload = {
+            "source_sha256": local_sha,
+            "pages": sorted(int(p) for p in request.page_numbers),
+            "profile": request.profile,
+            "base_url": self.base_url,
+            "params": params,
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(fingerprint_payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:24]
+
+        stable_dir = self._stable_job_dir(request)
+        identity_path = stable_dir / "mineru_remote_identity.json"
 
         identity: dict[str, Any] | None = None
         if identity_path.is_file():
             try:
                 loaded = json.loads(identity_path.read_text(encoding="utf-8"))
-                if (
-                    isinstance(loaded, dict)
-                    and loaded.get("batch_id")
-                    and loaded.get("base_url") == self.base_url
-                ):
-                    identity = loaded
             except (OSError, json.JSONDecodeError):
-                identity = None
+                loaded = None
+            if isinstance(loaded, dict) and loaded.get("fingerprint") == fingerprint:
+                identity = loaded
 
         if identity is None:
             batch_id, _slots, file_name = self.request_upload_slots(
                 local_file,
                 data_id=local_sha[:16],
+                language=str(params["language"]),
+                enable_table=bool(params["enable_table"]),
+                enable_formula=bool(params["enable_formula"]),
+                is_ocr=bool(params["is_ocr"]),
+                page_ranges=params["page_ranges"],
             )
             identity = {
                 "batch_id": batch_id,
                 "data_id": local_sha[:16],
                 "file_name": file_name,
                 "base_url": self.base_url,
-                "model_version": self.model_version,
+                "fingerprint": fingerprint,
+                "source_sha256": local_sha,
+                "pages": fingerprint_payload["pages"],
+                "profile": request.profile,
+                "params": params,
+                "phase": "uploaded",
                 "submitted_at": datetime.now(tz=timezone.utc).isoformat(),
             }
-            identity_path.write_text(
-                json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            _write_identity(identity_path, identity)
+
+        identity["phase"] = "polling"
+        _write_identity(identity_path, identity)
 
         with self._client() as client:
             entry = self.poll_batch_entry(
@@ -817,6 +923,16 @@ class MinerUAdapter:
             result_payload = self._fetch_zip_result(
                 client, str(entry["full_zip_url"]), str(identity["batch_id"])
             )
+
+        identity["phase"] = "completed"
+        identity["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
+        _write_identity(identity_path, identity)
+
+        # Also keep a copy next to this attempt's artifacts for audithers.
+        (request.output_dir / "remote_identity.json").write_text(
+            json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
         raw_path.write_text(
             json.dumps(
@@ -841,7 +957,15 @@ class MinerUAdapter:
             normalized_path=normalized_path,
             manifest_path=manifest_path,
             source_identity_verified=True,
-            extra_manifest={"remote_identity": identity, "protocol": "v4-batch"},
+            extra_manifest={
+                "remote_identity": identity,
+                "protocol": "v4-batch",
+                "remote_identity_path": str(
+                    identity_path.relative_to(stable_dir.parent.parent)
+                    if stable_dir.name == request.job_id
+                    else identity_path
+                ),
+            },
         )
 
     def _finalize_outputs(

@@ -207,3 +207,150 @@ def test_source_identity_mismatch_is_rejected_before_upload(tmp_path: Path) -> N
     )
     with pytest.raises(EngineProtocolUnsupportedError):
         adapter.parse(tampered, local_file=tampered.source_path)
+
+
+# ---- D06: stable identity across attempts, parameters travel ----------------
+
+
+def _job_request(tmp_path: Path, attempt: str, *, pdf_bytes: bytes = b"%PDF-1.4 fake", **overrides) -> ParseRequest:
+    """A request whose output_dir mimics a real per-attempt stage directory."""
+
+    import hashlib as _h
+
+    source = tmp_path / "source.pdf"
+    rewrite = overrides.pop("rewrite_source", False)
+    if rewrite or not source.exists():
+        source.write_bytes(pdf_bytes)
+    sha = _h.sha256(source.read_bytes()).hexdigest()
+    out = tmp_path / "jobs" / "job-x" / "stage_runs" / attempt / "run-0"
+    out.mkdir(parents=True, exist_ok=True)
+    base = dict(
+        job_id="job-x",
+        document_id=f"sha256:{sha}",
+        source_path=source,
+        page_numbers=(30, 31, 32),
+        profile="layout_ocr",  # type: ignore[arg-type]
+        options_ref="configs/demo.toml",
+        output_dir=out,
+        parser_options={"ocr_lang": "ch", "do_table_structure": False},
+    )
+    base.update(overrides)
+    return ParseRequest(**base)  # type: ignore[arg-type]
+
+
+def _counting_handler(calls: list, bodies: list):
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            calls.append("post")
+            bodies.append(json.loads(request.content.decode()))
+            return httpx.Response(
+                200,
+                json={"data": {"batch_id": f"b{len(calls)}", "file_urls": [f"https://oss.example/put/{len(calls)}"]}},
+            )
+        if request.method == "PUT":
+            return httpx.Response(200)
+        if request.method == "GET" and "/extract-results/batch/" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {
+                                "file_name": "source.pdf",
+                                "state": "done",
+                                "full_zip_url": "https://oss.example/zip/x",
+                            }
+                        ]
+                    }
+                },
+            )
+        if request.method == "GET" and url == "https://oss.example/zip/x":
+            return httpx.Response(200, content=_zip_bytes())
+        raise AssertionError(f"unexpected: {request.method} {url}")
+
+    return handler
+
+
+def test_identity_survives_a_new_attempt_directory(tmp_path: Path) -> None:
+    """D06 repro: a real workflow retry creates a NEW attempt dir — the
+    remote task must NOT be submitted twice."""
+
+    calls: list[str] = []
+    bodies: list[dict] = []
+    adapter = MinerUAdapter(
+        token="t", transport=httpx.MockTransport(_counting_handler(calls, bodies)), poll_interval=0.0
+    )
+    first = _job_request(tmp_path, "attempt-1", pdf_bytes=b"%PDF-1.4 v1", rewrite_source=True)
+    adapter.parse(first, local_file=first.source_path)
+
+    second = _job_request(tmp_path, "attempt-2")  # same job, new attempt dir
+    adapter.parse(second, local_file=second.source_path)
+
+    assert calls.count("post") == 1, f"resume across attempts must poll, not resubmit: {calls}"
+
+    # The stable identity lives at the JOB level, not inside an attempt.
+    stable = tmp_path / "jobs" / "job-x" / "mineru_remote_identity.json"
+    assert stable.is_file()
+    identity = json.loads(stable.read_text(encoding="utf-8"))
+    assert identity["phase"] == "completed"
+    assert identity["source_sha256"]
+
+
+def test_changed_source_or_params_submit_a_fresh_remote_task(tmp_path: Path) -> None:
+    """D06 repro: reusing the output dir with a DIFFERENT source file or
+    different options must create a new remote task, never mark the old
+    result as verified for the new identity."""
+
+    calls: list[str] = []
+    bodies: list[dict] = []
+    adapter = MinerUAdapter(
+        token="t", transport=httpx.MockTransport(_counting_handler(calls, bodies)), poll_interval=0.0
+    )
+    first = _job_request(tmp_path, "attempt-1", pdf_bytes=b"%PDF-1.4 v1", rewrite_source=True)
+    adapter.parse(first, local_file=first.source_path)
+    assert calls.count("post") == 1
+
+    # Same pages/options, but the source bytes changed.
+    changed = _job_request(tmp_path, "attempt-2", pdf_bytes=b"%PDF-1.4 v2", rewrite_source=True)
+    adapter.parse(changed, local_file=changed.source_path)
+    assert calls.count("post") == 2, "a changed source must not reuse the old batch"
+
+    # Same source again, but the parameters changed.
+    other_params = _job_request(
+        tmp_path, "attempt-3", parser_options={"ocr_lang": "en", "do_table_structure": True}
+    )
+    adapter.parse(other_params, local_file=other_params.source_path)
+    assert calls.count("post") == 3, "changed parameters must not reuse the old batch"
+
+
+def test_effective_parameters_reach_the_upload_body(tmp_path: Path) -> None:
+    """D06 repro: ocr_lang=ch / do_table_structure=false / layout_native must
+    be visible in the request body (previously stuck at en/table=true/ocr)."""
+
+    calls: list[str] = []
+    bodies: list[dict] = []
+    adapter = MinerUAdapter(
+        token="t", transport=httpx.MockTransport(_counting_handler(calls, bodies)), poll_interval=0.0
+    )
+    request = _job_request(
+        tmp_path,
+        "attempt-1",
+        profile="layout_native",
+        parser_options={"ocr_lang": "ch", "do_table_structure": False},
+    )
+    adapter.parse(request, local_file=request.source_path)
+
+    body = bodies[0]
+    assert body["language"] == "ch"
+    assert body["enable_table"] is False
+    file_entry = body["files"][0]
+    assert file_entry["is_ocr"] is False, "layout_native must not request OCR"
+    assert file_entry["page_ranges"] == "30-32"
+
+    # layout_ocr turns OCR on and the page ranges stay compact.
+    calls.clear(); bodies.clear()
+    second = _job_request(tmp_path, "attempt-2")
+    adapter.parse(second, local_file=second.source_path)
+    assert bodies[0]["files"][0]["is_ocr"] is True
+    assert bodies[0]["files"][0]["page_ranges"] == "30-32"
