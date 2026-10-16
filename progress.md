@@ -314,3 +314,8 @@
 - 证据真实化：实体与关系证据全部注册为**可解析 span**（替换旧的拼串 id）——验收中关系证据经 /evidence 成功解析出原文 "Synthetic sequence: #134 and 136 VH CDR 1 amino acid sequence"（note 定位为 unlocated 兜底时也保留 raw_text，precision=none 如实标注）。
 - 关系：note 驱动 实体→序列 关系（has_cdr/heavy_chain/light_chain，真实 note 证据）；SequenceRelation 新增 `link_status` 词表（linked/ambiguous/missing_sequence/outside_scope/not_applicable/no_evidence），未恢复序列 → missing_sequence 或按清点表判 outside_scope，绝不猜配。
 - API `/records` 返回 entities/relations/relation_summary；前端序列 tab 新增"关联表"（被测对象｜角色｜序列编号｜状态｜证据按钮）、活性详情显示实体名称+证据按钮。验收（job-f4e73151ce60, EP 30-33）：2 实体（#134/#136 construct）+ 4 关系（has_cdr×1, heavy_chain×2, light_chain×1）全部 linked。503 后端 + 28 vitest 全绿。
+
+### C07 完成：逐页图表与范围切换
+- 后端 `GET /figures?page_number=N`（保留无参全文兼容；新增 total 文档总数 + page_number 回显 + 空页说明"第 N 页没有图表（全文共 M 个）"）。
+- 前端图表 tab：默认"当前页"（URL scope 参数同步），显式切换"全文"；显示"第 N 页 X 图 · 全文共 M 图"双计数；页标题点击跳页；卡片=大图/下载（独立动作）。缓存键含 job+scope+页码。
+- 验收：job-62f430801980 → 全文 total 7；?page_number=2 → total 7 / 1 图；?page_number=8（无图页）→ 0 图 + 说明。504 后端（+1 API 测试）+ 28 vitest 全绿。服务已重启（API 单实例 48224）。

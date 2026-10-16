@@ -343,8 +343,17 @@ export function figureFileUrl(jobId: string, figure: FigureData): string {
 
 export function listFigures(
   jobId: string,
-): Promise<{ api_version: string; job_id: string; figures: FigureData[]; note: string | null }> {
-  return request(`/jobs/${encodeURIComponent(jobId)}/figures`);
+  pageNumber?: number,
+): Promise<{
+  api_version: string;
+  job_id: string;
+  figures: FigureData[];
+  note: string | null;
+  total: number;
+  page_number: number | null;
+}> {
+  const query = pageNumber != null ? `?page_number=${pageNumber}` : "";
+  return request(`/jobs/${encodeURIComponent(jobId)}/figures${query}`);
 }
 
 export function getReviews(

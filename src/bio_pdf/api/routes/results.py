@@ -219,8 +219,18 @@ def get_page(
 
 
 @router.get("/figures", response_model=FiguresResponse)
-def list_figures(service: ServiceDep, job_id: str) -> FiguresResponse:
-    """Every detected visual region (chart / curve / diagram) across pages."""
+def list_figures(
+    service: ServiceDep,
+    job_id: str,
+    page_number: int | None = None,
+) -> FiguresResponse:
+    """Every detected visual region (chart / curve / diagram) across pages.
+
+    C07: ``page_number`` filters to one page (the 图表 tab follows the
+    current page by default); the unfiltered call keeps returning all
+    figures for compatibility, and ``total`` always reports the document
+    count so the UI can show "当前页 2 / 全文 7".
+    """
 
     _job_or_404(service, job_id)
     from bio_pdf.errors import WorkflowError
@@ -240,18 +250,30 @@ def list_figures(service: ServiceDep, job_id: str) -> FiguresResponse:
         for fig in page.get("figures", []) or []:
             if isinstance(fig, dict):
                 out.append(fig)
+    total = len(out)
+    if page_number is not None:
+        out = [f for f in out if int(f.get("page_number", 0)) == page_number]
     note = None
     if not out:
-        pages = [p for p in data.get("pages", []) or [] if isinstance(p, dict)]
-        layout_seen = any(str(p.get("route", "")).startswith("layout_") for p in pages)
-        if not layout_seen:
-            note = (
-                "此任务未使用结构增强引擎（Docling），没有图表区域检测；"
-                "重新创建任务并选择“结构增强”后可提取统计图/曲线图。"
-            )
+        if page_number is not None and total > 0:
+            note = f"第 {page_number} 页没有图表（全文共 {total} 个，可切换“全文”查看）。"
         else:
-            note = "结构引擎在本文件未检测到任何图区（可能是纯文本论文或图表未被识别）。"
-    return FiguresResponse(job_id=job_id, figures=out, note=note)
+            pages = [p for p in data.get("pages", []) or [] if isinstance(p, dict)]
+            layout_seen = any(str(p.get("route", "")).startswith("layout_") for p in pages)
+            if not layout_seen:
+                note = (
+                    "此任务未使用结构增强引擎（Docling），没有图表区域检测；"
+                    "重新创建任务并选择“结构增强”后可提取统计图/曲线图。"
+                )
+            else:
+                note = "结构引擎在本文件未检测到任何图区（可能是纯文本论文或图表未被识别）。"
+    return FiguresResponse(
+        job_id=job_id,
+        figures=out,
+        note=note,
+        total=total,
+        page_number=page_number,
+    )
 
 
 @router.get("/pages/{page_number}/figure.png")

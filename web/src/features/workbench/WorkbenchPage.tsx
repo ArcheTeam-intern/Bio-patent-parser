@@ -50,10 +50,10 @@ export function WorkbenchPage() {
       (job.data?.status === "succeeded" ||
         job.data?.status === "succeeded_with_review"),
   });
-  // Shared with FiguresTab (same query key): the unified distribution needs
+  // Shared with FiguresTab (total key): the unified distribution needs
   // per-page figure counts on every results tab, not only on 图表.
   const figures = useQuery({
-    queryKey: ["figures", jobId],
+    queryKey: ["figures", jobId, "total"],
     queryFn: () => listFigures(jobId!),
     enabled: !!jobId && !isActive(job.data?.status),
   });
@@ -366,7 +366,19 @@ export function WorkbenchPage() {
               <TablesTab jobId={jobId} pageNumber={currentPage} />
             )}
             {tab === "text" && <TextTab jobId={jobId} pageNumber={currentPage} />}
-            {tab === "figures" && <FiguresTab jobId={jobId} onJump={changePage} />}
+            {tab === "figures" && (
+              <FiguresTab
+                jobId={jobId!}
+                onJump={changePage}
+                currentPage={currentPage}
+                scope={scope}
+                onScopeChange={(next) => {
+                  const paramsNext = new URLSearchParams(params);
+                  paramsNext.set("scope", next);
+                  setParams(paramsNext, { replace: true });
+                }}
+              />
+            )}
             {tab === "issues" && <IssuePanel jobId={jobId} />}
             {tab === "run" && <RunDetails jobId={jobId} job={job.data} />}
           </div>

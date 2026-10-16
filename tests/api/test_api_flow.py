@@ -360,3 +360,64 @@ def test_export_flow_json_and_fasta_empty_fails(client) -> None:
     assert "refusing" in (payload["error"] or "")
     dl = c.get(f"/api/v1/exports/{fasta_id}/download")
     assert dl.status_code == 409
+
+
+
+
+def test_figures_page_filter_reports_total_and_scope_note(client) -> None:
+    """C07: page filter keeps the document total and explains empty pages."""
+    import json as _json
+
+    c, tmp_path = client
+    pdf = _sample_pdf(tmp_path / "figs.pdf")
+    doc = c.post(
+        "/api/v1/documents",
+        files={"file": ("figs.pdf", pdf.read_bytes(), "application/pdf")},
+    ).json()
+    job = c.post(
+        "/api/v1/jobs",
+        json={"document_id": doc["document_id"], "parser": "native"},
+    ).json()
+    job_id = job["job_id"]
+
+    # Fabricate a normalized artifact carrying figures on two pages (the
+    # figures endpoint reads job artifacts regardless of stage state).
+    run = tmp_path / "data" / "jobs" / job_id
+    run.mkdir(parents=True)
+    (run / "normalized.json").write_text(
+        _json.dumps(
+            {
+                "schema_version": "1.0",
+                "document_id": doc["document_id"],
+                "parser_run_id": "docling",
+                "pages": [
+                    {
+                        "page_number": 2,
+                        "route": "layout_native",
+                        "blocks": [],
+                        "figures": [{"figure_id": "f1", "page_number": 2, "kind": "chart"}],
+                    },
+                    {
+                        "page_number": 3,
+                        "route": "layout_native",
+                        "blocks": [],
+                        "figures": [{"figure_id": "f2", "page_number": 3, "kind": "plot"}],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    body = c.get(f"/api/v1/jobs/{job_id}/figures").json()
+    assert body["total"] == 2
+    assert body["page_number"] is None
+    assert len(body["figures"]) == 2
+
+    page2 = c.get(f"/api/v1/jobs/{job_id}/figures?page_number=2").json()
+    assert page2["total"] == 2 and len(page2["figures"]) == 1
+    assert page2["page_number"] == 2
+
+    page9 = c.get(f"/api/v1/jobs/{job_id}/figures?page_number=9").json()
+    assert page9["figures"] == []
+    assert "全文共 2 个" in page9["note"]

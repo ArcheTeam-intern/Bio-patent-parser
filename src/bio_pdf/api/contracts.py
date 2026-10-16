@@ -183,6 +183,10 @@ class FiguresResponse(ApiEnvelope):
     #: Engine limitation note for native-only jobs (empty when figures exist
     #: or the job used a layout engine).
     note: str | None = None
+    #: C07: total figures across the document (before any page filter) and
+    #: the applied page filter (None = 全文).
+    total: int = 0
+    page_number: int | None = None
 
 
 class ArtifactInfo(BaseModel):
