@@ -949,3 +949,8 @@ dialog::backdrop {
   background: #fee2e2;
   color: #b91c1c;
 }
+
+.source-compare { display: flex; flex-direction: column; gap: 14px; }
+.source-channel { border: 1px solid var(--border-soft); border-radius: 6px; padding: 10px 12px; }
+.source-channel-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.reading-flow p { line-height: 1.8; }

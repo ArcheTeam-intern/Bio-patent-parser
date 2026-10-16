@@ -145,7 +145,10 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
     queryFn: () => getPage(jobId, pageNumber),
     enabled: !!jobId,
   });
-  const [raw, setRaw] = useState(false);
+
+  // D08: 原始块 / 阅读顺序 / 来源对照 — 三个视图共享同一份"按列阅读、跳
+  // 家具"的解析后段落，区别只在呈现层。
+  const [view, setView] = useState<"raw" | "reading" | "source">("reading");
 
   if (page.isLoading) return <div className="empty-state">加载中…</div>;
   if (page.error) return <div className="banner error">读取失败：{String(page.error)}</div>;
@@ -166,40 +169,70 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
     }
   }
   const proseBlocks = (blocks as TextBlockLike[]).filter((b) => !absorbed.has(b.block_id));
-  const hiddenCount = blocks.length - proseBlocks.length;
-  const groups = mergeBlocks(proseBlocks);
+  const pageW = (page.data as unknown as { width_pt?: number; height_pt?: number });
+  const enriched = proseBlocks.map((b) => ({
+    ...b,
+    page_width: b.page_width ?? pageW.width_pt ?? null,
+    page_height: b.page_height ?? pageW.height_pt ?? null,
+  }));
+  const hiddenCount = blocks.length - enriched.length;
+
+  // 阅读视图用列感知：家具（页眉/页脚/边距）单独排，主体分列后
+  // 左→右、列内上→下；任一"行短句号"作为 chip 单独显示。
+  const paragraphs = readingParagraphs(enriched);
+  // 来源对照：按 source_parser 分桶，桶内再走 readingParagraphs，
+  // 就能让 Docling 与 OCR 对同一区域分别呈现、互不掺混。
+  const channels = groupBySourceChannel(enriched);
+
   return (
     <div style={{ padding: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <span className="dim">
-          页面路由：{page.data?.route} · 块数：{blocks.length} · 合并为 {groups.length} 段
+          页面路由：{page.data?.route} · 块数：{blocks.length} · 合并为 {paragraphs.length} 段
+          {channels.length > 1 ? ` · 来源 ${channels.length} 通道` : ""}
         </span>
         <span className="spacer" />
         <button
-          aria-pressed={raw}
-          title={raw ? "切换回阅读视图" : "按解析器原始切分逐块查看"}
-          onClick={() => setRaw(v => !v)}
+          aria-pressed={view === "reading"}
+          onClick={() => setView("reading")}
+          title="按解析器返回顺序合并同段落，跳过表格/页眉/页脚"
         >
-          {raw ? "阅读视图" : "逐块查看"}
+          阅读顺序
+        </button>
+        <button
+          aria-pressed={view === "raw"}
+          title="逐块查看原始解析器输出"
+          onClick={() => setView("raw")}
+        >
+          原始块
+        </button>
+        <button
+          aria-pressed={view === "source"}
+          title="按 source_parser 分桶对照各通道文本"
+          onClick={() => setView("source")}
+        >
+          来源对照
         </button>
       </div>
-      {hiddenCount > 0 && !raw && (
+      {hiddenCount > 0 && view !== "raw" && (
         <div className="wb-hint" style={{ marginBottom: 6 }}>
           另有 {hiddenCount} 个文本块属于本页表格的单元格，已隐藏在「表格」标签页呈现（含颜色与行列结构）。
         </div>
       )}
-      {raw ? (
+      {view === "raw" ? (
         <table className="data">
           <thead>
             <tr>
+              <th>来源</th>
               <th>类型</th>
               <th>角色</th>
               <th>文本</th>
             </tr>
           </thead>
           <tbody>
-            {blocks.map((block: { block_id: string; kind: string; semantic_role?: string; text_raw: string }) => (
+            {blocks.map((block: { block_id: string; kind: string; semantic_role?: string; text_raw: string; source_parser?: string | null }) => (
               <tr key={block.block_id}>
+                <td className="dim">{block.source_parser ?? "—"}</td>
                 <td className="dim">{block.kind}</td>
                 <td className="dim">{block.semantic_role ?? "unknown"}</td>
                 <td style={{ whiteSpace: "pre-wrap" }}>{block.text_raw}</td>
@@ -207,13 +240,42 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
             ))}
           </tbody>
         </table>
+      ) : view === "source" ? (
+        <SourceCompareView channels={channels} />
       ) : (
         <div className="reading-flow">
-          {groups.map((g, i) => (
+          {paragraphs.map((g, i) => (
             <TextGroup key={g.ids.join("|") || i} group={g} />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** D08: per-source channel presentation. Same column/role rules per
+ * channel, so a Docling and an OCR channel rendered on the same page
+ * stay visually comparable and never silently merge.
+ */
+function SourceCompareView({ channels }: { channels: SourceChannel[] }) {
+  if (channels.length === 0) return null;
+  return (
+    <div className="source-compare">
+      {channels.map((c) => (
+        <div key={c.parser} className="source-channel">
+          <div className="source-channel-head">
+            <strong>{c.parser}</strong>
+            <span className="dim"> · {c.blockCount} 块 · {c.paragraphs.length} 段</span>
+          </div>
+          {c.paragraphs.length === 0 ? (
+            <div className="dim">本通道在本页无文本块。</div>
+          ) : (
+            c.paragraphs.map((g, i) => (
+              <TextGroup key={g.ids.join("|") || i} group={g} />
+            ))
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -223,6 +285,10 @@ export interface TextBlockLike {
   kind: string;
   semantic_role?: string;
   text_raw: string;
+  bbox?: number[] | null;
+  page_width?: number | null;
+  page_height?: number | null;
+  source_parser?: string | null;
 }
 
 export interface MergedGroup {
@@ -275,6 +341,144 @@ export function mergeBlocks(blocks: TextBlockLike[]): MergedGroup[] {
     });
   }
   return groups.map(({ canMerge: _omit, ...g }) => g);
+}
+
+// ---- D08 reading-order + source-compare -----------------------------------
+
+/** Block columns: cluster mergeable blocks' x-centres, split when the gap
+ * between consecutive sorted x-centres exceeds 60% of the typical column
+ * width. Furniture (header/footer roles, top/bottom margins) is excluded
+ * from the column analysis but listed at the top and bottom of the result.
+ */
+
+function _isFurniture(b: TextBlockLike): boolean {
+  const role = b.semantic_role ?? "unknown";
+  if (role === "header" || role === "footer") return true;
+  if (b.bbox && b.page_width && b.page_height) {
+    const [_x0, y0, _x1, y1] = b.bbox;
+    if (y1 <= 0.08 * b.page_height || y0 >= 0.92 * b.page_height) return true;
+  }
+  return false;
+}
+
+function _xCenter(b: TextBlockLike): number | null {
+  if (!b.bbox || b.bbox.length < 4) return null;
+  return (b.bbox[0] + b.bbox[2]) / 2;
+}
+
+function _yTop(b: TextBlockLike): number {
+  if (!b.bbox || b.bbox.length < 2) return 1e9;
+  return b.bbox[1];
+}
+
+export function readingParagraphs(blocks: TextBlockLike[]): MergedGroup[] {
+  const furnitureTop: TextBlockLike[] = [];
+  const furnitureBottom: TextBlockLike[] = [];
+  const body: TextBlockLike[] = [];
+  for (const b of blocks) {
+    if (_isFurniture(b)) {
+      if (b.bbox && b.bbox.length >= 2 && b.bbox[1] < (b.page_height ?? 0) / 2) {
+        furnitureTop.push(b);
+      } else {
+        furnitureBottom.push(b);
+      }
+      continue;
+    }
+    body.push(b);
+  }
+
+  // No geometry → fall back to plain merge (legacy behaviour).
+  const centres = body
+    .map((b) => _xCenter(b))
+    .filter((c): c is number => c != null) as number[];
+  if (centres.length === 0) {
+    return [
+      ...mergeBlocks(furnitureTop),
+      ...mergeBlocks(body),
+      ...mergeBlocks(furnitureBottom),
+    ];
+  }
+  const sorted = [...centres].sort((a, b) => a - b);
+  // 60% of the most common gap between consecutive centres = "column gap"
+  // threshold; points further apart than that are in a different column.
+  const gaps: number[] = [];
+  for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i] - sorted[i - 1]);
+  let threshold: number;
+  if (gaps.length >= 2) {
+    const sortedGaps = [...gaps].sort((a, b) => a - b);
+    const median = sortedGaps[Math.floor(sortedGaps.length / 2)] || 60;
+    threshold = Math.max(40, median * 1.6);
+  } else {
+    // A single gap between x-centres IS the column boundary.
+    threshold = Math.max(40, (gaps[0] || 60) * 0.5);
+  }
+  const columnBreaks: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i - 1] > threshold) columnBreaks.push((sorted[i - 1] + sorted[i]) / 2);
+  }
+
+  // Assign each body block to a column by x-centre.
+  const columns: TextBlockLike[][] = columnBreaks.length + 1 >= 1
+    ? Array.from({ length: columnBreaks.length + 1 }, () => [])
+    : [[]];
+  for (const b of body) {
+    const cx = _xCenter(b);
+    if (cx == null) {
+      columns[0].push(b);
+      continue;
+    }
+    let col = 0;
+    for (const boundary of columnBreaks) {
+      if (cx > boundary) col += 1;
+      else break;
+    }
+    columns[col].push(b);
+  }
+  // Read each column top-down, then concatenate left-to-right.
+  const out: MergedGroup[] = [];
+  for (const col of columns) {
+    col.sort((a, b) => _yTop(a) - _yTop(b));
+    out.push(...mergeBlocks(col));
+  }
+  return [
+    ...mergeBlocks(furnitureTop),
+    ...out,
+    ...mergeBlocks(furnitureBottom),
+  ];
+}
+
+/** D08 source compare: group blocks by source_parser and per-channel
+ * text content. Furniture and absorbed cells are excluded.
+ */
+export interface SourceChannel {
+  parser: string;
+  paragraphs: MergedGroup[];
+  blockCount: number;
+}
+
+export function groupBySourceChannel(blocks: TextBlockLike[]): SourceChannel[] {
+  const filtered = blocks.filter((b) => b.text_raw.trim().length > 0);
+  const bySource = new Map<string, TextBlockLike[]>();
+  for (const b of filtered) {
+    const key = b.source_parser ?? "unknown";
+    if (!bySource.has(key)) bySource.set(key, []);
+    bySource.get(key)!.push(b);
+  }
+  const channels: SourceChannel[] = [];
+  for (const [parser, items] of bySource.entries()) {
+    channels.push({
+      parser,
+      paragraphs: readingParagraphs(items),
+      blockCount: items.length,
+    });
+  }
+  // Stable order: native first, then any others alphabetically.
+  channels.sort((a, b) => {
+    const an = a.parser === "native" ? 0 : 1;
+    const bn = b.parser === "native" ? 0 : 1;
+    return an - bn || a.parser.localeCompare(b.parser);
+  });
+  return channels;
 }
 
 type MergedGroupWithFlag = MergedGroup & { canMerge: boolean };
