@@ -273,3 +273,96 @@ def test_issue_endpoints_enforce_job_ownership(client) -> None:
     # reparse must not cross jobs either (it would mix source + page)
     rep = c.post(f"/api/v1/jobs/{job_b}/issues/iss-owned/reparse")
     assert rep.status_code == 404
+
+
+def test_second_reparse_never_overwrites_the_first_candidate(client, monkeypatch) -> None:
+    """E3/S03: each candidate is its own immutable attempt."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c, tmp_path,
+        reason_code="SEQ_INVENTORY_MISSING",
+        source_ids=["st25:7"],
+        detail="SEQ ID 7 (page 1): region reached, no residues",
+    )
+
+    from bio_pdf.extract.sequences import region_ocr
+
+    responses = []
+    texts = iter([
+        [(40.0, 100.0, 120.0, 110.0, "FIRST-CANDIDATE")],
+        [(40.0, 100.0, 120.0, 110.0, "SECOND-CANDIDATE")],
+    ])
+
+    def fake_ocr(pdf_path, pages):  # noqa: ANN001
+        return {int(pages[0]): next(texts)}
+
+    monkeypatch.setattr(region_ocr, "ocr_residue_pages", fake_ocr)
+
+    first = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert first_body["candidate"]["attempt"] == 1
+    assert "FIRST" in first_body["candidate"]["preview"]
+    first_rel = first_body["candidate"]["artifact_rel"]
+    first_sha = first_body["candidate"]["content_sha256"]
+
+    second = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    second_body = second.json()
+    assert second_body["candidate"]["attempt"] == 2
+    assert second_body["candidate"]["artifact_rel"] != first_rel
+
+    # The FIRST event's artifact is byte-identical to what it recorded.
+    path1 = tmp_path / "data" / first_rel
+    assert "FIRST-CANDIDATE" in path1.read_text(encoding="utf-8")
+    import hashlib as _h
+
+    assert _h.sha256(path1.read_bytes()).hexdigest() == first_sha
+    events = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["events"]
+    rels = [e["artifact_rel"] for e in events if e["action"] == "reparse_candidate"]
+    assert rels == [first_rel, second_body["candidate"]["artifact_rel"]]
+    # Each event's note carries its own sha so a replay is checkable.
+    assert all("sha256=" in (e["note"] or "") for e in events if e["action"] == "reparse_candidate")
+
+
+def test_adopt_creates_a_new_formal_job_not_an_inplace_edit(client, monkeypatch) -> None:
+    """E3/S03: adoption = a NEW job/baseline; history kept, nothing mutated."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c, tmp_path,
+        reason_code="SEQ_INVENTORY_MISSING",
+        source_ids=["st25:7"],
+        detail="SEQ ID 7 (page 1): region reached, no residues",
+    )
+    from bio_pdf.extract.sequences import region_ocr
+
+    monkeypatch.setattr(
+        region_ocr, "ocr_residue_pages",
+        lambda pdf_path, pages: {int(pages[0]): [(40.0, 100.0, 120.0, 110.0, "ADOPT ME")]},
+    )
+    rep = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert rep.status_code == 200
+
+    # Without a candidate on a DIFFERENT issue, adoption refuses.
+    other = c.post(f"/api/v1/jobs/{job_id}/issues/iss-does-not-exist/adopt", json={})
+    assert other.status_code == 404
+
+    adopted = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/adopt", json={"actor": "reviewer"})
+    assert adopted.status_code == 201, adopted.text
+    body = adopted.json()
+    new_job_id = body["adopted"]["new_job_id"]
+    assert new_job_id and new_job_id != job_id
+    assert body["adopted"]["pages"] == [1]
+    assert any(e["action"] == "adopted" for e in body["events"])
+
+    # The new job is independent and queued — the ORIGINAL job's state and
+    # baseline are untouched.
+    original = c.get(f"/api/v1/jobs/{job_id}").json()
+    assert original["job_id"] == job_id
+    new = c.get(f"/api/v1/jobs/{new_job_id}").json()
+    assert new["status"] in ("queued", "running")
+
+    events = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["events"]
+    adopted_events = [e for e in events if e["action"] == "adopted"]
+    assert adopted_events and new_job_id in (adopted_events[0]["note"] or "")

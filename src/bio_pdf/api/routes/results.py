@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -938,12 +940,51 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
     lines = ocr.get(int(page), [])
     # region_ocr returns (x0, y0, x1, y1, text) — text is index 4 (E5).
     text = "\n".join(line[4] for line in lines)
+
+    # E3/S03: every reparse gets its OWN immutable attempt directory. A
+    # second run never overwrites the file an earlier event references —
+    # the audit trail must be able to replay exactly what it recorded.
     rel_dir = Path("jobs") / job_id / "issues" / issue_id
     out_dir = service.paths.artifact_root / rel_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    candidate = out_dir / "candidate_ocr.txt"
+    prior = [
+        event
+        for event in service.repository.list_issue_events(issue_id)
+        if str(event["action"]) == "reparse_candidate"
+    ]
+    attempt = len(prior) + 1
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    candidate = out_dir / f"candidate-{attempt}.txt"
     candidate.write_text(text, encoding="utf-8")
-    rel = (rel_dir / "candidate_ocr.txt").as_posix()
+    rel = (rel_dir / f"candidate-{attempt}.txt").as_posix()
+
+    publication = service.repository.get_publication(job_id)
+    doc_row = service.repository.connection.execute(
+        "SELECT sha256 FROM documents WHERE document_id = ?", (job.document_id,)
+    ).fetchone()
+    region_raw = row["region_json"] if "region_json" in row.keys() else None
+    meta = {
+        "issue_id": issue_id,
+        "job_id": job_id,
+        "attempt": attempt,
+        "artifact_rel": rel,
+        "content_sha256": digest,
+        "char_count": len(text),
+        "line_count": len(lines),
+        "page_number": int(page),
+        "region": json.loads(region_raw) if region_raw else None,
+        "source_sha256": str(doc_row["sha256"]) if doc_row else None,
+        "baseline_id": str(publication["baseline_id"]) if publication else None,
+        "params": {
+            "engine": "rapidocr_region",
+            "dpi": 300,
+            "policy": "st25-residue-fallback",
+        },
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    (out_dir / f"candidate-{attempt}.meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     service.repository.update_issue_state(issue_id, state="reparse_requested")
     service.repository.connection.commit()
@@ -952,7 +993,8 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         actor="reparse",
         action="reparse_candidate",
         note=(
-            f"page {page}: {len(lines)} OCR lines, {len(text)} chars"
+            f"attempt {attempt} sha256={digest[:16]} page {page}: "
+            f"{len(lines)} OCR lines, {len(text)} chars"
             + (f"; preview: {text[:120]!r}" if text else "; region empty — still unresolved")
         ),
         artifact_rel=rel,
@@ -963,10 +1005,126 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         "issue": _issue_view(service, refreshed),
         "candidate": {
             "artifact_rel": rel,
+            "attempt": attempt,
+            "content_sha256": digest,
             "line_count": len(lines),
             "char_count": len(text),
             "preview": text[:400],
-            "note": "候选未自动采用；人工核对后才能并入基线",
+            "note": "候选未自动采用；POST …/adopt 建立新基线",
+        },
+        "events": _issue_events(service, issue_id),
+    }
+
+
+class _AdoptRequest(BaseModel):
+    attempt: int | None = None
+    actor: str = "local-operator"
+    pages: list[int] | None = None
+
+
+@router.post("/issues/{issue_id}/adopt", status_code=201)
+def issue_adopt(
+    service: ServiceDep,
+    job_id: str,
+    issue_id: str,
+    request: _AdoptRequest,
+) -> dict:
+    """E3/S03: adopting a reparse candidate creates a NEW formal job and
+    baseline — it never edits the current publication in place.
+
+    The candidate artifact's recorded sha256 is re-verified before adoption;
+    the new job runs the SAME pipeline over the affected pages (engine
+    docling so the residue fallback participates), producing its own
+    immutable baseline and its own review queue. The issue keeps its full
+    event history (adoption is an event, not a rewrite).
+    """
+
+    _job_or_404(service, job_id)
+    row = _issue_or_404(service, job_id, issue_id)
+    events = [
+        event
+        for event in service.repository.list_issue_events(issue_id)
+        if str(event["action"]) == "reparse_candidate" and event["artifact_rel"]
+    ]
+    if not events:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "NO_CANDIDATE_TO_ADOPT",
+                "message": "run 区域复解析 first — there is no candidate to adopt",
+            },
+        )
+    chosen = None
+    for event in events:
+        if request.attempt is None or int(event["artifact_rel"].rsplit("-", 1)[-1].split(".")[0]) == int(request.attempt):
+            chosen = event
+    if chosen is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "CANDIDATE_NOT_FOUND",
+                "message": f"no reparse candidate attempt {request.attempt}",
+            },
+        )
+    artifact = service.paths.artifact_root / str(chosen["artifact_rel"])
+    meta_path = artifact.with_name(artifact.name.replace(".txt", ".meta.json"))
+    if not artifact.is_file() or not meta_path.is_file():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CANDIDATE_MISSING",
+                "message": "the candidate artifact is no longer readable",
+            },
+        )
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    from bio_pdf.storage.artifacts import compute_sha256_bytes
+
+    if compute_sha256_bytes(artifact.read_bytes()) != meta.get("content_sha256"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CANDIDATE_HASH_MISMATCH",
+                "message": "candidate content no longer matches its recorded hash",
+            },
+        )
+
+    job = service.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "job not found"})
+    doc_row = service.repository.connection.execute(
+        "SELECT source_path FROM documents WHERE document_id = ?", (job.document_id,)
+    ).fetchone()
+    if doc_row is None or not Path(str(doc_row["source_path"])).is_file():
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SOURCE_MISSING", "message": "document source unavailable"},
+        )
+
+    pages = [int(p) for p in (request.pages or [int(meta.get("page_number", 1))]) if int(p) > 0]
+    new_job, _page_count = service.create_job(
+        Path(str(doc_row["source_path"])),
+        engine="docling",
+        page_numbers=tuple(pages),
+    )
+    service.repository.append_issue_event(
+        issue_id=issue_id,
+        actor=request.actor,
+        action="adopted",
+        note=(
+            f"adopted candidate {Path(str(chosen['artifact_rel'])).name} "
+            f"(sha256={str(meta.get('content_sha256'))[:16]}) → new job {new_job.job_id}"
+            f" over pages {pages}"
+        ),
+        artifact_rel=chosen["artifact_rel"],
+    )
+    return {
+        "api_version": "v1",
+        "issue": _issue_view(service, row),
+        "adopted": {
+            "candidate_rel": chosen["artifact_rel"],
+            "content_sha256": meta.get("content_sha256"),
+            "new_job_id": new_job.job_id,
+            "pages": list(pages),
         },
         "events": _issue_events(service, issue_id),
     }
