@@ -276,6 +276,9 @@ export interface ReviewItem {
   reason_codes: string[];
   status: string;
   evidence_ids: string[];
+  /** D05：服务端稳定分组身份（job 参与）；按它分组，不用显示文本。 */
+  group_id?: string;
+  baseline_id?: string | null;
 }
 
 // ---- endpoints ---------------------------------------------------------
@@ -364,8 +367,8 @@ export function getReviews(
 ): Promise<{
   reviews: ReviewItem[];
   total: number;
-  /** C06 分组：整条筛选队列按 (任务, 页/表簇) 聚合的条数。 */
-  groups?: { group_key: string; job_id: string; label: string; page: number | null; count: number }[];
+  /** C06/D05 分组：整条筛选队列按 (任务, 页/表簇) 聚合的条数。 */
+  groups?: { group_id: string; job_id: string; label: string; page: number | null; count: number }[];
 }> {
   const params = new URLSearchParams();
   if (jobId) params.set("job_id", jobId);

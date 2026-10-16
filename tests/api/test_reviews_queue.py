@@ -105,7 +105,7 @@ def test_queue_reports_groups_over_the_whole_filtered_queue(completed_job) -> No
     assert grouped == body["total"], "group counts must cover the whole queue"
     # Every group has a stable key and a human label.
     for g in body["groups"]:
-        assert g["group_key"].startswith(job_id)
+        assert g["group_id"].startswith(job_id)
         assert g["label"]
 
 

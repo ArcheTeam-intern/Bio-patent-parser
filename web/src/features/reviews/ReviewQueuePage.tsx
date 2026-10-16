@@ -83,8 +83,13 @@ export function ReviewQueuePage() {
 
   // 摘要映射：值→展示文本。per-job 容错——结果未发布的 job 直接跳过。
   const queueJobIds = [...new Set(items.map((r) => r.job_id))].sort();
+  // D05：任务 + 结果修订共同构成摘要缓存身份，人工决定改变记录后
+  // 摘要必须刷新；不同任务/基线的同名记录不会互相覆盖。
+  const revisionStamp = queueJobIds
+    .map((id) => `${id}:${(jobs.data ?? []).find((j) => j.job_id === id)?.result_revision ?? 0}`)
+    .join(",");
   const summaries = useQuery({
-    queryKey: ["queue-records", queueJobIds],
+    queryKey: ["queue-records", queueJobIds, revisionStamp],
     queryFn: async () => {
       const map: Record<string, string> = {};
       for (const jobId of queueJobIds) {
@@ -131,25 +136,22 @@ export function ReviewQueuePage() {
   });
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
 
-  // 分组（C06）：按客户端同一规则聚合可见行，与后端 group 计数一致。
-  const groupOf = (recordId: string): { key: string; label: string } => {
+  // D05：分组只用后端返回的 group_id（job 参与身份）——不同任务同页
+  // 也绝不会合并成一组；显示标签由 record_id 推导，仅用于呈现。
+  const labelOf = (recordId: string): string => {
     const grid = recordId.match(/:meas:(\d+):grid:/);
-    if (grid) return { key: `p${grid[1]}:matrix`, label: `第 ${grid[1]} 页 · 药敏矩阵` };
+    if (grid) return `第 ${grid[1]} 页 · 药敏矩阵`;
     const pm = recordId.match(/:meas:(\d+):([a-z_]+)/);
-    if (pm) {
-      const src = pm[2] === "table" ? "表格" : "正文";
-      return { key: `p${pm[1]}:${pm[2]}`, label: `第 ${pm[1]} 页 · ${src}` };
-    }
-    if (recordId.includes(":seq:") || recordId.includes(":inline:"))
-      return { key: "sequences", label: "序列记录" };
-    return { key: "other", label: "其他记录" };
+    if (pm) return `第 ${pm[1]} 页 · ${pm[2] === "table" ? "表格" : "正文"}`;
+    if (recordId.includes(":seq:") || recordId.includes(":inline:")) return "序列记录";
+    return "其他记录";
   };
   const visibleGroups = new Map<string, typeof items>();
   for (const r of items) {
-    const g = groupOf(r.record_id);
-    const arr = visibleGroups.get(g.label) ?? [];
+    const key = r.group_id || `${r.job_id}|other`;
+    const arr = visibleGroups.get(key) ?? [];
     arr.push(r);
-    visibleGroups.set(g.label, arr);
+    visibleGroups.set(key, arr);
   }
 
   const toggleOne = (reviewId: string) => {
@@ -242,21 +244,24 @@ export function ReviewQueuePage() {
                 </tr>
               </thead>
               <tbody>
-                {[...visibleGroups.entries()].map(([label, rows]) => {
+                {[...visibleGroups.entries()].map(([groupId, rows]) => {
                   const allSelected = rows.every((r) => selected.has(r.review_id));
+                  const label = labelOf(rows[0].record_id);
+                  const jobIds = [...new Set(rows.map((r) => r.job_id))];
+                  const jobHint = jobIds.length === 1 ? jobIds[0] : `${jobIds.length} 个任务`;
                   return (
-                    <Fragment key={`group-${label}`}>
+                    <Fragment key={`group-${groupId}`}>
                       <tr className="group-row">
                         <td>
                           <input
                             type="checkbox"
-                            aria-label={`选择分组 ${label}`}
+                            aria-label={`选择分组 ${label} ${jobHint}`}
                             checked={allSelected}
                             onChange={() => toggleGroup(rows)}
                           />
                         </td>
                         <td colSpan={5} style={{ fontWeight: 600 }}>
-                          {label}（{rows.length} 条）
+                          {label}（{rows.length} 条）· {jobHint}
                         </td>
                       </tr>
                       {rows.map((r) => (

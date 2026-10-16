@@ -86,7 +86,10 @@ CREATE TABLE IF NOT EXISTS review_items (
     reason_codes_json TEXT NOT NULL DEFAULT '[]',
     status           TEXT NOT NULL DEFAULT 'open',
     evidence_ids_json TEXT NOT NULL DEFAULT '[]',
-    proposed_actions_json TEXT NOT NULL DEFAULT '[]'
+    proposed_actions_json TEXT NOT NULL DEFAULT '[]',
+    -- D05: the baseline this OPEN item belongs to. A newer publication
+    -- supersedes stale open items (human decisions are never touched).
+    baseline_id      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS review_items_job_idx ON review_items(job_id);
@@ -182,7 +185,10 @@ CREATE TABLE IF NOT EXISTS parse_issues (
     detail       TEXT NOT NULL DEFAULT '',
     state        TEXT NOT NULL DEFAULT 'open',
     baseline_id  TEXT,
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    -- D09: real location references captured at creation time.
+    page_number  INTEGER,
+    region_json  TEXT
 );
 
 -- Published baseline pointer (plan B03): the DB is the source of truth for
@@ -273,6 +279,22 @@ def init_repository(database: Path | str) -> sqlite3.Connection:
             conn.execute("ALTER TABLE exports ADD COLUMN snapshot_rel TEXT")
         if "snapshot_sha256" not in cols:
             conn.execute("ALTER TABLE exports ADD COLUMN snapshot_sha256 TEXT")
+        # D05: baseline binding for review items.
+        review_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(review_items)").fetchall()
+        }
+        if "baseline_id" not in review_cols:
+            conn.execute("ALTER TABLE review_items ADD COLUMN baseline_id TEXT")
+        # D09: real page/region references on issues (set at creation time).
+        issue_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(parse_issues)").fetchall()
+        }
+        if "page_number" not in issue_cols:
+            conn.execute("ALTER TABLE parse_issues ADD COLUMN page_number INTEGER")
+        if "region_json" not in issue_cols:
+            conn.execute("ALTER TABLE parse_issues ADD COLUMN region_json TEXT")
     except sqlite3.Error as exc:
         conn.close()
         raise DatabaseError(
@@ -904,24 +926,40 @@ class Repository:
                 self._conn.execute("ROLLBACK")
                 return False
             now = _utcnow_iso()
+            baseline_id = manifest_sha[:16]
             self._conn.execute(
                 "UPDATE jobs SET status = ?, current_stage = NULL, updated_at = ? WHERE job_id = ?",
                 (final_status, now, job_id),
+            )
+            # D05: a new baseline supersedes this job's STALE open items —
+            # they describe an older result set. Human decisions ('resolved')
+            # and their logs are never touched, and a superseded item that
+            # the new baseline re-derives (same stable review_id) is written
+            # back to open by the upsert below, so it is live, not lost.
+            self._conn.execute(
+                """
+                UPDATE review_items SET status = 'superseded'
+                WHERE job_id = ? AND status = 'open'
+                  AND (baseline_id IS NULL OR baseline_id != ?)
+                """,
+                (job_id, baseline_id),
             )
             for item in review_items:
                 self._conn.execute(
                     """
                     INSERT INTO review_items (review_id, job_id, record_id, record_revision,
                                                reason_codes_json, status, evidence_ids_json,
-                                               proposed_actions_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                               proposed_actions_json, baseline_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(review_id) DO UPDATE SET
                         job_id = excluded.job_id,
                         record_id = excluded.record_id,
                         record_revision = excluded.record_revision,
                         reason_codes_json = excluded.reason_codes_json,
                         evidence_ids_json = excluded.evidence_ids_json,
-                        proposed_actions_json = excluded.proposed_actions_json
+                        proposed_actions_json = excluded.proposed_actions_json,
+                        baseline_id = excluded.baseline_id,
+                        status = excluded.status
                     WHERE review_items.status != 'resolved'
                     """,
                     (
@@ -933,6 +971,7 @@ class Repository:
                         item.status,
                         _json_dumps(item.evidence_ids),
                         _json_dumps(item.proposed_actions),
+                        baseline_id,
                     ),
                 )
             for issue in issues or []:

@@ -210,6 +210,11 @@ class ReviewItemView(BaseModel):
     reason_codes: list[str] = Field(default_factory=list)
     status: str
     evidence_ids: list[str] = Field(default_factory=list)
+    #: D05: server-computed stable group identity (job + page/table cluster)
+    #: — the UI groups by THIS, never by display text (two jobs on the same
+    #: page are two groups) — and the baseline this item belongs to.
+    group_id: str = ""
+    baseline_id: str | None = None
 
 
 class ReviewsResponse(ApiEnvelope):

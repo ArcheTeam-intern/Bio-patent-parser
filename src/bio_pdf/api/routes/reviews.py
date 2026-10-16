@@ -59,6 +59,18 @@ def _group_for(record_id: str) -> tuple[str, str, int | None]:
     return "other", "其他记录", None
 
 
+def _group_id(job_id: str, record_id: str) -> str:
+    """D05: stable server-side group identity = job + page/table cluster.
+
+    Two jobs that parsed the same document render the SAME label ("第 8 页 ·
+    药敏矩阵") but must never merge into one group — the job id is part of
+    the identity, and the UI groups by this returned value only.
+    """
+
+    suffix, _label, _page = _group_for(record_id)
+    return f"{job_id}|{suffix}"
+
+
 @router.get("", response_model=ReviewsResponse)
 def list_reviews(
     service: ServiceDep,
@@ -108,6 +120,8 @@ def list_reviews(
             reason_codes=json.loads(row["reason_codes_json"] or "[]"),
             status=row["status"],
             evidence_ids=json.loads(row["evidence_ids_json"] or "[]"),
+            group_id=_group_id(str(row["job_id"]), str(row["record_id"])),
+            baseline_id=row["baseline_id"] if "baseline_id" in row.keys() else None,
         )
         for row in rows
     ]
@@ -123,7 +137,7 @@ def list_reviews(
         key = f"{row['job_id']}|{suffix}"
         entry = groups.setdefault(
             key,
-            {"group_key": key, "job_id": row["job_id"], "label": label, "page": page, "count": 0},
+            {"group_id": key, "job_id": row["job_id"], "label": label, "page": page, "count": 0},
         )
         entry["count"] += 1
     return ReviewsResponse(
