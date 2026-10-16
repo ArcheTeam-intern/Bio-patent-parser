@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getPage, getPageChannels, pageFigureUrl } from "../../api/client";
+import {
+  getPage,
+  getPageChannels,
+  pageFigureUrl,
+  type PageChannelCell,
+} from "../../api/client";
 
 /**
  * 表格与原文视图（plan B12）：
@@ -257,17 +262,20 @@ const CHANNEL_LABELS: Record<string, string> = {
   native: "原生字形层",
   layout: "结构引擎（Docling/MinerU）",
   rapidocr_region: "区域 OCR（RapidOCR）",
+  adopted_candidate: "人工采用候选（F09 消费输入）",
   unknown: "未知通道",
 };
 
 /**
- * E9/P05: the source comparison reads the RAW per-engine artifacts
- * (GET …/pages/n/channels — native parse, layout run dirs, region-OCR
- * sidecar), never the fused normalized view alone. Each channel keeps
- * its own lines with boxes so the reader can compare what every engine
- * actually produced. When a job has no readable stage artifacts (e.g.
- * very old runs), it falls back to the fused channel buckets — with the
- * fallback honestly labelled.
+ * E9/P05 + F08/P04+P05: the source comparison reads the RAW per-engine
+ * artifacts (GET …/pages/n/channels) from the CURRENT published manifest
+ * (hash-verified server-side). Each channel keeps its own lines AND table
+ * cells so the reader can compare what every engine actually produced —
+ * a table-only page still shows its channel. Channels that could not be
+ * hash-verified (legacy jobs) and non-current stage attempts (history)
+ * are labelled as such, never mixed into the current view. When a job has
+ * no readable channels at all, it falls back to the fused channel buckets
+ * with the fallback honestly labelled.
  */
 function SourceCompareView({
   jobId,
@@ -284,22 +292,90 @@ function SourceCompareView({
     enabled: !!jobId,
   });
   const rawChannels = channelsQuery.data?.channels ?? [];
-  if (rawChannels.length > 0) {
+  const history = channelsQuery.data?.history ?? [];
+  if (rawChannels.length > 0 || history.length > 0) {
     return (
       <div className="source-compare">
-        {rawChannels.map((ch) => (
-          <div key={ch.engine} className="source-channel">
-            <div className="source-channel-head">
-              <strong>{CHANNEL_LABELS[ch.engine] ?? ch.engine}</strong>
-              <span className="dim"> · {ch.lines.length} 行 · {ch.artifact_rel}</span>
+        {rawChannels.map((ch) => {
+          const tables = ch.tables ?? [];
+          const conflicts = ch.content_conflicts ?? [];
+          const supersedes = ch.native_superseded ?? [];
+          return (
+            <div key={`${ch.engine}:${ch.run ?? ""}`} className="source-channel">
+              <div className="source-channel-head">
+                <strong>{CHANNEL_LABELS[ch.engine] ?? ch.engine}</strong>
+                <span className="dim">
+                  {ch.run ? ` · ${ch.run}` : ""} · {ch.lines.length} 行
+                  {tables.length > 0 ? ` · ${tables.length} 表` : ""} · {ch.artifact_rel}
+                  {ch.manifest_verified === false ? " · 未校验（退化读取）" : " · 发布清单已校验"}
+                </span>
+              </div>
+              {ch.lines.length > 0 && (
+                <div className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.7 }}>
+                  {ch.lines.map((ln, i) => (
+                    <div key={i}>{ln.text}</div>
+                  ))}
+                </div>
+              )}
+              {tables.length === 0 && ch.lines.length === 0 && (
+                <div className="dim">本通道在本页无文本行与表格。</div>
+              )}
+              {tables.map((table, tIdx) => (
+                <div key={table.table_id || tIdx} style={{ marginTop: 6 }}>
+                  <div className="dim" style={{ fontSize: 11 }}>
+                    表 {table.table_id}
+                    {table.caption ? ` · ${table.caption}` : ""}
+                    {table.row_count != null ? ` · ${table.row_count}×${table.column_count ?? "?"}` : ""}
+                  </div>
+                  <table className="source-table">
+                    <tbody>
+                      {sourceTableRows(table).map((row, rIdx) => (
+                        <tr key={rIdx}>
+                          {row.map((cell, cIdx) => (
+                            <td
+                              key={cIdx}
+                              colSpan={cell.colspan ?? 1}
+                              rowSpan={cell.rowspan ?? 1}
+                              className={
+                                cell.header_role === "column" || cell.header_role === "row" || cell.header_role === "both"
+                                  ? "source-table-header"
+                                  : undefined
+                              }
+                            >
+                              {cell.text || "\u00a0"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+              {(conflicts.length > 0 || supersedes.length > 0) && (
+                <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                  {conflicts.length > 0 ? `本页原生/OCR 内容冲突 ${conflicts.length} 处` : ""}
+                  {conflicts.length > 0 && supersedes.length > 0 ? " · " : ""}
+                  {supersedes.length > 0 ? `短原生片段被更完整 OCR 行取代 ${supersedes.length} 处（见侧车记录）` : ""}
+                </div>
+              )}
             </div>
-            <div className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.7 }}>
-              {ch.lines.map((ln, i) => (
-                <div key={i}>{ln.text}</div>
+          );
+        })}
+        {history.length > 0 && (
+          <div className="source-channel" style={{ borderStyle: "dashed" }}>
+            <div className="source-channel-head">
+              <strong>历史尝试（非当前发布）</strong>
+              <span className="dim"> · {history.length} 个 run</span>
+            </div>
+            <div className="dim mono" style={{ fontSize: 11, lineHeight: 1.8 }}>
+              {history.map((h) => (
+                <div key={h.run}>
+                  {h.stage} · {h.run} · {h.status}
+                </div>
               ))}
             </div>
           </div>
-        ))}
+        )}
       </div>
     );
   }
@@ -327,6 +403,17 @@ function SourceCompareView({
       ))}
     </div>
   );
+}
+
+/** Group a channel table's cells into visual rows honouring spans. */
+function sourceTableRows(table: { cells: PageChannelCell[] }): PageChannelCell[][] {
+  const rows: PageChannelCell[][] = [];
+  for (const cell of table.cells) {
+    const rowIndex = cell.row ?? 0;
+    while (rows.length <= rowIndex) rows.push([]);
+    rows[rowIndex].push(cell);
+  }
+  return rows.filter((row) => row.length > 0);
 }
 
 export interface TextBlockLike {

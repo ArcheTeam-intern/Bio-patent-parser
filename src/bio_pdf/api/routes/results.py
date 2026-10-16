@@ -462,12 +462,26 @@ def get_evidence(
 
 
 def _baseline_id(service, job_id: str) -> str | None:
+    """F09: the ONE outward baseline id.
+
+    The DB publication row is the source of truth (it is what the review
+    flow fences against); the published manifest records the same value at
+    publish time. ``published_at``/``manifest_sha`` are separate fields and
+    are NOT substituted for the baseline except for legacy jobs that never
+    recorded one.
+    """
+
+    publication = service.repository.get_publication(job_id)
+    if publication is not None and "baseline_id" in publication.keys():
+        value = publication["baseline_id"]
+        if value:
+            return str(value)
     from bio_pdf.storage.result_reader import ResultReader
 
     manifest = ResultReader(service.paths.artifact_root).read_published_manifest(job_id)
     if manifest is None:
         return None
-    return manifest.get("published_at") or None
+    return manifest.get("baseline_id") or manifest.get("published_at") or None
 
 
 def _legacy_text_precision(span: dict) -> str:
@@ -721,98 +735,307 @@ __all__ = ["router"]
 
 @router.get("/pages/{page_number}/channels")
 def page_channels(service: ServiceDep, job_id: str, page_number: int) -> dict:
-    """E9/P05: the RAW per-engine content of one page.
+    """E9/P05 + F08/P04+P05: the RAW per-engine content of one page.
 
     The fused normalized document answers "what the pipeline read"; this
-    endpoint answers "what each ENGINE produced": every parse stage's own
-    normalized artifact (native glyphs, Docling layout, MinerU) plus the
-    extract-stage region-OCR sidecar, each kept separate so the source
-    comparison can never blur channels. Stage dirs that no longer exist or
-    pages an engine did not produce are honestly absent (or empty lines).
+    endpoint answers "what each ENGINE produced". F08: the CURRENT published
+    manifest is the authority — every channel is read from a manifest ref
+    whose sha256 is VERIFIED before parsing (a corrupted sidecar is
+    RESULT_CORRUPT, never silently skipped). Channels carry text blocks AND
+    table cells (a table-only page still has a channel). Stage attempts that
+    are NOT part of the current publication are listed separately under
+    ``history`` — never mixed into the current channels. Legacy jobs without
+    a published manifest fall back to the working tree, clearly marked.
     """
 
+    from bio_pdf.storage.result_reader import ResultCorruptError
+
     _job_or_404(service, job_id)
-    root = service.paths.artifact_root / "jobs" / job_id / "stage_runs"
+    root = service.paths.artifact_root
+
+    def _verified_json(entry: dict[str, Any], *, label: str) -> dict[str, Any]:
+        """Read one manifest ref, hash-verified. Corruption → 409."""
+
+        from bio_pdf.storage.artifacts import compute_sha256_bytes
+
+        rel = str(entry.get("relative_path") or "")
+        sha = str(entry.get("sha256") or "")
+        path = root / rel
+        if not rel or not sha or not path.is_file():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RESULT_CORRUPT",
+                    "message": f"published artifact missing for {label}: {rel or '?'}",
+                    "details": {"relative_path": rel},
+                },
+            )
+        data = path.read_bytes()
+        if compute_sha256_bytes(data) != sha:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RESULT_CORRUPT",
+                    "message": f"published artifact hash mismatch for {label}: {rel}",
+                    "details": {"relative_path": rel},
+                },
+            )
+        try:
+            return json.loads(data.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RESULT_CORRUPT",
+                    "message": f"published artifact is not valid JSON: {rel}",
+                    "details": {"relative_path": rel},
+                },
+            ) from exc
+
+    def _page_view(page: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        lines: list[dict[str, Any]] = []
+        for block in page.get("blocks", []) or []:
+            if not isinstance(block, dict):
+                continue
+            lines.append(
+                {
+                    "text": str(block.get("text_raw") or ""),
+                    "bbox": block.get("bbox"),
+                    "kind": str(block.get("kind") or "text"),
+                }
+            )
+        tables: list[dict[str, Any]] = []
+        for table in page.get("tables", []) or []:
+            if not isinstance(table, dict):
+                continue
+            tables.append(
+                {
+                    "table_id": str(table.get("table_id") or ""),
+                    "caption": table.get("caption"),
+                    "bbox": table.get("bbox"),
+                    "row_count": table.get("row_count"),
+                    "column_count": table.get("column_count"),
+                    "cells": [
+                        {
+                            "row": cell.get("row_index"),
+                            "col": cell.get("column_index"),
+                            "rowspan": cell.get("rowspan"),
+                            "colspan": cell.get("colspan"),
+                            "text": str(cell.get("text_raw") or ""),
+                            "header_role": cell.get("header_role"),
+                            "bbox": cell.get("bbox"),
+                        }
+                        for cell in table.get("cells", []) or []
+                        if isinstance(cell, dict)
+                    ],
+                }
+            )
+        return lines, tables
+
+    def _stage_of(run_name: str) -> str | None:
+        if "--native_parse--" in run_name:
+            return "native_parse"
+        if "--layout_parse--" in run_name:
+            return "layout_parse"
+        if "--extract--" in run_name:
+            return "extract"
+        return None
+
     channels: list[dict[str, Any]] = []
-    if not root.is_dir():
-        return {"api_version": "v1", "job_id": job_id, "page_number": page_number, "channels": []}
+    history: list[dict[str, Any]] = []
+    manifest_verified = False
 
-    for run_dir in sorted(root.iterdir()):
-        if not run_dir.is_dir():
-            continue
-        name = run_dir.name
-        if "--native_parse--" in name:
-            engine = "native"
-        elif "--layout_parse--" in name:
-            # run subdirs may split by profile (layout-native vs layout-ocr).
-            engine = "layout"
-        elif "--extract--" in name:
-            engine = "rapidocr_region"
-        else:
-            continue
+    from bio_pdf.storage.result_reader import ResultReader
 
-        if engine == "rapidocr_region":
-            sidecar = run_dir / "region-ocr.json"
-            if sidecar.is_file():
-                try:
-                    data = json.loads(sidecar.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    data = {}
-                lines = (data.get("pages") or {}).get(str(page_number)) or []
-                if lines:
-                    channels.append(
-                        {
-                            "engine": engine,
-                            "artifact_rel": sidecar.relative_to(service.paths.artifact_root).as_posix(),
-                            "lines": [
-                                {"text": str(ln.get("text") or ""), "bbox": [ln.get("x0"), ln.get("y0"), ln.get("x1"), ln.get("y1")]}
-                                for ln in lines
-                            ],
-                        }
-                    )
-            continue
+    try:
+        manifest = ResultReader(root).read_published_manifest(job_id)
+    except ResultCorruptError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RESULT_CORRUPT",
+                "message": str(exc) or "published result is corrupted",
+                "details": getattr(exc, "details", {}) or {},
+            },
+        ) from exc
 
-        # parse stages: normalized.json at the run root or in run-* subdirs
-        candidates = [run_dir / "normalized.json", *sorted(run_dir.glob("run-*/normalized.json"))]
-        for path in candidates:
-            if not path.is_file():
+    stage_runs_root = root / "jobs" / job_id / "stage_runs"
+    current_run_ids: set[str] = set()
+
+    if manifest is not None:
+        manifest_verified = True
+        stages = manifest.get("stages") or {}
+        for stage_name, outputs in stages.items():
+            if not isinstance(outputs, dict):
                 continue
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                continue
-            for page in data.get("pages", []) or []:
-                if not isinstance(page, dict) or int(page.get("page_number", -1)) != page_number:
+            for _logical, entry in outputs.items():
+                if not isinstance(entry, dict):
                     continue
-                lines = [
-                    {
-                        "text": str(block.get("text_raw") or ""),
-                        "bbox": block.get("bbox"),
-                        "kind": str(block.get("kind") or "text"),
-                    }
-                    for block in page.get("blocks", []) or []
-                    if isinstance(block, dict)
-                ]
-                if lines:
-                    sub = path.parent.name if path.parent != run_dir else None
+                rel = str(entry.get("relative_path") or "")
+                parts = rel.split("/")
+                if len(parts) >= 4 and parts[0] == "jobs" and parts[2] == "stage_runs":
+                    current_run_ids.add(parts[3])
+                filename = parts[-1] if parts else ""
+                if stage_name in ("native_parse", "layout_parse") and filename == "normalized.json":
+                    data = _verified_json(entry, label=f"{stage_name} normalized")
+                    for page in data.get("pages", []) or []:
+                        if not isinstance(page, dict) or int(page.get("page_number", -1)) != page_number:
+                            continue
+                        lines, tables = _page_view(page)
+                        if not lines and not tables:
+                            continue
+                        channels.append(
+                            {
+                                "engine": "native" if stage_name == "native_parse" else "layout",
+                                "run": parts[3] if len(parts) >= 4 else None,
+                                "artifact_rel": rel,
+                                "manifest_verified": True,
+                                "lines": lines,
+                                "tables": tables,
+                            }
+                        )
+                elif stage_name == "extract" and filename == "region-ocr.json":
+                    data = _verified_json(entry, label="region-ocr")
+                    page_lines = (data.get("pages") or {}).get(str(page_number)) or []
+                    conflicts = [
+                        record
+                        for record in (data.get("content_conflicts") or [])
+                        if int(record.get("page_number") or -1) == page_number
+                    ]
+                    supersedes = [
+                        record
+                        for record in (data.get("native_superseded") or [])
+                        if int(record.get("page_number") or -1) == page_number
+                    ]
+                    if page_lines or conflicts or supersedes:
+                        channels.append(
+                            {
+                                "engine": "rapidocr_region",
+                                "artifact_rel": rel,
+                                "manifest_verified": True,
+                                "lines": [
+                                    {
+                                        "text": str(ln.get("text") or ""),
+                                        "bbox": [ln.get("x0"), ln.get("y0"), ln.get("x1"), ln.get("y1")],
+                                    }
+                                    for ln in page_lines
+                                ],
+                                "tables": [],
+                                "content_conflicts": conflicts,
+                                "native_superseded": supersedes,
+                            }
+                        )
+                    # F09: adopted-candidate content is its OWN channel — it
+                    # entered the feed from a human-adopted reparse, not from
+                    # this run's region OCR; the two must never blur.
+                    adopted_lines = (data.get("adopted_candidates") or {}).get(str(page_number)) or []
+                    if adopted_lines:
+                        channels.append(
+                            {
+                                "engine": "adopted_candidate",
+                                "artifact_rel": rel,
+                                "manifest_verified": True,
+                                "lines": [
+                                    {
+                                        "text": str(ln.get("text") or ""),
+                                        "bbox": [ln.get("x0"), ln.get("y0"), ln.get("x1"), ln.get("y1")],
+                                    }
+                                    for ln in adopted_lines
+                                ],
+                                "tables": [],
+                            }
+                        )
+
+    # History: stage-run directories that are NOT part of the current
+    # published manifest (failed/earlier attempts). Kept apart from the
+    # current channels — an old attempt must never masquerade as current.
+    if stage_runs_root.is_dir():
+        for run_dir in sorted(stage_runs_root.iterdir()):
+            if not run_dir.is_dir():
+                continue
+            stage = _stage_of(run_dir.name)
+            if stage is None:
+                continue
+            is_current = run_dir.name in current_run_ids
+            if is_current:
+                continue
+            stage_manifest = run_dir / "stage.manifest.json"
+            history.append(
+                {
+                    "run": run_dir.name,
+                    "stage": stage,
+                    "status": "completed" if stage_manifest.is_file() else "failed_or_incomplete",
+                    "artifact_rel": stage_manifest.relative_to(root).as_posix()
+                    if stage_manifest.is_file()
+                    else None,
+                }
+            )
+
+    # Legacy fallback: no published manifest at all (old jobs) — read the
+    # working stage_runs tree, clearly marked as unverified.
+    if manifest is None and stage_runs_root.is_dir():
+        for run_dir in sorted(stage_runs_root.iterdir()):
+            if not run_dir.is_dir():
+                continue
+            stage = _stage_of(run_dir.name)
+            if stage is None:
+                continue
+            if stage == "extract":
+                sidecar = run_dir / "region-ocr.json"
+                if sidecar.is_file():
+                    try:
+                        data = json.loads(sidecar.read_text(encoding="utf-8"))
+                    except json.JSONDecodeError:
+                        continue
+                    lines = (data.get("pages") or {}).get(str(page_number)) or []
+                    if lines:
+                        channels.append(
+                            {
+                                "engine": "rapidocr_region",
+                                "artifact_rel": sidecar.relative_to(root).as_posix(),
+                                "manifest_verified": False,
+                                "lines": [
+                                    {"text": str(ln.get("text") or ""),
+                                     "bbox": [ln.get("x0"), ln.get("y0"), ln.get("x1"), ln.get("y1")]}
+                                    for ln in lines
+                                ],
+                                "tables": [],
+                            }
+                        )
+                continue
+            candidates = [run_dir / "normalized.json", *sorted(run_dir.glob("run-*/normalized.json"))]
+            for path in candidates:
+                if not path.is_file():
+                    continue
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    continue
+                for page in data.get("pages", []) or []:
+                    if not isinstance(page, dict) or int(page.get("page_number", -1)) != page_number:
+                        continue
+                    lines, tables = _page_view(page)
+                    if not lines and not tables:
+                        continue
                     channels.append(
                         {
-                            # The canonical engine label stays stable; the
-                            # concrete run (e.g. profile split) is its own
-                            # field, so readers can group or drill down.
-                            "engine": engine,
-                            "run": sub,
-                            "artifact_rel": path.relative_to(service.paths.artifact_root).as_posix(),
+                            "engine": "native" if stage == "native_parse" else "layout",
+                            "run": path.parent.name if path.parent != run_dir else None,
+                            "artifact_rel": path.relative_to(root).as_posix(),
+                            "manifest_verified": False,
                             "lines": lines,
+                            "tables": tables,
                         }
                     )
 
-    channels.sort(key=lambda ch: ch["engine"])
+    channels.sort(key=lambda ch: (ch["engine"], str(ch.get("run") or "")))
     return {
         "api_version": "v1",
         "job_id": job_id,
         "page_number": page_number,
+        "manifest_verified": manifest_verified,
         "channels": channels,
+        "history": history,
     }
 
 
@@ -1017,44 +1240,56 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
 
     from bio_pdf.extract.sequences.region_ocr import ocr_residue_pages
 
+    # F02/S01: reserve the candidate IDENTITY first, in one atomic DB
+    # transaction (unique candidate_id + per-issue display attempt). Two
+    # concurrent requests can never share an identity or a file, and a
+    # failure below consumes the reservation ('failed') instead of leaving
+    # a reusable identity behind.
+    reservation = service.repository.reserve_issue_candidate(issue_id=issue_id, job_id=job_id)
+    candidate_id = str(reservation["candidate_id"])
+    attempt = int(reservation["attempt"])
+
     try:
         ocr = ocr_residue_pages(Path(str(doc_row["source_path"])), [int(page)])
     except Exception as exc:  # noqa: BLE001 — the failure becomes the log entry
+        service.repository.fail_issue_candidate(
+            candidate_id=candidate_id, error=f"{type(exc).__name__}: {exc}"
+        )
         service.repository.append_issue_event(
             issue_id=issue_id,
             actor="reparse",
             action="reparse_failed",
-            note=f"{type(exc).__name__}: {exc}"[:300],
+            note=(
+                f"candidate {candidate_id} (attempt {attempt}) failed: "
+                f"{type(exc).__name__}: {exc}"
+            )[:300],
         )
         raise HTTPException(
             status_code=502,
             detail={
                 "code": "REPARSE_FAILED",
                 "message": f"region OCR failed: {exc}",
-                "details": {"page": page},
+                "details": {"page": page, "candidate_id": candidate_id, "attempt": attempt},
             },
         ) from exc
 
     lines = ocr.get(int(page), [])
     # region_ocr returns (x0, y0, x1, y1, text) — text is index 4 (E5).
     text = "\n".join(line[4] for line in lines)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-    # E3/S03: every reparse gets its OWN immutable attempt directory. A
-    # second run never overwrites the file an earlier event references —
-    # the audit trail must be able to replay exactly what it recorded.
+    # E3/S03 + F02/S01: every candidate has its OWN immutable identity and
+    # directory. The file name carries the unique candidate_id (the
+    # per-issue attempt is only the display number); a second run never
+    # overwrites the file an earlier event references — the audit trail
+    # must be able to replay exactly what it recorded.
     rel_dir = Path("jobs") / job_id / "issues" / issue_id
     out_dir = service.paths.artifact_root / rel_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    prior = [
-        event
-        for event in service.repository.list_issue_events(issue_id)
-        if str(event["action"]) == "reparse_candidate"
-    ]
-    attempt = len(prior) + 1
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    candidate = out_dir / f"candidate-{attempt}.txt"
-    candidate.write_text(text, encoding="utf-8")
-    rel = (rel_dir / f"candidate-{attempt}.txt").as_posix()
+    candidate_name = f"candidate-{candidate_id}.txt"
+    meta_name = f"candidate-{candidate_id}.meta.json"
+    rel = (rel_dir / candidate_name).as_posix()
+    meta_rel = (rel_dir / meta_name).as_posix()
 
     publication = service.repository.get_publication(job_id)
     doc_row = service.repository.connection.execute(
@@ -1062,15 +1297,30 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
     ).fetchone()
     region_raw = row["region_json"] if "region_json" in row.keys() else None
     meta = {
+        "candidate_id": candidate_id,
         "issue_id": issue_id,
         "job_id": job_id,
         "attempt": attempt,
         "artifact_rel": rel,
+        "meta_rel": meta_rel,
         "content_sha256": digest,
         "char_count": len(text),
         "line_count": len(lines),
         "page_number": int(page),
         "region": json.loads(region_raw) if region_raw else None,
+        # F09: the 2D lines (boxes + text) travel with the candidate so an
+        # ADOPTED candidate can be consumed as a real OCR source by the
+        # new job's extract stage (float() kills numpy scalars — D10).
+        "lines": [
+            {
+                "x0": float(x0),
+                "y0": float(y0),
+                "x1": float(x1),
+                "y1": float(y1),
+                "text": str(line_text),
+            }
+            for (x0, y0, x1, y1, line_text) in lines
+        ],
         "source_sha256": str(doc_row["sha256"]) if doc_row else None,
         "baseline_id": str(publication["baseline_id"]) if publication else None,
         "params": {
@@ -1080,9 +1330,59 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         },
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
     }
-    (out_dir / f"candidate-{attempt}.meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    meta_text = json.dumps(meta, ensure_ascii=False, indent=2, sort_keys=True)
+    meta_digest = hashlib.sha256(meta_text.encode("utf-8")).hexdigest()
+
+    # Exclusive create ("xb"): a collision is impossible by construction,
+    # and a leftover file becomes a loud failure — never an in-place
+    # overwrite of evidence another event may reference. Bytes, not text
+    # mode, so the on-disk sha matches the recorded sha on every platform.
+    try:
+        with open(out_dir / candidate_name, "xb") as fh:
+            fh.write(text.encode("utf-8"))
+        with open(out_dir / meta_name, "xb") as fh:
+            fh.write(meta_text.encode("utf-8"))
+    except FileExistsError as exc:
+        service.repository.fail_issue_candidate(
+            candidate_id=candidate_id, error=f"artifact already exists: {exc}"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CANDIDATE_ARTIFACT_EXISTS",
+                "message": "candidate artifact path already exists — refusing to overwrite",
+                "details": {"candidate_id": candidate_id, "artifact_rel": rel},
+            },
+        ) from exc
+    except OSError as exc:
+        service.repository.fail_issue_candidate(
+            candidate_id=candidate_id, error=f"write failed: {exc}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "CANDIDATE_WRITE_FAILED",
+                "message": f"candidate artifact could not be written: {exc}",
+                "details": {"candidate_id": candidate_id},
+            },
+        ) from exc
+
+    committed = service.repository.finish_issue_candidate(
+        candidate_id=candidate_id,
+        artifact_rel=rel,
+        content_sha256=digest,
+        meta_sha256=meta_digest,
+        meta_json=meta_text,
     )
+    if not committed:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "CANDIDATE_IDENTITY_LOST",
+                "message": "the candidate reservation was no longer writable",
+                "details": {"candidate_id": candidate_id},
+            },
+        )
 
     service.repository.update_issue_state(issue_id, state="reparse_requested")
     service.repository.connection.commit()
@@ -1091,7 +1391,7 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         actor="reparse",
         action="reparse_candidate",
         note=(
-            f"attempt {attempt} sha256={digest[:16]} page {page}: "
+            f"attempt {attempt} candidate {candidate_id} sha256={digest[:16]} page {page}: "
             f"{len(lines)} OCR lines, {len(text)} chars"
             + (f"; preview: {text[:120]!r}" if text else "; region empty — still unresolved")
         ),
@@ -1102,9 +1402,12 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         "api_version": "v1",
         "issue": _issue_view(service, refreshed),
         "candidate": {
+            "candidate_id": candidate_id,
             "artifact_rel": rel,
+            "meta_rel": meta_rel,
             "attempt": attempt,
             "content_sha256": digest,
+            "meta_sha256": meta_digest,
             "line_count": len(lines),
             "char_count": len(text),
             "preview": text[:400],
@@ -1139,12 +1442,13 @@ def issue_adopt(
 
     _job_or_404(service, job_id)
     row = _issue_or_404(service, job_id, issue_id)
-    events = [
-        event
-        for event in service.repository.list_issue_events(issue_id)
-        if str(event["action"]) == "reparse_candidate" and event["artifact_rel"]
+    # F02/S01: candidates come from the reservation table (immutable
+    # identity + hashes), not from scanning event notes.
+    candidates = [
+        cand
+        for cand in service.repository.list_issue_candidates(issue_id, status="written")
     ]
-    if not events:
+    if not candidates:
         raise HTTPException(
             status_code=409,
             detail={
@@ -1153,9 +1457,9 @@ def issue_adopt(
             },
         )
     chosen = None
-    for event in events:
-        if request.attempt is None or int(event["artifact_rel"].rsplit("-", 1)[-1].split(".")[0]) == int(request.attempt):
-            chosen = event
+    for cand in candidates:
+        if request.attempt is None or int(cand["attempt"]) == int(request.attempt):
+            chosen = cand
     if chosen is None:
         raise HTTPException(
             status_code=404,
@@ -1174,10 +1478,21 @@ def issue_adopt(
                 "message": "the candidate artifact is no longer readable",
             },
         )
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     from bio_pdf.storage.artifacts import compute_sha256_bytes
 
-    if compute_sha256_bytes(artifact.read_bytes()) != meta.get("content_sha256"):
+    recorded_meta_sha = chosen["meta_sha256"] if "meta_sha256" in chosen.keys() else None
+    if recorded_meta_sha and compute_sha256_bytes(meta_path.read_bytes()) != recorded_meta_sha:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CANDIDATE_META_HASH_MISMATCH",
+                "message": "candidate metadata no longer matches its recorded hash",
+            },
+        )
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    actual_content_sha = compute_sha256_bytes(artifact.read_bytes())
+    recorded_content_sha = str(chosen["content_sha256"] or meta.get("content_sha256") or "")
+    if actual_content_sha != recorded_content_sha or actual_content_sha != meta.get("content_sha256"):
         raise HTTPException(
             status_code=409,
             detail={
@@ -1199,19 +1514,40 @@ def issue_adopt(
         )
 
     pages = [int(p) for p in (request.pages or [int(meta.get("page_number", 1))]) if int(p) > 0]
+    candidate_text = artifact.read_text(encoding="utf-8", errors="replace")
+    # F09: adoption is REAL consumption — the candidate (id, content hash,
+    # source SHA, origin baseline, page/region) becomes part of the new
+    # job's persisted inputs, and the extract stage feeds its content into
+    # the extraction for that page. A copy is hash-verified into the job's
+    # own adopted/ directory at creation time.
     new_job, _page_count = service.create_job(
         Path(str(doc_row["source_path"])),
         engine="docling",
         page_numbers=tuple(pages),
+        adopted_candidates=[
+            {
+                "candidate_id": str(chosen["candidate_id"]),
+                "artifact_path": str(artifact),
+                "content_sha256": actual_content_sha,
+                "meta_json": meta_path.read_text(encoding="utf-8"),
+                "source_sha256": meta.get("source_sha256"),
+                "baseline_id": meta.get("baseline_id"),
+                "origin_job_id": job_id,
+                "origin_issue_id": issue_id,
+                "page_number": int(meta.get("page_number", pages[0])),
+                "region": meta.get("region") if isinstance(meta.get("region"), dict) else None,
+            }
+        ],
     )
     service.repository.append_issue_event(
         issue_id=issue_id,
         actor=request.actor,
         action="adopted",
         note=(
-            f"adopted candidate {Path(str(chosen['artifact_rel'])).name} "
-            f"(sha256={str(meta.get('content_sha256'))[:16]}) → new job {new_job.job_id}"
-            f" over pages {pages}"
+            f"adopted candidate {chosen['candidate_id']} "
+            f"(sha256={actual_content_sha[:16]}, {len(candidate_text)} chars) → new job "
+            f"{new_job.job_id} over pages {pages}; the candidate content is CONSUMED by "
+            "the new job's extract stage (input recorded in its effective config)"
         ),
         artifact_rel=chosen["artifact_rel"],
     )
@@ -1219,8 +1555,10 @@ def issue_adopt(
         "api_version": "v1",
         "issue": _issue_view(service, row),
         "adopted": {
+            "candidate_id": str(chosen["candidate_id"]),
             "candidate_rel": chosen["artifact_rel"],
-            "content_sha256": meta.get("content_sha256"),
+            "content_sha256": actual_content_sha,
+            "consumed_by_new_job": True,
             "new_job_id": new_job.job_id,
             "pages": list(pages),
         },

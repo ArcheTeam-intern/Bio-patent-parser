@@ -75,27 +75,61 @@ def _write_identity(path: Path, identity: dict[str, Any]) -> None:
 
 
 
-def _validate_page_geometry(document: NormalizedDocument) -> list[str]:
-    """E8/P04: bounding boxes are only trustworthy when they fit the page.
+def _page_geometry_descriptor(
+    document: NormalizedDocument,
+    *,
+    page_sizes: dict[int, tuple[float, float, int]],
+    declared_basis: Any,
+    projection_warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    """F07/P03: geometry facts stay SEPARATE and honest.
 
-    MinerU's coordinate basis is not independently verified from the
-    protocol (no successful cloud sample yet). Instead of pretending a
-    mapping, each block box is CHECKED against the page's real size; every
-    violation becomes an explicit geometry warning — the manifest marks
-    the basis unverified and downstream never silently clamps or rescales.
+    ``page_size_verified`` (we know the real page size), ``bounds_valid``
+    (no box violates the page / is non-finite / is inverted) and
+    ``coordinate_basis_verified`` (a JUSTIFIED unit+origin+rotation+crop
+    transform exists — declared by the protocol payload) are three
+    different claims. A box merely not exceeding the page does NOT prove
+    the coordinate basis: an unknown pixel/normalized frame can land
+    in-bounds by coincidence. While the basis is unverified the boxes stay
+    RAW (no rescale/clamp) and precise evidence-location promises are
+    blocked, not implied.
     """
 
-    warnings: list[str] = []
+    import math
+
+    # Warnings raised during PROJECTION (a dropped non-finite box never
+    # reaches the normalized document) still count against bounds validity.
+    warnings: list[str] = list(projection_warnings or [])
+    unverified_pages: list[int] = []
+    produced = [p.page_number for p in document.pages]
     for page in document.pages:
         if page.width_pt <= 0 or page.height_pt <= 0:
             warnings.append(f"page {page.page_number}: unknown page size — geometry unverified")
+            unverified_pages.append(page.page_number)
             continue
         items = list(page.blocks) + list(page.tables) + list(page.figures)
         for item in items:
             bbox = getattr(item, "bbox", None)
             if not bbox or len(bbox) < 4:
                 continue
-            x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            try:
+                x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            except (TypeError, ValueError):
+                warnings.append(
+                    f"page {page.page_number}: non-numeric box — geometry unverified"
+                )
+                continue
+            if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+                warnings.append(
+                    f"page {page.page_number}: non-finite box coordinates "
+                    f"({x0},{y0},{x1},{y1}) — box rejected, raw payload retained"
+                )
+                continue
+            if x1 < x0 or y1 < y0:
+                warnings.append(
+                    f"page {page.page_number}: inverted box ({x0:.0f},{y0:.0f},{x1:.0f},{y1:.0f}) "
+                    "— bounds not valid"
+                )
             tol = 2.0
             if (
                 x0 < -tol or y0 < -tol
@@ -107,7 +141,64 @@ def _validate_page_geometry(document: NormalizedDocument) -> list[str]:
                     f"exceeds the {page.width_pt:.0f}x{page.height_pt:.0f}pt page — "
                     "MinerU coordinate basis unverified"
                 )
-    return warnings
+
+    page_size_verified = bool(produced) and all(
+        pn in page_sizes and page_sizes[pn][0] > 0 and page_sizes[pn][1] > 0
+        for pn in produced
+    )
+
+    spec = declared_basis if isinstance(declared_basis, dict) else None
+    basis_notes: list[str] = []
+    coordinate_basis_verified = False
+    if spec is None:
+        basis_notes.append(
+            "no coordinate basis was declared by the protocol (unit/origin/rotation/crop "
+            "unknown) — boxes are raw and precise evidence location is not guaranteed"
+        )
+    else:
+        unit = str(spec.get("unit") or "").lower()
+        origin = str(spec.get("origin") or "").lower()
+        rotation_applied = bool(spec.get("rotation_applied"))
+        crop_applied = bool(spec.get("crop_applied"))
+        if unit != "pt":
+            basis_notes.append(
+                f"declared unit {unit!r} is not pt — no conversion is invented; boxes stay raw"
+            )
+        elif origin not in ("top_left", "bottom_left"):
+            basis_notes.append(
+                "no origin was declared — a trusted page frame cannot be justified"
+            )
+        elif crop_applied:
+            basis_notes.append(
+                "a crop transform was applied upstream (not declared as page-space) — "
+                "page-space mapping unverified"
+            )
+        else:
+            rotated = sorted(
+                pn
+                for pn in produced
+                if int(page_sizes.get(pn, (0.0, 0.0, 0))[2] or 0) % 360 != 0
+            )
+            if rotated and not rotation_applied:
+                basis_notes.append(
+                    f"pages {rotated} are rotated and rotation_applied is not declared — "
+                    "the box frame cannot be trusted"
+                )
+            elif not page_size_verified:
+                basis_notes.append(
+                    "page sizes are not verified — the box→page mapping cannot be trusted"
+                )
+            else:
+                coordinate_basis_verified = True
+
+    return {
+        "page_size_verified": page_size_verified,
+        "coordinate_basis_verified": coordinate_basis_verified,
+        "bounds_valid": not warnings,
+        "bbox_warnings": warnings,
+        "unverified_pages": sorted(set(unverified_pages)),
+        "basis_notes": basis_notes,
+    }
 def _source_page_geometry(
     source_path: Path, pages: list[int]
 ) -> dict[int, tuple[float, float, int]]:
@@ -576,17 +667,42 @@ class MinerUAdapter:
         # project it into a Docling-shaped document before normalising.
         ordered_pages = sorted(int(p) for p in request.page_numbers)
         page_sizes = _source_page_geometry(request.source_path, ordered_pages)
+        declared_basis = (
+            result_payload.get("coord_basis") if isinstance(result_payload, dict) else None
+        )
         projected = _project_mineru_payload(
             result_payload,
             page_numbers=set(request.page_numbers),
             page_order=ordered_pages or None,
             page_sizes=page_sizes,
+            declared_basis=declared_basis,
         )
+        projection_warnings = projected.pop("_projection_warnings", [])
         document = normalize_docling_document(
             projected,
             parser_run_id=f"{request.job_id}:mineru",
             document_id=request.document_id,
         )
+
+        # F07/P03: three separate geometry facts (same contract as the batch path).
+        descriptor = _page_geometry_descriptor(
+            document,
+            page_sizes=page_sizes,
+            declared_basis=declared_basis,
+            projection_warnings=projection_warnings,
+        )
+        doc_errors = (
+            list(document.errors) + list(projection_warnings) + list(descriptor["bbox_warnings"])
+        )
+        if descriptor["basis_notes"]:
+            doc_errors.append(
+                "mineru coordinate basis unverified: " + "; ".join(descriptor["basis_notes"])
+            )
+        if not descriptor["bounds_valid"]:
+            doc_errors.append(
+                "box bounds invalid: geometry bounds are not verified (raw boxes retained)"
+            )
+        document = document.model_copy(update={"errors": doc_errors})
 
         # MinerU ignores server-side page-range requests; keep the original
         # page numbers and filter locally so the output honours the request.
@@ -614,6 +730,23 @@ class MinerUAdapter:
             normalized_path=normalized_path,
             source_identity_verified=source_identity_verified,
         )
+        manifest["page_geometry"] = {
+            "basis": "source-pdf" if page_sizes else "unknown-defaults",
+            "declared_coordinate_basis": declared_basis,
+            "page_size_verified": descriptor["page_size_verified"],
+            "coordinate_basis_verified": descriptor["coordinate_basis_verified"],
+            "bounds_valid": descriptor["bounds_valid"],
+            "raw_bbox_retained": True,
+            "bbox_warnings": descriptor["bbox_warnings"][:50],
+            "unverified_pages": descriptor["unverified_pages"],
+            "basis_notes": descriptor["basis_notes"],
+            "page_count": len(document.pages),
+            "rotated_pages": sorted(
+                page_no
+                for page_no, (_w, _h, rotation) in (page_sizes or {}).items()
+                if rotation
+            ),
+        }
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
@@ -1054,24 +1187,42 @@ class MinerUAdapter:
 
         ordered_pages = sorted(int(p) for p in request.page_numbers)
         page_sizes = _source_page_geometry(request.source_path, ordered_pages)
+        declared_basis = (
+            result_payload.get("coord_basis") if isinstance(result_payload, dict) else None
+        )
         projected = _project_mineru_payload(
             result_payload,
             page_numbers=set(request.page_numbers),
             page_order=ordered_pages or None,
             page_sizes=page_sizes,
+            declared_basis=declared_basis,
         )
+        projection_warnings = projected.pop("_projection_warnings", [])
         document = normalize_docling_document(
             projected,
             parser_run_id=f"{request.job_id}:mineru",
             document_id=request.document_id,
         )
 
-        # E8/P04: validate every block box against the page's real size.
-        geometry_warnings = _validate_page_geometry(document)
-        if geometry_warnings:
-            document = document.model_copy(
-                update={"errors": list(document.errors) + geometry_warnings}
+        # F07/P03: three separate geometry facts — never conflated.
+        descriptor = _page_geometry_descriptor(
+            document,
+            page_sizes=page_sizes,
+            declared_basis=declared_basis,
+            projection_warnings=projection_warnings,
+        )
+        doc_errors = (
+            list(document.errors) + list(projection_warnings) + list(descriptor["bbox_warnings"])
+        )
+        if descriptor["basis_notes"]:
+            doc_errors.append(
+                "mineru coordinate basis unverified: " + "; ".join(descriptor["basis_notes"])
             )
+        if not descriptor["bounds_valid"]:
+            doc_errors.append(
+                "box bounds invalid: geometry bounds are not verified (raw boxes retained)"
+            )
+        document = document.model_copy(update={"errors": doc_errors})
 
         requested = set(request.page_numbers)
         produced = {p.page_number for p in document.pages}
@@ -1095,12 +1246,19 @@ class MinerUAdapter:
             normalized_path=normalized_path,
             source_identity_verified=source_identity_verified,
         )
-        # D07: how the page geometry was obtained — source-PDF sizes when
-        # available, neutral defaults (recorded as UNVERIFIED) otherwise.
+        # F07/P03: how the page geometry was obtained — source-PDF sizes when
+        # available, and the three SEPARATE verification facts. A box that
+        # merely fits the page does not verify the coordinate basis.
         manifest["page_geometry"] = {
             "basis": "source-pdf" if page_sizes else "unknown-defaults",
-            "verified": bool(page_sizes) and not geometry_warnings,
-            "bbox_warnings": geometry_warnings[:50],
+            "declared_coordinate_basis": declared_basis,
+            "page_size_verified": descriptor["page_size_verified"],
+            "coordinate_basis_verified": descriptor["coordinate_basis_verified"],
+            "bounds_valid": descriptor["bounds_valid"],
+            "raw_bbox_retained": True,
+            "bbox_warnings": descriptor["bbox_warnings"][:50],
+            "unverified_pages": descriptor["unverified_pages"],
+            "basis_notes": descriptor["basis_notes"],
             "page_count": len(document.pages),
             "rotated_pages": sorted(
                 page_no
@@ -1167,12 +1325,76 @@ class MinerUAdapter:
 # ---------------------------------------------------------------------------
 
 
+def _project_bbox(
+    bbox: Any,
+    *,
+    declared_origin: str | None,
+    page_no: int,
+    item_ref: str,
+    warnings: list[str],
+) -> dict[str, Any] | None:
+    """Coerce a raw MinerU bbox into the Docling-shaped dict (F07/P03).
+
+    - The RAW box always travels along under ``raw_bbox`` so nothing is
+      lost when the frame is not trusted.
+    - A non-finite box is DROPPED with an explicit warning (the raw payload
+      keeps it) — never silently serialized or clamped.
+    - ``coord_origin`` is claimed ONLY when the payload declared a basis;
+      otherwise the key is omitted and the manifest records the basis as
+      unverified (the normalizer's TOPLEFT default is a last-resort reading,
+      not a verified fact).
+    """
+
+    import math
+
+    try:
+        if isinstance(bbox, dict):
+            values = [
+                float(bbox.get("l", bbox.get("left", 0))),
+                float(bbox.get("t", bbox.get("top", 0))),
+                float(bbox.get("r", bbox.get("right", 0))),
+                float(bbox.get("b", bbox.get("bottom", 0))),
+            ]
+        elif isinstance(bbox, (list, tuple)) and len(bbox) == 8:
+            xs = [float(bbox[i]) for i in (0, 2, 4, 6)]
+            ys = [float(bbox[i]) for i in (1, 3, 5, 7)]
+            values = [min(xs), min(ys), max(xs), max(ys)]
+        elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            values = [float(v) for v in bbox]
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+
+    if not all(math.isfinite(v) for v in values):
+        warnings.append(
+            f"page {page_no}: {item_ref} has a non-finite bbox {values!r} — "
+            "box dropped from the normalized view, raw payload retained"
+        )
+        return None
+
+    out: dict[str, Any] = {
+        "l": values[0],
+        "t": values[1],
+        "r": values[2],
+        "b": values[3],
+        "raw_bbox": list(bbox) if isinstance(bbox, (list, tuple)) else dict(bbox),
+    }
+    origin = str(declared_origin or "").lower()
+    if origin in ("top_left", "topleft"):
+        out["coord_origin"] = "TOPLEFT"
+    elif origin in ("bottom_left", "bottomleft"):
+        out["coord_origin"] = "BOTTOMLEFT"
+    return out
+
+
 def _project_mineru_payload(
     payload: dict[str, Any],
     *,
     page_numbers: set[int],
     page_order: list[int] | None = None,
     page_sizes: dict[int, tuple[float, float, int]] | None = None,
+    declared_basis: Any = None,
 ) -> dict[str, Any]:
     """Map MinerU's result envelope into a Docling-shaped dict.
 
@@ -1185,15 +1407,24 @@ def _project_mineru_payload(
 
     The normaliser in :mod:`bio_pdf.parsers.normalize_docling` expects
     ``{"pages": [{"page": N, "width": w, "height": h, "texts": [...]}, ...]}``.
-    We build that here, with one entry per page MinerU reported.
+    We build that here, with one entry per page MinerU reported. A reserved
+    ``_projection_warnings`` key carries bbox drops back to the caller.
     """
 
+    spec = declared_basis if isinstance(declared_basis, dict) else None
+    declared_origin = str(spec.get("origin") or "") if spec else None
+    warnings: list[str] = []
+
     if "content_list" in payload and isinstance(payload["content_list"], list):
-        return _project_content_list(
+        projected = _project_content_list(
             payload["content_list"],
             page_order=page_order,
             page_sizes=page_sizes,
+            declared_origin=declared_origin,
+            warnings=warnings,
         )
+        projected["_projection_warnings"] = warnings
+        return projected
 
     if "markdown" in payload and isinstance(payload["markdown"], str) and payload["markdown"].strip():
         # C10 (plan §5.4): markdown alone carries NO per-page structure.
@@ -1207,10 +1438,10 @@ def _project_mineru_payload(
         )
 
     if "pages" in payload and isinstance(payload["pages"], list) and payload["pages"]:
-        return {"pages": payload["pages"]}
+        return {"pages": payload["pages"], "_projection_warnings": warnings}
 
     # Last resort: empty pages list. The normaliser will raise a clear error.
-    return {"pages": []}
+    return {"pages": [], "_projection_warnings": warnings}
 
 
 _PAGE_HEADER_RE = re.compile(r"^\s*<!--\s*page\s+(\d+)\s*-->", re.IGNORECASE)
@@ -1219,7 +1450,14 @@ _PAGE_HEADER_RE = re.compile(r"^\s*<!--\s*page\s+(\d+)\s*-->", re.IGNORECASE)
 _TABLE_TYPES = {"table", "table_body"}
 
 
-def _project_table_item(item: dict[str, Any], page_no: int, seq: int) -> dict[str, Any] | None:
+def _project_table_item(
+    item: dict[str, Any],
+    page_no: int,
+    seq: int,
+    *,
+    declared_origin: str | None = None,
+    warnings: list[str] | None = None,
+) -> dict[str, Any] | None:
     """Convert a MinerU table item (``table_body`` HTML) into a Docling-shaped table.
 
     The HTML is parsed with a tolerant regex-based cell walker (no external
@@ -1234,25 +1472,17 @@ def _project_table_item(item: dict[str, Any], page_no: int, seq: int) -> dict[st
         return None
 
     bbox = item.get("bbox") or item.get("position")
-    bbox_out: dict[str, float] | None = None
-    try:
-        if isinstance(bbox, dict):
-            bbox_out = {
-                "l": float(bbox.get("l", bbox.get("left", 0))),
-                "t": float(bbox.get("t", bbox.get("top", 0))),
-                "r": float(bbox.get("r", bbox.get("right", 0))),
-                "b": float(bbox.get("b", bbox.get("bottom", 0))),
-            }
-        elif isinstance(bbox, (list, tuple)) and len(bbox) == 8:
-            # MinerU sometimes emits 8-number bboxes (4 corner points).
-            xs = [float(bbox[i]) for i in (0, 2, 4, 6)]
-            ys = [float(bbox[i]) for i in (1, 3, 5, 7)]
-            bbox_out = {"l": min(xs), "t": min(ys), "r": max(xs), "b": max(ys)}
-        elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-            bbox_out = {"l": float(bbox[0]), "t": float(bbox[1]),
-                        "r": float(bbox[2]), "b": float(bbox[3])}
-    except (TypeError, ValueError):
-        bbox_out = None
+    bbox_out: dict[str, Any] | None = (
+        _project_bbox(
+            bbox,
+            declared_origin=declared_origin,
+            page_no=page_no,
+            item_ref=f"table {seq}",
+            warnings=warnings if warnings is not None else [],
+        )
+        if bbox is not None
+        else None
+    )
 
     cells: list[dict[str, Any]] = []
     row_idx = -1
@@ -1325,6 +1555,8 @@ def _project_content_list(
     *,
     page_order: list[int] | None = None,
     page_sizes: dict[int, tuple[float, float, int]] | None = None,
+    declared_origin: str | None = None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a Docling-shaped pages dict from a MinerU ``content_list`` (D07).
 
@@ -1334,7 +1566,11 @@ def _project_content_list(
       wrong for any non-contiguous request.
     - Page size comes from the SOURCE PDF (``page_sizes``), not a fixed
       612x792; each page's rotation is carried along.
+    - F07/P03: boxes go through :func:`_project_bbox` — origin only claimed
+      when declared, raw box retained, non-finite boxes dropped loudly.
     """
+
+    warnings = warnings if warnings is not None else []
 
     pages: dict[int, dict[str, Any]] = {}
     for item in items:
@@ -1372,7 +1608,10 @@ def _project_content_list(
         # Tables: the content lives in ``table_body`` HTML; projecting only
         # ``text``/``content`` would silently drop every table.
         if item_type in _TABLE_TYPES and (item.get("table_body") or ""):
-            table_payload = _project_table_item(item, page_no, len(page["tables"]))
+            table_payload = _project_table_item(
+                item, page_no, len(page["tables"]),
+                declared_origin=declared_origin, warnings=warnings,
+            )
             if table_payload is not None:
                 page["tables"].append(table_payload)
                 continue
@@ -1382,27 +1621,17 @@ def _project_content_list(
             continue
 
         bbox = item.get("bbox") or item.get("position")
-        try:
-            if isinstance(bbox, dict):
-                bbox_out = {
-                    "l": float(bbox.get("l", bbox.get("left", 0))),
-                    "t": float(bbox.get("t", bbox.get("top", 0))),
-                    "r": float(bbox.get("r", bbox.get("right", 0))),
-                    "b": float(bbox.get("b", bbox.get("bottom", 0))),
-                }
-            elif isinstance(bbox, (list, tuple)) and len(bbox) == 8:
-                xs = [float(bbox[i]) for i in (0, 2, 4, 6)]
-                ys = [float(bbox[i]) for i in (1, 3, 5, 7)]
-                bbox_out = {"l": min(xs), "t": min(ys), "r": max(xs), "b": max(ys)}
-            elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-                bbox_out = {"l": float(bbox[0]), "t": float(bbox[1]),
-                            "r": float(bbox[2]), "b": float(bbox[3])}
-            else:
-                bbox_out = None
-        except (TypeError, ValueError):
-            bbox_out = None
-        if bbox_out is not None:
-            bbox_out = {**bbox_out, "coord_origin": "TOPLEFT"}
+        bbox_out = (
+            _project_bbox(
+                bbox,
+                declared_origin=declared_origin,
+                page_no=page_no,
+                item_ref=f"text {len(page['texts'])}",
+                warnings=warnings,
+            )
+            if bbox is not None
+            else None
+        )
 
         label = item.get("type") or item.get("label") or "text"
         page["texts"].append(

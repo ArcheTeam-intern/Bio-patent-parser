@@ -15,6 +15,7 @@ execution report with the real server. Key invariants under test:
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -374,3 +375,334 @@ def test_expired_lease_side_is_recovered_like_a_restart(client, monkeypatch) -> 
     # Per-attempt dirs: the recovered run wrote to attempt-2.
     assert "attempt-2" in (by_side["docling"]["artifact_dir"] or "")
     second.repository.close()
+
+
+# ---- F03/S02: retry generation — failed sides only re-armed explicitly ---
+
+
+def test_stale_snapshot_cannot_re_execute_a_just_failed_side(client, monkeypatch) -> None:
+    """F03/S02 (the recheck's exact timing): the ORIGINAL pass is blocked in
+    docling while another retry flow claims mineru and FAILS it. When
+    docling is released, the old traversal must NOT re-run mineru — the
+    forbidden sequence ['docling','mineru_http','mineru_http'] with
+    attempt=2 must be impossible. A failed side is only re-armed by an
+    explicit new retry."""
+
+    c, tmp_path = client
+    document_id = _upload_doc(c, tmp_path)
+
+    from bio_pdf.application import comparison_service as cs
+
+    calls: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        calls.append(engine)
+        if engine == "docling":
+            entered.set()
+            release.wait(timeout=10)
+            return _StubAdapter("Ala Gly Leu Lys", document_id)
+        return _StubAdapter("Ala Gly Leu Lys", document_id, fail=True)
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    res = c.post(
+        "/api/v1/comparisons",
+        json={"document_id": document_id, "pages": [1], "engines": ["docling", "mineru_http"]},
+    )
+    comparison_id = res.json()["comparison_id"]
+    assert entered.wait(timeout=10)
+
+    # Another flow: retry claims mineru (still queued) and FAILS it.
+    retry = c.post(f"/api/v1/comparisons/{comparison_id}/retry")
+    assert retry.status_code == 200
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        body = c.get(f"/api/v1/comparisons/{comparison_id}").json()
+        mineru = next(s for s in body["sides"] if s["side"] == "mineru_http")
+        if mineru["status"] == "failed":
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("mineru_http never reached failed")
+
+    # Release the ORIGINAL pass; its stale snapshot still lists mineru as
+    # queued, but the claim authority must refuse a failed side.
+    release.set()
+    body = _wait_done(c, comparison_id, timeout=30.0)
+    assert calls == ["docling", "mineru_http"], calls
+    by_side = {s["side"]: s for s in body["sides"]}
+    assert by_side["mineru_http"]["status"] == "failed"
+    assert by_side["mineru_http"]["attempt"] == 1, "no second execution may consume attempt 2"
+
+
+def test_plain_pass_cannot_rearm_a_failed_side_only_explicit_retry_can(client, monkeypatch) -> None:
+    """F03/S02: a plain execution pass (recovery sweep / start) finds
+    nothing to claim on a 'failed' side; only the explicit retry()'s atomic
+    failed→queued flip re-arms it — exactly once per retry call."""
+
+    _c, tmp_path = client
+    document_id = _upload_doc(_c, tmp_path)
+
+    from bio_pdf.application import comparison_service as cs
+    from bio_pdf.application.comparison_service import ComparisonService
+    from bio_pdf.storage.repository import Repository
+
+    calls: list[str] = []
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        calls.append(engine)
+        fail = engine == "mineru_http"
+        return _StubAdapter("Ala Gly Leu Lys", document_id, fail=fail)
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    svc = ComparisonService(
+        repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=3600.0,
+    )
+    cid = svc.create(
+        document_id=document_id,
+        source_path=tmp_path / "cmp.pdf",
+        pages=[1],
+        engines=["docling", "mineru_http"],
+    )
+    svc.start(cid)
+    for _ in range(200):
+        info = svc.get(cid)
+        if all(s["status"] in ("done", "failed") for s in info["sides"]):
+            break
+        time.sleep(0.02)
+    assert calls.count("mineru_http") == 1
+
+    # Plain pass again: nothing claimable (done + failed), no new calls.
+    svc.start(cid)
+    time.sleep(0.3)
+    assert calls.count("mineru_http") == 1, "a plain pass must not re-run a failed side"
+
+    # Explicit retry re-arms it exactly once.
+    svc.retry(cid)
+    for _ in range(200):
+        info = svc.get(cid)
+        if all(s["status"] in ("done", "failed") for s in info["sides"]):
+            break
+        time.sleep(0.02)
+    assert calls.count("mineru_http") == 2
+    svc.repository.close()
+
+
+# ---- F04/S04: heartbeat renewal, takeover, budget ------------------------
+
+
+def test_heartbeat_keeps_a_live_long_run_leased(client, monkeypatch) -> None:
+    """F04/S04: a live execution longer than the INITIAL lease is kept
+    claimable=false by its token-conditioned heartbeat — another worker
+    must not steal it just because the initial lease (0.3s here) elapsed."""
+
+    _c, tmp_path = client
+    document_id = _upload_doc(_c, tmp_path)
+
+    from bio_pdf.application import comparison_service as cs
+    from bio_pdf.application.comparison_service import ComparisonService
+    from bio_pdf.storage.repository import Repository
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        entered.set()
+        release.wait(timeout=10)
+        return _StubAdapter("Ala Gly Leu Lys", document_id)
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    db = tmp_path / "data" / "bio.sqlite"
+    svc = ComparisonService(
+        repository=Repository(db, check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=0.3,
+        heartbeat_interval=0.05,
+    )
+    cid = svc.create(document_id=document_id, source_path=tmp_path / "cmp.pdf", pages=[1], engines=["docling"])
+    svc.start(cid)
+    assert entered.wait(timeout=10)
+
+    time.sleep(0.9)  # >= 3 lease periods — only the heartbeat keeps it leased
+    other = ComparisonService(
+        repository=Repository(db, check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=0.3,
+    )
+    assert other._claim_side(cid, "docling") is None, "live heartbeat must protect the lease"
+
+    release.set()
+    for _ in range(200):
+        info = svc.get(cid)
+        if info["sides"][0]["status"] == "done":
+            break
+        time.sleep(0.05)
+    info = svc.get(cid)
+    assert info["sides"][0]["status"] == "done"
+    assert info["sides"][0]["attempt"] == 1
+    svc.repository.close()
+    other.repository.close()
+
+
+def test_stopped_heartbeat_allows_takeover_and_stale_attempt_publishes_nothing(
+    client, monkeypatch
+) -> None:
+    """F04/S04: once the heartbeat stops, the lease lapses, a takeover is
+    allowed (attempt 2), and the OLD attempt's completion write is fenced
+    out — it publishes nothing over the new holder's state."""
+
+    _c, tmp_path = client
+    document_id = _upload_doc(_c, tmp_path)
+
+    from bio_pdf.application import comparison_service as cs
+    from bio_pdf.application.comparison_service import ComparisonService
+    from bio_pdf.storage.repository import Repository
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        entered.set()
+        release.wait(timeout=10)
+        return _StubAdapter("Ala Gly Leu Lys", document_id)
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    db = tmp_path / "data" / "bio.sqlite"
+    svc = ComparisonService(
+        repository=Repository(db, check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=0.2,
+        heartbeat_interval=10.0,  # effectively stopped for this test
+    )
+    cid = svc.create(document_id=document_id, source_path=tmp_path / "cmp.pdf", pages=[1], engines=["docling"])
+    svc.start(cid)
+    assert entered.wait(timeout=10)
+
+    time.sleep(0.5)  # lease lapsed, no renewal happened
+    other = ComparisonService(
+        repository=Repository(db, check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=0.2,
+    )
+    claimed = other._claim_side(cid, "docling")
+    assert claimed is not None, "an expired lease (stopped heartbeat) must be claimable"
+    token2, attempt2 = claimed
+    assert attempt2 == 2
+
+    # The old execution now finishes and tries to publish: fenced out.
+    release.set()
+    time.sleep(1.0)
+    side = other.get(cid)["sides"][0]
+    assert side["status"] == "running", "the stale attempt must not overwrite the new holder's state"
+    assert side["attempt"] == 2
+    assert side["summary"] == {}
+    # The current holder publishes normally.
+    assert other._publish_side_result(cid, "docling", token2, status="done", summary_json="{}") is True
+    svc.repository.close()
+    other.repository.close()
+
+
+def test_execution_budget_exceeded_is_published_as_failure(client, monkeypatch) -> None:
+    """F04/S04: exceeding the execution budget is an explicit failure code,
+    never a silent hang."""
+
+    _c, tmp_path = client
+    document_id = _upload_doc(_c, tmp_path)
+
+    from bio_pdf.application import comparison_service as cs
+    from bio_pdf.application.comparison_service import ComparisonService
+    from bio_pdf.storage.repository import Repository
+
+    release = threading.Event()
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        release.wait(timeout=10)
+        return _StubAdapter("Ala Gly Leu Lys", document_id)
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    svc = ComparisonService(
+        repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=30.0,
+        heartbeat_interval=0.05,
+        execution_budget_seconds=0.3,
+    )
+    cid = svc.create(document_id=document_id, source_path=tmp_path / "cmp.pdf", pages=[1], engines=["docling"])
+    svc.start(cid)
+    time.sleep(0.6)  # budget (0.3s) definitely exceeded while still running
+    release.set()
+    for _ in range(200):
+        info = svc.get(cid)
+        if info["sides"][0]["status"] in ("done", "failed"):
+            break
+        time.sleep(0.05)
+    side = svc.get(cid)["sides"][0]
+    assert side["status"] == "failed"
+    assert "EXECUTION_BUDGET_EXCEEDED" in (side["error"] or "")
+    svc.repository.close()
+
+
+# ---- F04/S03: periodic sweeper recovers after a fast restart --------------
+
+
+def test_restart_with_valid_lease_recovers_periodically_without_retry(tmp_path, monkeypatch) -> None:
+    """F04/S03: a process dies; the restart boots while the old lease is
+    STILL VALID (so the boot pass finds nothing). No retry is ever clicked;
+    the periodic sweeper must recover the side once the lease lapses."""
+
+    import datetime as _dt
+
+    from bio_pdf.application import comparison_service as cs
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        return _StubAdapter("Ala Gly Leu Lys", "doc-sweep")
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    settings = ApiSettings(
+        data_dir=tmp_path / "data",
+        samples_dir=tmp_path / "samples",
+        comparison_sweep_seconds=0.25,
+    )
+    app = create_app(settings)
+    with TestClient(app) as c:
+        document_id = _upload_doc(c, tmp_path)
+        source_path = tmp_path / "cmp.pdf"
+
+        # Simulate the crashed process: a running side whose lease is still
+        # valid at boot (the boot sweep must leave it alone).
+        import sqlite3
+
+        now = _dt.datetime.now(tz=_dt.timezone.utc)
+        lease_until = (now + _dt.timedelta(seconds=1.0)).isoformat()
+        conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+        conn.execute(
+            "INSERT INTO comparisons (comparison_id, document_id, source_path, pages_json, engines_json,"
+            " status, created_at, updated_at) VALUES ('cmp-dead', ?, ?, '[1]', '[\"docling\"]', 'running', ?, ?)",
+            (document_id, str(source_path), now.isoformat(), now.isoformat()),
+        )
+        conn.execute(
+            "INSERT INTO comparison_sides (comparison_id, side, status, attempt, lease_token, lease_until)"
+            " VALUES ('cmp-dead', 'docling', 'running', 1, 'lease-of-dead-process', ?)",
+            (lease_until,),
+        )
+        conn.commit()
+        conn.close()
+
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            body = c.get("/api/v1/comparisons/cmp-dead").json()
+            if body["sides"][0]["status"] == "done":
+                break
+            time.sleep(0.1)
+        body = c.get("/api/v1/comparisons/cmp-dead").json()
+        assert body["sides"][0]["status"] == "done", body
+        assert body["sides"][0]["attempt"] == 2, "recovery must claim a fresh attempt"

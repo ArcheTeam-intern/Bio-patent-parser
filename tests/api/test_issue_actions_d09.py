@@ -366,3 +366,123 @@ def test_adopt_creates_a_new_formal_job_not_an_inplace_edit(client, monkeypatch)
     events = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["events"]
     adopted_events = [e for e in events if e["action"] == "adopted"]
     assert adopted_events and new_job_id in (adopted_events[0]["note"] or "")
+
+
+# ---- F02/S01: concurrent reparse candidate identity -----------------------
+
+
+def test_concurrent_reparse_requests_get_distinct_immutable_candidates(client, monkeypatch) -> None:
+    """F02/S01 (the recheck's barrier repro): two reparse requests for the
+    SAME issue run CONCURRENTLY (both inside OCR at the same time). With the
+    old len(prior)+1 numbering both returned attempt=1 and wrote the same
+    candidate-1.txt — one response's SHA then pointed at the other's bytes.
+    With atomic identity reservation each request gets its own candidate_id,
+    attempt, file and hashes, and both files stay byte-exact."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c, tmp_path,
+        reason_code="SEQ_INVENTORY_MISSING",
+        source_ids=["st25:7"],
+        detail="SEQ ID 7 (page 1): region reached, no residues",
+    )
+
+    import threading
+
+    from bio_pdf.extract.sequences import region_ocr
+
+    barrier = threading.Barrier(2, timeout=10)
+
+    def fake_ocr(pdf_path, pages):  # noqa: ANN001
+        # Both requests must be INSIDE the OCR call simultaneously —
+        # exactly the interleaving the recheck constructed.
+        barrier.wait()
+        return {int(pages[0]): [(40.0, 100.0, 120.0, 110.0, f"TXT-{threading.get_ident()}")]}
+
+    monkeypatch.setattr(region_ocr, "ocr_residue_pages", fake_ocr)
+
+    results: list[dict] = []
+
+    def call() -> None:
+        resp = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+        results.append({"status": resp.status_code, "body": resp.json()})
+
+    threads = [threading.Thread(target=call) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+
+    assert len(results) == 2
+    assert all(r["status"] == 200 for r in results), results
+    ids = [r["body"]["candidate"]["candidate_id"] for r in results]
+    attempts = sorted(r["body"]["candidate"]["attempt"] for r in results)
+    rels = [r["body"]["candidate"]["artifact_rel"] for r in results]
+    assert len(set(ids)) == 2, "two concurrent requests must not share a candidate identity"
+    assert attempts == [1, 2], "display attempts must be distinct and gapless"
+    assert len(set(rels)) == 2, "distinct identities must write distinct files"
+
+    import hashlib as _h
+
+    for r in results:
+        cand = r["body"]["candidate"]
+        text = (tmp_path / "data" / cand["artifact_rel"]).read_text(encoding="utf-8")
+        meta = json.loads(
+            (tmp_path / "data" / cand["meta_rel"]).read_text(encoding="utf-8")
+        )
+        # The file bytes match THIS response's recorded sha…
+        assert _h.sha256(text.encode("utf-8")).hexdigest() == cand["content_sha256"]
+        # …and its meta, and the meta's own sha, are this candidate's.
+        assert meta["candidate_id"] == cand["candidate_id"]
+        assert meta["content_sha256"] == cand["content_sha256"]
+        assert _h.sha256(
+            (tmp_path / "data" / cand["meta_rel"]).read_bytes()
+        ).hexdigest() == cand["meta_sha256"]
+
+    # Both events reference their own file; hashes in notes are distinct.
+    events = c.get(f"/api/v1/jobs/{job_id}/issues/{issue_id}").json()["events"]
+    referenced = [e["artifact_rel"] for e in events if e["action"] == "reparse_candidate"]
+    assert sorted(referenced) == sorted(rels)
+
+
+def test_failed_reparse_consumes_its_reserved_identity(client, monkeypatch) -> None:
+    """F02/S01: a failed request leaves a 'failed' record; the NEXT request
+    gets a fresh identity (attempt 2) — the failed one is never reused."""
+
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(
+        c, tmp_path,
+        reason_code="SEQ_INVENTORY_MISSING",
+        source_ids=["st25:7"],
+        detail="SEQ ID 7 (page 1): region reached, no residues",
+    )
+
+    from bio_pdf.extract.sequences import region_ocr
+
+    calls = {"n": 0}
+
+    def flaky_ocr(pdf_path, pages):  # noqa: ANN001
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("synthetic OCR failure")
+        return {int(pages[0]): [(40.0, 100.0, 120.0, 110.0, "RECOVERED")]}
+
+    monkeypatch.setattr(region_ocr, "ocr_residue_pages", flaky_ocr)
+
+    first = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert first.status_code == 502
+    failed_candidate = first.json()["error"]["details"]["candidate_id"]
+    assert first.json()["error"]["details"]["attempt"] == 1
+
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    row = conn.execute(
+        "SELECT status, error FROM issue_candidates WHERE candidate_id = ?", (failed_candidate,)
+    ).fetchone()
+    conn.close()
+    assert row is not None and row[0] == "failed"
+    assert "synthetic OCR failure" in row[1]
+
+    second = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert second.status_code == 200
+    assert second.json()["candidate"]["attempt"] == 2, "the failed identity must not be reused"
+    assert second.json()["candidate"]["candidate_id"] != failed_candidate

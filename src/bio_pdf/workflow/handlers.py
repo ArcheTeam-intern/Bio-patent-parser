@@ -806,6 +806,9 @@ def _source_parser_from_run(parser_run_id: str) -> str:
 def _merge_ocr_page_lines(
     blocks: list[dict[str, Any]],
     ocr_lines: dict[int, list[tuple[float, float, str]]],
+    *,
+    origin: str = "rapidocr_region",
+    origin_aliases: dict[int, list[dict[str, str]]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Interleave OCR'd lines into each page by vertical position (C03/D02).
 
@@ -813,21 +816,30 @@ def _merge_ocr_page_lines(
     native blocks, so a residue row between ``<400> 7`` and ``<210> 8`` stays
     exactly there.
 
-    E5 rules (strict superset of D02):
+    E5 rules (strict superset of D02), F05/P01 total-coverage:
 
     - Overlap is decided on BOTH axes (x AND y intervals intersect): equal
       text at DIFFERENT positions is real repeated content — both kept
       (the old adjacent-OCR dedup deleted the second copy).
     - Same physical mention + equal fingerprint → merged (OCR copy dropped).
-    - Same physical mention + DIFFERENT content at comparable granularity
+    - Same mention + the NATIVE text fully covers the OCR content
+      (``ocr_fp ⊆ native_fp``) → OCR consumed: nothing can be lost.
+    - Same mention + the OCR line is MORE complete than the native fragment
+      (``native_fp ⊂ ocr_fp``, proper subset) → the native fragment MUST NOT
+      consume the OCR: the complete OCR line takes the mention's place in
+      the extraction feed (superseding the short native block for parsing;
+      the native artifact itself is untouched) and a ``coverage_supersede``
+      record keeps both texts/boxes for audit. The old bidirectional
+      substring rule silently deleted "Cys" here (F05 recheck repro).
+    - Same mention + DIFFERENT content at comparable granularity
       (lengths within 2x) → the native text stays in the feed and a
-      ``SOURCE_CONFLICT`` record (page, 2D box, both texts) is returned —
+      ``content_conflict`` record (page, 2D box, both texts) is returned —
       never silently resolved.
-    - Granularity mismatch (a native paragraph vs one of its OCR lines):
-      if the shorter fingerprint is contained in the longer → merged;
-      merely overlapping but incomparable → kept, NOT a conflict.
+    - Merely overlapping but incomparable → kept, NOT a conflict.
 
-    Returns ``(merged_blocks, conflicts)``.
+    Records carry a ``kind`` of ``content_conflict`` or ``coverage_supersede``.
+
+    Returns ``(merged_blocks, records)``.
     """
 
     import re as _re
@@ -846,9 +858,9 @@ def _merge_ocr_page_lines(
         )
 
     output: list[dict[str, Any]] = []
-    conflicts: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     # Uniform item shape: (y, order, kind, payload) where kind is
-    # "block" (payload = block dict) or "ocr" (payload = line text).
+    # "block" (payload = block dict) or "ocr" (payload = 5-tuple).
     page_items: dict[int, list[tuple[float, int, str, Any]]] = {}
     for index, block in enumerate(blocks):
         page = int(block.get("page_number", 1))
@@ -856,16 +868,30 @@ def _merge_ocr_page_lines(
         y0 = float(bbox[1]) if bbox else 0.0
         page_items.setdefault(page, []).append((y0, index, "block", block))
 
+    #: block indexes whose native fragment was superseded by a MORE
+    #: complete OCR line at the same mention (dropped from the feed only —
+    #: the native artifact keeps every byte).
+    superseded: set[int] = set()
+
     for page, lines in ocr_lines.items():
         natives = [
             (
-                (float(b["bbox"][0]), float(b["bbox"][1]), float(b["bbox"][2]), float(b["bbox"][3]))
-                if b.get("bbox") and len(b["bbox"]) >= 4
-                else None,
+                item_index,
+                (
+                    (
+                        float(b["bbox"][0]),
+                        float(b["bbox"][1]),
+                        float(b["bbox"][2]),
+                        float(b["bbox"][3]),
+                    )
+                    if b.get("bbox") and len(b["bbox"]) >= 4
+                    else None
+                ),
                 fingerprint(str(b.get("text") or "")),
                 str(b.get("text") or ""),
+                str(b.get("block_id") or ""),
             )
-            for _y, _o, kind, b in page_items.get(page, [])
+            for _y, item_index, kind, b in page_items.get(page, [])
             if kind == "block"
         ]
         kept: list[tuple[float, int, str, Any]] = []
@@ -874,24 +900,63 @@ def _merge_ocr_page_lines(
             if len(fp) < 2:
                 continue
             overlapping = [
-                (n_fp, n_text)
-                for n_box, n_fp, n_text in natives
+                (item_index, n_fp, n_text, n_block_id)
+                for item_index, n_box, n_fp, n_text, n_block_id in natives
                 if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
             ]
-            merge_equal = any(n_fp == fp for n_fp, _t in overlapping)
-            contained = any(
-                n_fp and (fp in n_fp or n_fp in fp) for n_fp, _t in overlapping
+            merge_equal = any(n_fp == fp for _i, n_fp, _t, _b in overlapping)
+            # F05: only retained content that FULLY COVERS the OCR text may
+            # consume it; equal already merged above.
+            covered = any(
+                n_fp and n_fp != fp and fp in n_fp for _i, n_fp, _t, _b in overlapping
             )
-            if merge_equal or contained:
-                continue  # same physical mention, (same or finer) content
+            if merge_equal or covered:
+                continue  # nothing beyond the retained text could be lost
+            supersedes = [
+                (item_index, n_fp, n_text, n_block_id)
+                for item_index, n_fp, n_text, n_block_id in overlapping
+                if n_fp and n_fp != fp and n_fp in fp  # native fragment ⊂ OCR
+            ]
+            if supersedes:
+                superseded_native = []
+                for item_index, n_fp, n_text, n_block_id in supersedes:
+                    superseded.add(item_index)
+                    superseded_native.append(
+                        {"text": n_text, "block_id": n_block_id, "fingerprint": n_fp}
+                    )
+                    records.append(
+                        {
+                            "kind": "coverage_supersede",
+                            "page_number": page,
+                            "x0": float(round(x0, 1)),
+                            "y_top": float(round(y0, 1)),
+                            "x1": float(round(x1, 1)),
+                            "y_bottom": float(round(y1, 1)),
+                            "native_text": n_text,
+                            "ocr_text": text,
+                            "native_block_id": n_block_id,
+                            "reason": (
+                                "the OCR line covers the native fragment at this "
+                                "mention; the complete OCR text replaces it in the "
+                                "extraction feed (native artifact untouched)"
+                            ),
+                        }
+                    )
+                # Keep the MORE complete OCR line, tagged with what it
+                # superseded so evidence links survive.
+                kept.append(
+                    (y0, order, "ocr", (x0, y0, x1, y1, text, superseded_native))
+                )
+                continue
             disagree = [
                 (n_fp, n_text)
-                for n_fp, n_text in overlapping
+                for _i, n_fp, n_text, _b in overlapping
                 if max(len(fp), len(n_fp)) <= 2 * max(min(len(fp), len(n_fp)), 1)
             ]
             if disagree:
-                conflicts.append(
+                records.append(
                     {
+                        "kind": "content_conflict",
                         "page_number": page,
                         "x0": float(round(x0, 1)),
                         "y_top": float(round(y0, 1)),
@@ -904,7 +969,7 @@ def _merge_ocr_page_lines(
                 continue  # native stays in the feed; conflict is recorded
             # Different position OR incomparable granularity: keep the OCR
             # line — content is never dropped for resembling something else.
-            kept.append((y0, order, "ocr", (x0, y0, x1, y1, text)))
+            kept.append((y0, order, "ocr", (x0, y0, x1, y1, text, None)))
         page_items.setdefault(page, []).extend(kept)
 
     for page in sorted(page_items):
@@ -913,9 +978,26 @@ def _merge_ocr_page_lines(
         items.sort(key=lambda item: item[0])
         for _y, _order, kind, payload in items:
             if kind == "block":
+                item_index = _order
+                if item_index in superseded:
+                    continue  # superseded by a more complete OCR line
                 output.append(payload)
             else:
-                x0, y_top, x1, y_bottom, text = payload
+                x0, y_top, x1, y_bottom, text, superseded_native = payload
+                aliases = []
+                for sup in superseded_native or []:
+                    aliases.append(
+                        {
+                            "kind": "superseded_native",
+                            "text": str(sup["text"]),
+                            "block_id": str(sup["block_id"]),
+                        }
+                    )
+                # F09: adopted-candidate lines carry their candidate identity
+                # on the block, so evidence written from it traces back to
+                # the exact adopted artifact.
+                for alias in (origin_aliases or {}).get(page, []):
+                    aliases.append({str(k): str(v) for k, v in alias.items()})
                 output.append(
                     {
                         "text": text,
@@ -927,12 +1009,12 @@ def _merge_ocr_page_lines(
                         "bbox": [x0, y_top, x1, y_bottom],
                         "block_id": f"ocr-region:{page}:{int(_y)}:{_order}",
                         "source_refs": [],
-                        "source_aliases": [],
-                        "source_parser": "rapidocr_region",
+                        "source_aliases": aliases,
+                        "source_parser": origin,
                         "source_artifact_id": None,
                     }
                 )
-    return output, conflicts
+    return output, records
 
 
 def _page_blocks(
@@ -1058,9 +1140,12 @@ class ExtractStage(_FileStage):
                 }
             )
 
-        # E9: artifact refs contributed during the sequence pass (region OCR
-        # sidecar) are published alongside extract.json.
+        # E9/F08: artifact refs contributed during the sequence pass (region
+        # OCR + adopted-candidate sidecar) are published alongside extract.json.
         extract_extra_refs: list[Any] = []
+        # F09: what adopted candidates contributed to this extraction (the
+        # audit chain candidate → feed blocks → evidence).
+        adopted_records_out: list[dict[str, Any]] = []
 
         # ---- sequences ----------------------------------------------------
         sequences: list[SequenceRecord] = []
@@ -1111,6 +1196,9 @@ class ExtractStage(_FileStage):
             feed_blocks = blocks
             ocr_pages_used: list[int] = []
             conflict_pages: set[int] = set()
+            ocr_text: dict[int, list[tuple[float, float, float, float, str]]] = {}
+            ocr_conflicts: list[dict[str, Any]] = []
+            coverage_supersedes: list[dict[str, Any]] = []
             if ocr_candidates:
                 from bio_pdf.extract.sequences.region_ocr import ocr_residue_pages
                 from pathlib import Path as _Path
@@ -1128,30 +1216,19 @@ class ExtractStage(_FileStage):
                     )
                     ocr_text = {}
                 if ocr_text:
-                    feed_blocks, ocr_conflicts = _merge_ocr_page_lines(blocks, ocr_text)
+                    feed_blocks, merge_records = _merge_ocr_page_lines(blocks, ocr_text)
                     ocr_pages_used = sorted(ocr_text)
-                    # E9/P05: persist the region OCR as its own auditable
-                    # artifact so the 来源对照 view can read EXACTLY what
-                    # the fallback contributed, per page, with boxes.
-                    from bio_pdf.storage.artifacts import atomic_write_json as _awj
-
-                    region_payload = {
-                        "schema_version": "1.0",
-                        "engine": "rapidocr_region",
-                        "dpi": 300,
-                        "policy": "st25-residue-fallback",
-                        "pages": {
-                            str(page): [
-                                {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "text": t}
-                                for (x0, y0, x1, y1, t) in lines
-                            ]
-                            for page, lines in sorted(ocr_text.items())
-                        },
-                    }
-                    region_ref = _awj(Path(context.stage_dir()), "region-ocr.json", region_payload)
-                    extract_extra_refs.append(
-                        _stage_ref(context, "region-ocr.json", region_ref)
-                    )
+                    # F05/P01: split the merge records — content conflicts are
+                    # recorded as SOURCE_CONFLICT issues; coverage supersedes
+                    # (a complete OCR line replaced a short native fragment)
+                    # travel into the audit payload and diagnostics so the
+                    # replacement is traceable, never silent.
+                    ocr_conflicts = [
+                        r for r in merge_records if r.get("kind") == "content_conflict"
+                    ]
+                    coverage_supersedes = [
+                        r for r in merge_records if r.get("kind") == "coverage_supersede"
+                    ]
                     diagnostics.append(
                         {
                             "code": "REGION_OCR_PAGES",
@@ -1194,8 +1271,203 @@ class ExtractStage(_FileStage):
                         }
                     else:
                         conflict_pages = set()
-                else:
-                    conflict_pages = set()
+                    # F05/P01: a complete OCR line replaced a short native
+                    # fragment at the same mention — nothing was dropped
+                    # (the native bytes stay in its own artifact) and the
+                    # replacement is listed page by page.
+                    if coverage_supersedes:
+                        diagnostics.append(
+                            {
+                                "code": "NATIVE_SUPERSEDED_BY_OCR_COUNT",
+                                "detail": (
+                                    f"{len(coverage_supersedes)} native fragment(s) superseded by "
+                                    "more complete OCR lines on pages "
+                                    + ", ".join(
+                                        str(p)
+                                        for p in sorted(
+                                            {int(s["page_number"]) for s in coverage_supersedes}
+                                        )
+                                    )
+                                ),
+                            }
+                        )
+
+            # ---- F09: adopted candidates are CONSUMED as OCR sources ------
+            # The content was hash-verified when copied into this job; here
+            # it enters the extraction feed through the SAME merge rules as
+            # region OCR, tagged with its candidate identity so evidence
+            # written from these lines traces back to the adopted artifact.
+            adopted_specs = [
+                spec
+                for spec in (_workflow_options(context).get("adopted_candidates") or [])
+                if isinstance(spec, dict)
+            ]
+            adopted_sidecar: dict[int, list[dict[str, Any]]] = {}
+            if adopted_specs:
+                import hashlib as _hashlib
+
+                from pathlib import Path as _Path2
+
+                adopted_lines: dict[int, list[tuple[float, float, float, float, str]]] = {}
+                adopted_aliases: dict[int, list[dict[str, str]]] = {}
+                for spec in adopted_specs:
+                    candidate_id = str(spec.get("candidate_id") or "")
+                    artifact_name = str(spec.get("artifact_name") or "candidate.txt")
+                    page_no = int(spec.get("page_number") or 0)
+                    if page_no <= 0 or (in_scope is not None and page_no not in in_scope):
+                        diagnostics.append(
+                            {
+                                "code": "ADOPTED_CANDIDATE_OUT_OF_SCOPE",
+                                "detail": f"{candidate_id} targets page {page_no}, outside this run's pages",
+                            }
+                        )
+                        continue
+                    artifact_path = (
+                        _Path2(context.output_dir) / "adopted" / candidate_id / artifact_name
+                    )
+                    if not artifact_path.is_file():
+                        raise WorkflowError(
+                            f"adopted candidate artifact missing for {candidate_id}",
+                            details={"candidate_id": candidate_id, "path": str(artifact_path)},
+                        )
+                    payload_bytes = artifact_path.read_bytes()
+                    digest = _hashlib.sha256(payload_bytes).hexdigest()
+                    expected = str(spec.get("content_sha256") or "")
+                    if not expected or digest != expected:
+                        raise WorkflowError(
+                            f"adopted candidate content hash mismatch for {candidate_id}",
+                            details={
+                                "candidate_id": candidate_id,
+                                "expected_sha256": expected,
+                                "actual_sha256": digest,
+                            },
+                        )
+                    text = payload_bytes.decode("utf-8", errors="replace")
+                    boxes: list[dict[str, Any]] = []
+                    meta_path = artifact_path.with_name("candidate.meta.json")
+                    if meta_path.is_file():
+                        try:
+                            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        except json.JSONDecodeError:
+                            meta = {}
+                        if isinstance(meta.get("lines"), list):
+                            boxes = [ln for ln in meta["lines"] if isinstance(ln, dict)]
+                    if boxes:
+                        for ln in boxes:
+                            adopted_lines.setdefault(page_no, []).append(
+                                (
+                                    float(ln.get("x0") or 0.0),
+                                    float(ln.get("y0") or 0.0),
+                                    float(ln.get("x1") or 0.0),
+                                    float(ln.get("y1") or 0.0),
+                                    str(ln.get("text") or ""),
+                                )
+                            )
+                    else:
+                        # Legacy candidates kept only joined text: place it at
+                        # the issue region (or a page-leading strip) as ONE
+                        # line — honestly coarse, never silently mis-positioned.
+                        region = spec.get("region") if isinstance(spec.get("region"), dict) else None
+                        y_top = float(region.get("y_top") or 0.0) if region else 0.0
+                        y_bottom = (
+                            float(region.get("y_bottom") or (y_top + 10.0)) if region else 10.0
+                        )
+                        adopted_lines.setdefault(page_no, []).append(
+                            (0.0, y_top, 612.0, y_bottom, text)
+                        )
+                    adopted_aliases.setdefault(page_no, []).append(
+                        {
+                            "kind": "adopted_candidate",
+                            "candidate_id": candidate_id,
+                            "content_sha256": digest,
+                            "baseline_id": str(spec.get("baseline_id") or ""),
+                            "origin_job_id": str(spec.get("origin_job_id") or ""),
+                        }
+                    )
+                    adopted_records_out.append(
+                        {
+                            "candidate_id": candidate_id,
+                            "content_sha256": digest,
+                            "source_sha256": spec.get("source_sha256"),
+                            "origin_baseline_id": spec.get("baseline_id"),
+                            "origin_job_id": spec.get("origin_job_id"),
+                            "origin_issue_id": spec.get("origin_issue_id"),
+                            "page_number": page_no,
+                            "line_count": len(adopted_lines.get(page_no, [])),
+                            "coverage_policy": spec.get("coverage_policy") or "merge-with-evidence",
+                        }
+                    )
+                if adopted_lines:
+                    feed_blocks, adopted_merge_records = _merge_ocr_page_lines(
+                        feed_blocks,
+                        adopted_lines,
+                        origin="adopted_candidate",
+                        origin_aliases=adopted_aliases,
+                    )
+                    # Records from consuming a candidate: coverage supersedes
+                    # and content conflicts are explicit (full payload below).
+                    used_by_page: dict[int, list[str]] = {}
+                    for block in feed_blocks:
+                        if str(block.get("source_parser")) == "adopted_candidate":
+                            used_by_page.setdefault(int(block.get("page_number") or 0), []).append(
+                                str(block.get("block_id") or "")
+                            )
+                    for record in adopted_records_out:
+                        page_no = int(record["page_number"])
+                        record["merged_block_ids"] = used_by_page.get(page_no, [])
+                        record["merge_records"] = [
+                            r
+                            for r in adopted_merge_records
+                            if int(r.get("page_number") or -1) == page_no
+                        ]
+                    for page_no, lines in adopted_lines.items():
+                        adopted_sidecar[page_no] = [
+                            {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "text": t}
+                            for (x0, y0, x1, y1, t) in lines
+                        ]
+                    diagnostics.append(
+                        {
+                            "code": "ADOPTED_CANDIDATES_CONSUMED",
+                            "detail": (
+                                ", ".join(
+                                    f"{r['candidate_id']}@{r['content_sha256'][:16]}"
+                                    for r in adopted_records_out
+                                )
+                                + " merged into the extraction feed on pages "
+                                + ", ".join(str(p) for p in sorted(adopted_lines))
+                            ),
+                        }
+                    )
+
+            # E9/P05 + F08/P05: ONE auditable sidecar for everything that
+            # entered the feed from outside the native text layer (region
+            # OCR + adopted candidates), written and published with the
+            # extract outcome.
+            if ocr_text or adopted_sidecar:
+                from bio_pdf.storage.artifacts import atomic_write_json as _awj
+
+                region_payload = {
+                    "schema_version": "1.0",
+                    "engine": "rapidocr_region",
+                    "dpi": 300,
+                    "policy": "st25-residue-fallback",
+                    "pages": {
+                        str(page): [
+                            {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "text": t}
+                            for (x0, y0, x1, y1, t) in lines
+                        ]
+                        for page, lines in sorted(ocr_text.items())
+                    },
+                    "content_conflicts": ocr_conflicts,
+                    "native_superseded": coverage_supersedes,
+                    "adopted_candidates": {
+                        str(page): lines for page, lines in sorted(adopted_sidecar.items())
+                    },
+                }
+                region_ref = _awj(Path(context.stage_dir()), "region-ocr.json", region_payload)
+                extract_extra_refs.append(
+                    _stage_ref(context, "region-ocr.json", region_ref)
+                )
 
             st25_sequences, st25_scan = parse_st25_blocks_with_scan(
                 feed_blocks,
@@ -1546,13 +1818,19 @@ class ExtractStage(_FileStage):
             # C02: declaration-level inventory (every <210>, recovered or
             # not). None when sequences are not a target of this run.
             "sequence_inventory": sequence_inventory,
+            # F09: adopted candidates actually consumed by this run (with
+            # their merged feed block ids) — empty when none were adopted.
+            "adopted_candidates": adopted_records_out,
             "diagnostics": diagnostics,
             "issues": issues,
         }
         out_dir = Path(context.stage_dir())
         ref = atomic_write_json(out_dir, "extract.json", payload)
         return StageOutcome(
-            artifact_refs=[_stage_ref(context, "extract.json", ref)],
+            # F08/P05: the region-OCR sidecar rides WITH the extract outcome,
+            # so it enters the published manifest (hash-checked, auditable) —
+            # it was written to disk but never published before.
+            artifact_refs=[_stage_ref(context, "extract.json", ref), *extract_extra_refs],
             review_required=0,
             warnings=[d["code"] for d in diagnostics[:5]],
         )

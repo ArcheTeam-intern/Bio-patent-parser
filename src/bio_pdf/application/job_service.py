@@ -173,6 +173,7 @@ class JobService:
         ocr_policy: str = "auto",
         workflow_config: WorkflowConfig | None = None,
         config_path: Path | str | None = None,
+        adopted_candidates: list[dict] | None = None,
     ) -> tuple[Job, int]:
         """Register the document and enqueue a job. Returns (job, page_count).
 
@@ -181,7 +182,15 @@ class JobService:
         its hash — this is what stages read and what makes a rerun
         reproducible. ``page_numbers`` may be empty for "all pages"; pages
         outside 1..page_count or duplicates fail at creation time.
+
+        F09: ``adopted_candidates`` are immutable reparse candidates the
+        new job must CONSUME: each entry's content is verified against its
+        recorded sha256 and copied into ``jobs/<job_id>/adopted/<id>/``,
+        and the descriptor list travels in the persisted effective config
+        (so the config hash covers it and the extract stage can use it).
         """
+
+        import hashlib as _hashlib
 
         inspection = inspect_pdf(source_path)
         self._repository.upsert_document(
@@ -204,6 +213,58 @@ class JobService:
             # config — it previously only changed the config hash.
             cfg = cfg.model_copy(update={"targets": tuple(targets)})
 
+        # F09: adopt step — the candidate file is verified and copied into
+        # the new job's own input directory BEFORE the job exists; a hash
+        # mismatch aborts loudly instead of running with the wrong bytes.
+        job_id = f"job-{uuid.uuid4().hex[:12]}"
+        if adopted_candidates:
+            from bio_pdf.config import AdoptedCandidate
+
+            adopted_specs: list[AdoptedCandidate] = []
+            for raw in adopted_candidates:
+                source = Path(str(raw["artifact_path"]))
+                if not source.is_file():
+                    raise WorkflowError(
+                        "adopted candidate artifact is missing",
+                        details={"candidate_id": raw.get("candidate_id"), "path": str(source)},
+                    )
+                payload = source.read_bytes()
+                digest = _hashlib.sha256(payload).hexdigest()
+                expected = str(raw.get("content_sha256") or "")
+                if not expected or digest != expected:
+                    raise WorkflowError(
+                        "adopted candidate content no longer matches its recorded hash",
+                        details={
+                            "candidate_id": raw.get("candidate_id"),
+                            "expected_sha256": expected,
+                            "actual_sha256": digest,
+                            "code": "CANDIDATE_HASH_MISMATCH",
+                        },
+                    )
+                artifact_name = "candidate.txt"
+                dest_dir = self.paths.artifact_root / "jobs" / job_id / "adopted" / str(
+                    raw["candidate_id"]
+                )
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                (dest_dir / artifact_name).write_bytes(payload)
+                meta_text = raw.get("meta_json")
+                if isinstance(meta_text, str) and meta_text:
+                    (dest_dir / "candidate.meta.json").write_text(meta_text, encoding="utf-8")
+                adopted_specs.append(
+                    AdoptedCandidate(
+                        candidate_id=str(raw["candidate_id"]),
+                        content_sha256=digest,
+                        artifact_name=artifact_name,
+                        source_sha256=str(raw["source_sha256"]) if raw.get("source_sha256") else None,
+                        baseline_id=str(raw["baseline_id"]) if raw.get("baseline_id") else None,
+                        origin_job_id=str(raw["origin_job_id"]) if raw.get("origin_job_id") else None,
+                        origin_issue_id=str(raw["origin_issue_id"]) if raw.get("origin_issue_id") else None,
+                        page_number=int(raw["page_number"]),
+                        region=raw.get("region") if isinstance(raw.get("region"), dict) else None,
+                    )
+                )
+            cfg = cfg.model_copy(update={"adopted_candidates": adopted_specs})
+
         # Engine availability is checked BEFORE enqueue (B04): an
         # unconfigured remote service or a missing SDK is not a silent
         # substitution candidate.
@@ -220,7 +281,7 @@ class JobService:
         config_hash = make_cache_key(effective)
         now = datetime.now(tz=timezone.utc)
         job = Job(
-            job_id=f"job-{uuid.uuid4().hex[:12]}",
+            job_id=job_id,
             document_id=inspection.document_id,
             config_hash=config_hash,
             status="queued",

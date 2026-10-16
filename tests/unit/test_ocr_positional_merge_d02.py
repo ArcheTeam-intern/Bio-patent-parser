@@ -147,3 +147,67 @@ def test_conflict_page_downgrades_complete_declarations() -> None:
         if entry["status"] == "complete" and conflict_pages & set(entry["residue_pages"]):
             entry["status"] = "conflict"
     assert inventory["entries"][0]["status"] == "conflict"
+
+
+# ---- F05/P01: native short lines must not swallow more complete OCR ------
+
+
+def test_short_native_fragment_no_longer_swallows_a_longer_ocr_line() -> None:
+    """F05 recheck repro: native 'Ala' box [10,10,40,20] + OCR 'Ala Cys'
+    box [10,10,90,20] — the old bidirectional substring rule consumed the
+    OCR and 'Cys' was lost. The complete OCR line must take the mention's
+    place in the extraction feed (with a coverage_supersede record), and
+    the residue parse must see BOTH residues."""
+
+    tokens_tag = _native("<210> 1\n<211> 2\n<212> PRT\n<400> 1", [10.0, 10.0, 500.0, 20.0])
+    native_short = _native("Ala", [10.0, 80.0, 40.0, 90.0])
+    merged, records = _merge_ocr_page_lines(
+        [tokens_tag, native_short], {1: [(10.0, 80.0, 90.0, 90.0, "Ala Cys")]}
+    )
+
+    texts = [str(b.get("text")) for b in merged]
+    assert "Ala Cys" in texts, "the more complete OCR line must be retained"
+    assert "Ala" not in texts, "the superseded fragment must not double-feed the parser"
+
+    supersedes = [r for r in records if r.get("kind") == "coverage_supersede"]
+    assert len(supersedes) == 1
+    record = supersedes[0]
+    assert record["native_text"] == "Ala" and record["ocr_text"] == "Ala Cys"
+    assert record["page_number"] == 1 and record["native_block_id"]
+
+    # Traceability: the surviving OCR block names what it superseded.
+    ocr_block = next(b for b in merged if str(b.get("text")) == "Ala Cys")
+    aliases = ocr_block.get("source_aliases") or []
+    assert aliases and aliases[0]["kind"] == "superseded_native"
+    assert aliases[0]["text"] == "Ala"
+
+    # Character-level outcome: the parse sees BOTH residues, not just 'A'.
+    from bio_pdf.extract.sequences.st25 import parse_st25_blocks_with_scan
+
+    sequences, _scan = parse_st25_blocks_with_scan(merged, "sha256:fixture")
+    assert [s.normalized_sequence for s in sequences] == ["AC"]
+
+
+def test_native_covering_the_ocr_text_still_consumes_it() -> None:
+    """The allowed direction (F05): retained native content FULLY covers the
+    OCR text — consuming it cannot lose anything (character check)."""
+
+    blocks = [_native("Ala Cys Gly", [10.0, 100.0, 200.0, 110.0])]
+    merged, records = _merge_ocr_page_lines(
+        blocks, {1: [(10.0, 100.0, 90.0, 110.0, "Cys")]}
+    )
+    assert [str(b.get("text")) for b in merged] == ["Ala Cys Gly"]
+    assert records == []
+
+
+def test_partial_overlap_with_incomparable_granularity_keeps_both() -> None:
+    """Neither side covers the other and the lengths are incomparable:
+    both texts stay in the feed, no record is fabricated."""
+
+    blocks = [_native("Ala", [10.0, 100.0, 40.0, 110.0])]
+    merged, records = _merge_ocr_page_lines(
+        blocks, {1: [(10.0, 100.0, 90.0, 110.0, "Cys Leu Pro")]}
+    )
+    texts = [str(b.get("text")) for b in merged]
+    assert "Ala" in texts and "Cys Leu Pro" in texts
+    assert records == []

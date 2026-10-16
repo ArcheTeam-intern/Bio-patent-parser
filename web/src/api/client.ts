@@ -478,24 +478,64 @@ export function reparseIssue(jobId: string, issueId: string): Promise<{
   return request(`/jobs/${encodeURIComponent(jobId)}/issues/${encodeURIComponent(issueId)}/reparse`, { method: "POST" });
 }
 
-/** E9/P05: per-engine RAW content of one page (source comparison reads
- * these artifacts — not the fused normalized view). */
+/** E9/P05 + F08/P04: per-engine RAW content of one page (source comparison
+ * reads these artifacts — not the fused normalized view). Channels carry
+ * text blocks AND table cells; `manifest_verified` tells whether the file
+ * came hash-verified from the current published manifest. */
 export interface PageChannelLine {
   text: string;
   bbox?: number[] | null;
   kind?: string;
 }
 
+export interface PageChannelCell {
+  row?: number | null;
+  col?: number | null;
+  rowspan?: number | null;
+  colspan?: number | null;
+  text: string;
+  header_role?: string | null;
+  bbox?: number[] | null;
+}
+
+export interface PageChannelTable {
+  table_id: string;
+  caption?: string | null;
+  bbox?: number[] | null;
+  row_count?: number | null;
+  column_count?: number | null;
+  cells: PageChannelCell[];
+}
+
+export interface PageChannelHistoryEntry {
+  run: string;
+  stage: string;
+  status: string;
+  artifact_rel?: string | null;
+}
+
 export interface PageChannel {
   engine: string;
+  run?: string | null;
   artifact_rel: string;
+  manifest_verified?: boolean;
   lines: PageChannelLine[];
+  tables?: PageChannelTable[];
+  content_conflicts?: Record<string, unknown>[];
+  native_superseded?: Record<string, unknown>[];
 }
 
 export function getPageChannels(
   jobId: string,
   pageNumber: number,
-): Promise<{ api_version: string; job_id: string; page_number: number; channels: PageChannel[] }> {
+): Promise<{
+  api_version: string;
+  job_id: string;
+  page_number: number;
+  manifest_verified?: boolean;
+  channels: PageChannel[];
+  history?: PageChannelHistoryEntry[];
+}> {
   return request(`/jobs/${encodeURIComponent(jobId)}/pages/${pageNumber}/channels`);
 }
 

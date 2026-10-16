@@ -276,6 +276,96 @@ def evaluate(
     )
 
 
+@app.command("sequence-diagnosis")
+def sequence_diagnosis(
+    data_dir: Path = typer.Option(Path("data/demo"), "--data-dir"),
+    job_id: str = typer.Option(..., "--job-id", help="Published job to diagnose."),
+    seq_ids: Optional[str] = typer.Option(
+        None, "--seq-ids", help="Comma-separated SEQ IDs (default: all)."
+    ),
+    out: Optional[Path] = typer.Option(None, "--out", help="Write the JSON here."),
+) -> None:
+    """F10: layer-by-layer diagnosis of a job's sequence declarations.
+
+    Answers, per SEQ ID: declared/region pages, whether region OCR ran, the
+    OCR text actually produced, what the fusion kept per source, and why
+    the residue parse ended in its status — so a still-missing declaration
+    is explained layer by layer instead of being blamed on the budget.
+    """
+
+    from bio_pdf.evaluation.sequence_diagnosis import diagnose_sequences
+
+    wanted = [s.strip() for s in seq_ids.split(",") if s.strip()] if seq_ids else None
+    payload = diagnose_sequences(data_dir, job_id, seq_ids=wanted)
+
+    # Fill the outward baseline_id from the DB publication (F09: one value).
+    try:
+        from bio_pdf.storage.repository import Repository
+
+        repo = Repository(data_dir / "bio.sqlite")
+        try:
+            row = repo.connection.execute(
+                "SELECT baseline_id FROM publications WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is not None:
+                payload["baseline_id"] = str(row["baseline_id"] or "") or None
+        finally:
+            repo.close()
+    except Exception:  # noqa: BLE001 — the diagnosis stands without the DB
+        pass
+
+    text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        typer.echo(
+            json.dumps(
+                {"job_id": job_id, "entries": len(payload["entries"]), "out": str(out)},
+                ensure_ascii=False,
+            )
+        )
+    else:
+        typer.echo(text)
+
+
+@app.command("annotation-queue")
+def annotation_queue(
+    data_dir: Path = typer.Option(Path("data/demo"), "--data-dir"),
+    job_id: str = typer.Option(..., "--job-id", help="Published job to queue for annotation."),
+    pages: Optional[str] = typer.Option(
+        None, "--pages", help="Comma-separated page range the human will annotate."
+    ),
+    out: Path = typer.Option(..., "--out", help="Draft v2 gold manifest to write."),
+) -> None:
+    """F10: build the pending character-level annotation list (draft gold).
+
+    The file is a v2 gold manifest with every item DRAFT (never counted,
+    never verified by a model). A human reads the PDF character by
+    character, fills the sequences, flips the flags, then runs
+    ``bio-pdf evaluate``.
+    """
+
+    from bio_pdf.evaluation.sequence_diagnosis import build_annotation_queue
+
+    page_list = [int(p) for p in pages.split(",") if p.strip()] if pages else None
+    payload = build_annotation_queue(data_dir, job_id, document_pages=page_list)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "draft_annotations": len(payload["annotations"]),
+                "out": str(out),
+                "status": "draft — nothing here counts until human_verified",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 @app.command("serve")
 def serve_api(
     host: str = typer.Option("127.0.0.1", "--host"),

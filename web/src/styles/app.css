@@ -953,4 +953,7 @@ dialog::backdrop {
 .source-compare { display: flex; flex-direction: column; gap: 14px; }
 .source-channel { border: 1px solid var(--border-soft); border-radius: 6px; padding: 10px 12px; }
 .source-channel-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.source-table { border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.source-table td { border: 1px solid var(--border-soft); padding: 2px 6px; vertical-align: top; }
+.source-table td.source-table-header { background: rgba(127, 127, 127, 0.12); font-weight: 600; }
 .reading-flow p { line-height: 1.8; }

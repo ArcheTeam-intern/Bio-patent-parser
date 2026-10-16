@@ -226,6 +226,28 @@ CREATE TABLE IF NOT EXISTS issue_events (
     created_at TEXT NOT NULL
 );
 
+-- F02/S01: reparse candidate identities. Reservation happens in ONE
+-- transaction (BEGIN IMMEDIATE + MAX(attempt)+1) so two concurrent reparse
+-- requests always receive distinct candidate_ids and display attempts;
+-- the file is then created EXCLUSIVELY under the unique candidate_id.
+-- A request that fails leaves its reservation in 'failed' state and the
+-- next request gets a fresh identity — identities are never reused.
+CREATE TABLE IF NOT EXISTS issue_candidates (
+    candidate_id   TEXT PRIMARY KEY,
+    issue_id       TEXT NOT NULL REFERENCES parse_issues(issue_id),
+    job_id         TEXT NOT NULL,
+    attempt        INTEGER NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'reserved',
+    artifact_rel   TEXT,
+    content_sha256 TEXT,
+    meta_sha256    TEXT,
+    meta_json      TEXT,
+    error          TEXT,
+    created_at     TEXT NOT NULL,
+    finished_at    TEXT,
+    UNIQUE (issue_id, attempt)
+);
+
 CREATE TABLE IF NOT EXISTS comparison_sides (
     comparison_id TEXT NOT NULL REFERENCES comparisons(comparison_id),
     side          TEXT NOT NULL,
@@ -1134,6 +1156,98 @@ class Repository:
         self._conn.execute(
             "UPDATE parse_issues SET state = ? WHERE issue_id = ?", (state, issue_id)
         )
+
+    # ---- F02/S01: reparse candidate identities ---------------------------
+
+    def reserve_issue_candidate(self, *, issue_id: str, job_id: str) -> dict[str, Any]:
+        """Atomically reserve a candidate identity for one reparse request.
+
+        BEGIN IMMEDIATE makes the MAX(attempt)+1 read and the INSERT a
+        single writer transaction, and candidate_id is a fresh UUID — two
+        concurrent requests can never share an identity, a display attempt
+        or a file. The reservation is durable before any file/OCR work, so
+        a request that dies mid-way leaves inspectable state instead of a
+        reusable identity.
+        """
+
+        import uuid
+
+        candidate_id = f"cand-{uuid.uuid4().hex[:12]}"
+        conn = self._conn
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(attempt), 0) AS mx FROM issue_candidates WHERE issue_id = ?",
+                (issue_id,),
+            ).fetchone()
+            attempt = int(row["mx"]) + 1
+            conn.execute(
+                """
+                INSERT INTO issue_candidates
+                    (candidate_id, issue_id, job_id, attempt, status, created_at)
+                VALUES (?, ?, ?, ?, 'reserved', ?)
+                """,
+                (candidate_id, issue_id, job_id, attempt, _utcnow_iso()),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        return {"candidate_id": candidate_id, "attempt": attempt}
+
+    def finish_issue_candidate(
+        self,
+        *,
+        candidate_id: str,
+        artifact_rel: str,
+        content_sha256: str,
+        meta_sha256: str,
+        meta_json: str,
+    ) -> bool:
+        """Commit the written candidate (content + meta hashes together).
+
+        Only a 'reserved' row can transition to 'written' — a retry after a
+        partial failure cannot silently re-label a failed identity.
+        """
+
+        cur = self._conn.execute(
+            """
+            UPDATE issue_candidates
+            SET status = 'written', artifact_rel = ?, content_sha256 = ?,
+                meta_sha256 = ?, meta_json = ?, finished_at = ?
+            WHERE candidate_id = ? AND status = 'reserved'
+            """,
+            (artifact_rel, content_sha256, meta_sha256, meta_json, _utcnow_iso(), candidate_id),
+        )
+        self._conn.commit()
+        return cur.rowcount == 1
+
+    def fail_issue_candidate(self, *, candidate_id: str, error: str) -> None:
+        """Mark a reservation failed — the identity is consumed forever."""
+
+        self._conn.execute(
+            """
+            UPDATE issue_candidates SET status = 'failed', error = ?, finished_at = ?
+            WHERE candidate_id = ?
+            """,
+            (error[:300], _utcnow_iso(), candidate_id),
+        )
+        self._conn.commit()
+
+    def get_issue_candidate(self, candidate_id: str) -> Any:
+        return self._conn.execute(
+            "SELECT * FROM issue_candidates WHERE candidate_id = ?", (candidate_id,)
+        ).fetchone()
+
+    def list_issue_candidates(self, issue_id: str, *, status: str | None = None) -> list[Any]:
+        if status:
+            return self._conn.execute(
+                "SELECT * FROM issue_candidates WHERE issue_id = ? AND status = ? ORDER BY attempt",
+                (issue_id, status),
+            ).fetchall()
+        return self._conn.execute(
+            "SELECT * FROM issue_candidates WHERE issue_id = ? ORDER BY attempt", (issue_id,)
+        ).fetchall()
 
     def get_publication(self, job_id: str) -> Any:
         return self._conn.execute(

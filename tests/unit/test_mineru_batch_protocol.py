@@ -487,7 +487,373 @@ def test_oversized_bbox_is_flagged_not_trusted(tmp_path: Path) -> None:
 
     manifest = json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))
     geometry = manifest["page_geometry"]
-    # The page size WAS real (A4) but a box violated it → not verified.
+    # F07/P03: the facts stay separate — the page size IS real (A4), the
+    # bounds are violated, and the coordinate basis was never declared.
     assert geometry["basis"] == "source-pdf"
-    assert geometry["verified"] is False
+    assert geometry["page_size_verified"] is True
+    assert geometry["bounds_valid"] is False
+    assert geometry["coordinate_basis_verified"] is False
+    assert geometry["declared_coordinate_basis"] is None
     assert geometry["bbox_warnings"]
+
+
+# ---- F06/P02: cross-engine activity identity (no local table ids) ---------
+
+
+def _mic_v2(
+    value,
+    row_ctx,
+    *,
+    unit="ug/ml",
+    table_id="1:t0",
+    anchor="header:mic|s. aureus",
+    page=1,
+    conditions=None,
+    operand=None,
+):
+    m = {
+        "entity": "compoundX", "metric": "MIC", "target": "S. aureus",
+        "value_raw": value, "unit_raw": unit, "unit_normalized": unit,
+        "row_context": row_ctx, "column_context": None,
+        "table_id": table_id, "table_anchor": anchor, "page_number": page,
+        "conditions": conditions or [],
+    }
+    if operand is not None:
+        m["value_structured"] = operand
+    return m
+
+
+def test_local_table_id_change_does_not_break_pairing() -> None:
+    """F06 recheck repro: same activity, conditions, page and value — only
+    the LOCAL table id differs (each engine invents its own). Pairing must
+    not flip from success to "everything missing"."""
+
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    out = pair_measurements(
+        [_mic_v2("1", "1h", table_id="1:t0")],
+        [_mic_v2("1", "1h", table_id="0:t3")],
+    )
+    assert out["paired"] == 1
+    assert out["keys_only_a"] == [] and out["keys_only_b"] == []
+    assert out["value_diffs"] == []
+
+
+def test_reordered_tables_pair_without_diffs() -> None:
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    ms_a = [
+        _mic_v2("1", "1h", table_id="1:t0", anchor="header:mic|s. aureus"),
+        _mic_v2("2", "2h", table_id="2:t1", anchor="caption:kill kinetics"),
+    ]
+    ms_b = [
+        _mic_v2("2", "2h", table_id="0:t4", anchor="caption:kill kinetics"),
+        _mic_v2("1", "1h", table_id="0:t2", anchor="header:mic|s. aureus"),
+    ]
+    out = pair_measurements(ms_a, ms_b)
+    assert out["paired"] == 2
+    assert out["value_diffs"] == [] and out["ambiguous"] == 0
+
+
+def test_split_table_with_duplicate_candidates_is_ambiguous_not_fake_diff() -> None:
+    """A split/merged detection difference can leave duplicate candidates on
+    one side; those must be reported as AMBIGUOUS with candidates — never
+    force-paired into invented value differences (no dictionary last-wins)."""
+
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    # B detected the same row twice (its table was split into two fragments).
+    ms_b = [_mic_v2("1", "1h"), _mic_v2("1", "1h", table_id="0:t9")]
+    out = pair_measurements([_mic_v2("1", "1h")], ms_b)
+    assert out["paired"] == 0
+    assert out["ambiguous"] == 1
+    assert out["value_diffs"] == []
+    assert out["ambiguous_candidates"][0]["candidates_b"][0]["value_raw"] == "1"
+
+
+def test_different_experiment_conditions_are_not_force_paired() -> None:
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    ms_a = [_mic_v2("1", "1h", conditions=[{"kind": "time", "value": "1 h"}])]
+    ms_b = [_mic_v2("1", "1h", conditions=[{"kind": "time", "value": "2 h"}])]
+    out = pair_measurements(ms_a, ms_b)
+    assert out["paired"] == 0
+    assert len(out["keys_only_a"]) == 1 and len(out["keys_only_b"]) == 1
+    assert out["value_diffs"] == []
+
+
+def test_unit_magnitude_difference_is_reported_not_flattened() -> None:
+    """mg vs g is a 1000x difference — a reported UNIT difference, never
+    flattened away by normalization."""
+
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    out = pair_measurements(
+        [_mic_v2("1", "1h", unit="mg/mL")],
+        [_mic_v2("1", "1h", unit="ug/mL")],
+    )
+    assert len(out["value_diffs"]) == 1
+    assert "unit" in out["value_diffs"][0]["kind"]
+    assert out["value_diffs"][0]["unit_a"] == "mg/mL"
+    assert out["value_diffs"][0]["unit_b"] == "ug/mL"
+
+
+def test_operators_compare_structurally() -> None:
+    """'≤5' vs '≤ 5' is formatting; '≤5' vs '5' is a real operator change."""
+
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    le = {"kind": "scalar", "operator": "<=", "number": "5", "raw": "≤5"}
+    le_spaced = {"kind": "scalar", "operator": "<=", "number": "5", "raw": "≤ 5"}
+    plain = {"kind": "scalar", "operator": None, "number": "5", "raw": "5"}
+
+    out = pair_measurements(
+        [_mic_v2("≤5", "1h", operand=le)], [_mic_v2("≤ 5", "1h", operand=le_spaced)]
+    )
+    assert out["paired"] == 1 and out["value_diffs"] == []
+
+    out2 = pair_measurements(
+        [_mic_v2("≤5", "1h", operand=le)], [_mic_v2("5", "1h", operand=plain)]
+    )
+    assert len(out2["value_diffs"]) == 1
+    assert out2["value_diffs"][0]["kind"] == "operator"
+    assert out2["value_diffs"][0]["operator_a"] == "<="
+    assert out2["value_diffs"][0]["operator_b"] is None
+
+
+# ---- F07/P03: coordinate basis claims stay separate and honest ------------
+
+
+def _zip_content(items) -> bytes:
+    import io
+    import zipfile
+
+    # allow_nan keeps NaN in the payload — Python's json.loads reads it back,
+    # reproducing a real protocol response with a non-finite box.
+    content = json.dumps(items, allow_nan=True)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("x_content_list.json", content)
+        zf.writestr("full.md", "# x")
+    return buf.getvalue()
+
+
+def _mineru_parse(tmp_path: Path, items, *, monkeypatch=None, rotation=None):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas as _canvas
+
+    pdf = tmp_path / "source.pdf"
+    cv = _canvas.Canvas(str(pdf), pagesize=A4)
+    cv.drawString(50, 800, "x")
+    cv.save()
+
+    if monkeypatch is not None and rotation is not None:
+        from bio_pdf.parsers import mineru_adapter as ma
+
+        real = ma._source_page_geometry
+
+        def rotated(source_path, pages):  # noqa: ANN001
+            sizes = real(source_path, pages)
+            return {p: (w, h, rotation) for p, (w, h, _r) in sizes.items()}
+
+        monkeypatch.setattr(ma, "_source_page_geometry", rotated)
+
+    zip_bytes = _zip_content(items)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            return httpx.Response(
+                200,
+                json={"data": {"batch_id": "bg", "file_urls": ["https://oss.example/put/g"]}},
+            )
+        if request.method == "PUT":
+            return httpx.Response(200)
+        if "/extract-results/batch/" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {"file_name": "source.pdf", "state": "done", "full_zip_url": "https://oss.example/zip/g"}
+                        ]
+                    }
+                },
+            )
+        if url == "https://oss.example/zip/g":
+            return httpx.Response(200, content=zip_bytes)
+        raise AssertionError(url)
+
+    import hashlib as _h
+
+    request = ParseRequest(
+        job_id="job-f07",
+        document_id="sha256:" + _h.sha256(pdf.read_bytes()).hexdigest(),
+        source_path=pdf,
+        page_numbers=(1,),
+        profile="layout_native",  # type: ignore[arg-type]
+        options_ref="configs/demo.toml",
+        output_dir=tmp_path / "out",
+        parser_options={},
+    )
+    adapter = MinerUAdapter(
+        token="t", transport=httpx.MockTransport(handler), poll_interval=0.0
+    )
+    artifacts = adapter.parse(request, local_file=pdf)
+    normalized = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
+    manifest = json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))
+    return normalized, manifest
+
+
+def test_in_bounds_box_with_unknown_basis_is_not_verified(tmp_path: Path) -> None:
+    """F07 recheck repro: an in-bounds box [0,0,100,100] on A4 WITHOUT any
+    declared unit/origin must not be reported as a verified coordinate
+    basis — fitting the page proves nothing about the frame."""
+
+    normalized, manifest = _mineru_parse(
+        tmp_path, [{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [0, 0, 100, 100]}]
+    )
+    geometry = manifest["page_geometry"]
+    assert geometry["page_size_verified"] is True
+    assert geometry["bounds_valid"] is True
+    assert geometry["coordinate_basis_verified"] is False
+    assert geometry["raw_bbox_retained"] is True
+    assert any("not guaranteed" in note for note in geometry["basis_notes"])
+    assert any("coordinate basis unverified" in e for e in normalized["errors"])
+    # Raw values pass through unchanged (no rescale, no clamp).
+    block = normalized["pages"][0]["blocks"][0]
+    assert block["bbox"] == [0.0, 0.0, 100.0, 100.0]
+
+
+def test_declared_pt_basis_verifies_coordinate_basis() -> None:
+    """A payload that DECLARES unit=pt + origin provides the justified
+    transform — only then may the basis be verified."""
+
+    from bio_pdf.parsers.mineru_adapter import (
+        _page_geometry_descriptor,
+        _project_mineru_payload,
+    )
+    from bio_pdf.parsers.normalize_docling import normalize_docling_document
+
+    payload = {
+        "content_list": [{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [10, 20, 100, 30]}],
+        "coord_basis": {"unit": "pt", "origin": "top_left"},
+    }
+    projected = _project_mineru_payload(
+        payload,
+        page_numbers={1},
+        page_order=[1],
+        page_sizes={1: (595.0, 842.0, 0)},
+        declared_basis={"unit": "pt", "origin": "top_left"},
+    )
+    from bio_pdf.errors import WorkflowError
+    from bio_pdf.parsers.mineru_adapter import EngineProtocolUnsupportedError  # noqa: F401
+
+    document = normalize_docling_document(
+        {k: v for k, v in projected.items() if k != "_projection_warnings"},
+        parser_run_id="run", document_id="doc",
+    )
+    descriptor = _page_geometry_descriptor(
+        document, page_sizes={1: (595.0, 842.0, 0)}, declared_basis=payload["coord_basis"]
+    )
+    assert descriptor["coordinate_basis_verified"] is True
+    assert descriptor["basis_notes"] == []
+
+
+def test_px_and_normalized_units_are_not_silently_converted() -> None:
+    from bio_pdf.parsers.mineru_adapter import (
+        _page_geometry_descriptor,
+        _project_mineru_payload,
+    )
+    from bio_pdf.parsers.normalize_docling import normalize_docling_document
+
+    for basis in (
+        {"unit": "px", "origin": "top_left", "dpi": 144},
+        {"unit": "normalized", "origin": "top_left", "scale": 1000},
+    ):
+        projected = _project_mineru_payload(
+            {"content_list": [{"type": "text", "text": "x", "page_idx": 0, "bbox": [0, 0, 100, 100]}]},
+            page_numbers={1},
+            page_order=[1],
+            page_sizes={1: (595.0, 842.0, 0)},
+            declared_basis=basis,
+        )
+        document = normalize_docling_document(
+            {k: v for k, v in projected.items() if k != "_projection_warnings"},
+            parser_run_id="run", document_id="doc",
+        )
+        descriptor = _page_geometry_descriptor(
+            document, page_sizes={1: (595.0, 842.0, 0)}, declared_basis=basis
+        )
+        assert descriptor["coordinate_basis_verified"] is False
+        assert any("no conversion is invented" in note for note in descriptor["basis_notes"])
+
+
+def test_rotation_blocks_basis_until_rotation_applied_is_declared(tmp_path: Path, monkeypatch) -> None:
+    items = [{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [10, 20, 100, 30]}]
+    _normalized, manifest = _mineru_parse(tmp_path, items, monkeypatch=monkeypatch, rotation=90)
+    geometry = manifest["page_geometry"]
+    assert 1 in geometry["rotated_pages"]
+    assert geometry["coordinate_basis_verified"] is False
+
+    from bio_pdf.parsers.mineru_adapter import (
+        _page_geometry_descriptor,
+        _project_mineru_payload,
+    )
+    from bio_pdf.parsers.normalize_docling import normalize_docling_document
+
+    basis = {"unit": "pt", "origin": "top_left", "rotation_applied": True}
+    projected = _project_mineru_payload(
+        {"content_list": items}, page_numbers={1}, page_order=[1],
+        page_sizes={1: (595.0, 842.0, 90)}, declared_basis=basis,
+    )
+    document = normalize_docling_document(
+        {k: v for k, v in projected.items() if k != "_projection_warnings"},
+        parser_run_id="run", document_id="doc",
+    )
+    descriptor = _page_geometry_descriptor(
+        document, page_sizes={1: (595.0, 842.0, 90)}, declared_basis=basis
+    )
+    assert descriptor["coordinate_basis_verified"] is True
+
+
+def test_non_finite_bbox_is_dropped_loudly(tmp_path: Path) -> None:
+    import math
+
+    normalized, manifest = _mineru_parse(
+        tmp_path,
+        [{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [0, 0, float("nan"), 100]}],
+    )
+    geometry = manifest["page_geometry"]
+    assert any("non-finite" in w for w in geometry["bbox_warnings"])
+    assert geometry["bounds_valid"] is False
+    assert any("non-finite" in e for e in normalized["errors"])
+    # The box is dropped from the normalized view; the raw payload keeps it.
+    block = normalized["pages"][0]["blocks"][0]
+    assert block["bbox"] is None
+
+
+def test_inverted_box_fails_bounds_but_basis_facts_stay_separate() -> None:
+    from bio_pdf.parsers.mineru_adapter import (
+        _page_geometry_descriptor,
+        _project_mineru_payload,
+    )
+    from bio_pdf.parsers.normalize_docling import normalize_docling_document
+
+    basis = {"unit": "pt", "origin": "top_left"}
+    projected = _project_mineru_payload(
+        {"content_list": [{"type": "text", "text": "x", "page_idx": 0, "bbox": [100, 100, 20, 20]}]},
+        page_numbers={1}, page_order=[1], page_sizes={1: (595.0, 842.0, 0)}, declared_basis=basis,
+    )
+    document = normalize_docling_document(
+        {k: v for k, v in projected.items() if k != "_projection_warnings"},
+        parser_run_id="run", document_id="doc",
+    )
+    descriptor = _page_geometry_descriptor(
+        document, page_sizes={1: (595.0, 842.0, 0)}, declared_basis=basis
+    )
+    # The basis declaration IS justified (pt+origin, unrotated, sized)…
+    assert descriptor["coordinate_basis_verified"] is True
+    # …while the BOX itself is invalid — separate facts, not conflated.
+    assert descriptor["bounds_valid"] is False
+    assert any("inverted" in w for w in descriptor["bbox_warnings"])

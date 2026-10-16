@@ -366,22 +366,28 @@ class WorkflowRunner:
         review_plan = self._load_review_plan(job.job_id, published)
         issue_plan = self._load_issue_plan(job.job_id, published)
         final_status = self._final_status(job.job_id, review_total, review_plan)
-        manifest_payload = self._result_manifest(job, published, final_status)
         job_dir = self.artifact_root / "jobs" / job.job_id
+        # E1/S01 + F09: the review items already carry the validate stage's
+        # content-addressed baseline (it is baked into their ids); read it
+        # off the plan instead of re-reading artifacts. Manifest hash is
+        # only the fallback for plans without items. The SAME value is
+        # recorded INSIDE the manifest so every outward reader (DB row,
+        # published manifest, evidence endpoint) reports one baseline_id.
+        baseline_id = (
+            str(getattr(review_plan[0], "baseline_id", "") or "") or ""
+            if review_plan
+            else ""
+        )
+        manifest_payload = self._result_manifest(
+            job, published, final_status, baseline_id=baseline_id or None
+        )
         # Immutable manifest file first; the DB commit makes it current.
         manifest_rel = self._write_immutable_manifest(job_dir, manifest_payload)
         manifest_path = self.artifact_root / manifest_rel
         manifest_sha = self._sha256(manifest_path)
+        if not baseline_id:
+            baseline_id = manifest_sha[:16]
 
-        # E1/S01: the review items already carry the validate stage's
-        # content-addressed baseline (it is baked into their ids); read it
-        # off the plan instead of re-reading artifacts. Manifest hash is
-        # only the fallback for plans without items.
-        baseline_id = (
-            str(getattr(review_plan[0], "baseline_id", "") or "") or manifest_sha[:16]
-            if review_plan
-            else manifest_sha[:16]
-        )
         ok = self.repository.publish_result_fenced(
             token=self.lease_token,
             job_id=job.job_id,
@@ -721,14 +727,30 @@ class WorkflowRunner:
         job: Job,
         published: dict[str, dict[str, Any]],
         final_status: str,
+        *,
+        baseline_id: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        """The immutable per-publish manifest (F09).
+
+        ``baseline_id`` is recorded INSIDE the manifest when the validate
+        stage produced one, so the DB publication row, this manifest and
+        every evidence/review reader report the SAME baseline. Jobs without
+        review items fall back to ``manifest_sha[:16]`` everywhere
+        (readers keep that legacy rule; it is the same file hash the DB
+        stored). ``manifest_sha`` and ``published_at`` stay separate
+        fields — never substituted for the baseline.
+        """
+
+        payload = {
             "job_id": job.job_id,
             "document_id": job.document_id,
             "published_at": _utcnow().isoformat(),
             "final_status": final_status,
             "stages": {name: refs for name, refs in published.items() if refs},
         }
+        if baseline_id:
+            payload["baseline_id"] = baseline_id
+        return payload
 
 
 __all__ = ["WorkflowRunner", "RunResult"]

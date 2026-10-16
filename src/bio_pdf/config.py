@@ -47,6 +47,29 @@ class ParserOptions(_StrictModel):
     engine_timeout_seconds: float = Field(default=900.0, gt=0)
 
 
+class AdoptedCandidate(_StrictModel):
+    """F09: an explicitly ADOPTED reparse candidate.
+
+    Adoption is not a rename of "reparse": the new job's inputs record the
+    immutable candidate identity (id + content hash), its source SHA, the
+    ORIGIN baseline (audit trail), the target page/region and the coverage
+    policy — and the extract stage actually CONSUMES the candidate content
+    as an OCR source for that page. The content travels under
+    ``jobs/<job_id>/adopted/<candidate_id>/<artifact_name>``.
+    """
+
+    candidate_id: str
+    content_sha256: str
+    artifact_name: str = "candidate.txt"
+    source_sha256: str | None = None
+    baseline_id: str | None = None
+    origin_job_id: str | None = None
+    origin_issue_id: str | None = None
+    page_number: int
+    region: dict[str, Any] | None = None
+    coverage_policy: Literal["merge-with-evidence"] = "merge-with-evidence"
+
+
 class WorkflowConfig(_StrictModel):
     """The complete effective configuration of one job."""
 
@@ -67,6 +90,9 @@ class WorkflowConfig(_StrictModel):
     reparse_max_regions: int = Field(default=10, ge=0)
     reparse_max_attempts_per_region: int = Field(default=2, ge=1)
     reparse_timeout_seconds: float = Field(default=120.0, gt=0)
+
+    #: F09: explicitly adopted reparse candidates consumed by extract.
+    adopted_candidates: list[AdoptedCandidate] = Field(default_factory=list)
 
 
 def load_workflow_config(path: Path | str | None = None) -> WorkflowConfig:

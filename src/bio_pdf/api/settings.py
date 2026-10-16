@@ -27,6 +27,11 @@ class ApiSettings:
     web_dist_dir: Path | None = None
     max_upload_bytes: int = 100 * 1024 * 1024
     cors_origins: list[str] = field(default_factory=list)
+    #: F04/S03: cadence of the comparison orphan sweeper (seconds). The
+    #: sweeper re-claims queued sides and lease-expired running sides, so
+    #: a restart whose old leases are still valid recovers automatically
+    #: once they lapse.
+    comparison_sweep_seconds: float = 15.0
 
     @classmethod
     def from_env(cls) -> "ApiSettings":

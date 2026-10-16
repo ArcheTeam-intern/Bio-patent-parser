@@ -41,12 +41,14 @@ async def _lifespan(app: FastAPI):
 
     app.state.service_factory = service_factory
 
-    # E2/S05: restart recovery for comparison experiments. A process that
-    # died mid-run leaves sides 'running' with leases that expire; on boot
-    # those (and never-started 'queued' ones) become claimable again and
-    # continue in a background pass — startup never blocks, and 'failed'
-    # is left for the explicit retry action.
-    def _recover_comparisons() -> None:
+    # E2/S05 + F04/S03: comparison experiment recovery. A process that
+    # died mid-run leaves sides 'running' with leases that expire; the
+    # sweeper (boot pass + periodic loop) claims exactly the queued sides
+    # and the lease-expired running ones, so a fast restart whose old
+    # leases are still valid recovers as soon as they lapse — no retry
+    # click. 'failed' is left for the explicit retry action, and a live
+    # execution's heartbeat keeps its lease fresh so it is never stolen.
+    def _comparison_recover_once() -> None:
         try:
             from bio_pdf.application.comparison_service import ComparisonService
 
@@ -55,11 +57,22 @@ async def _lifespan(app: FastAPI):
                 ComparisonService.from_service(svc).recover_orphans()
             finally:
                 svc.close()
-        except Exception:  # noqa: BLE001 — recovery is best-effort at boot
+        except Exception:  # noqa: BLE001 — recovery is best-effort
             pass
 
-    threading.Thread(target=_recover_comparisons, daemon=True).start()
-    yield
+    stop_sweep = threading.Event()
+
+    def _comparison_sweeper() -> None:
+        _comparison_recover_once()
+        interval = max(1.0, float(settings.comparison_sweep_seconds))
+        while not stop_sweep.wait(interval):
+            _comparison_recover_once()
+
+    threading.Thread(target=_comparison_sweeper, daemon=True, name="cmp-sweeper").start()
+    try:
+        yield
+    finally:
+        stop_sweep.set()
 
 
 def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:
