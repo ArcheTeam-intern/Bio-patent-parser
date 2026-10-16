@@ -156,23 +156,40 @@ def test_empty_text_returns_no_records() -> None:
     assert parse_st25_text("", document_id="sha256:fixture") == []
 
 def test_running_header_and_line_numbers_never_become_residues() -> None:
-    """C03: EP-style running material must not fabricate residues (EPB1)."""
+    """C03/D03: EP-style running material must not fabricate residues (EPB1).
 
-    def page(seq_id: int) -> str:
-        return "\n".join([
-            "EP 3 027 649 B1",
-            "31",
-            "5",
-            "10",
-            "15",
-            f"<210> {seq_id}",
-            "<211> 4",
-            "<212> PRT",
-            f"<400> {seq_id}",
-            "Ala Gly Leu Lys",
-        ])
+    D03 tightened the rule: repetition alone cannot delete content — the
+    header/page-number/line-number occurrences carry the REAL geometry
+    (top margin, bottom margin, narrow left column) that justifies treating
+    them as furniture.
+    """
 
-    blocks = [{"text": page(n), "page_number": n} for n in (30, 31, 32)]
+    PAGE_W, PAGE_H = 595.22, 842.0
+
+    def line_block(text: str, page: int, bbox: list[float]) -> dict:
+        return {
+            "text": text,
+            "page_number": page,
+            "bbox": bbox,
+            "page_width": PAGE_W,
+            "page_height": PAGE_H,
+            "semantic_role": "unknown",
+        }
+
+    blocks: list[dict] = []
+    for n in (30, 31, 32):
+        # Header in the top margin, footer page number, left line-number
+        # column, then the real declaration + residue line in the body.
+        blocks.append(line_block("EP 3 027 649 B1", n, [267.0, 45.0, 341.0, 56.0]))
+        for y in (118.0, 177.0, 236.0):
+            blocks.append(line_block(str(int(y)), n, [44.0, y, 56.0, y + 9.0]))
+        blocks.append(line_block(f"<210> {n - 29}", n, [88.0, 300.0, 140.0, 310.0]))
+        blocks.append(line_block("<211> 4", n, [88.0, 312.0, 140.0, 322.0]))
+        blocks.append(line_block("<212> PRT", n, [88.0, 324.0, 140.0, 334.0]))
+        blocks.append(line_block(f"<400> {n - 29}", n, [88.0, 336.0, 140.0, 346.0]))
+        blocks.append(line_block("Ala Gly Leu Lys", n, [88.0, 348.0, 200.0, 358.0]))
+        blocks.append(line_block(str(n), n, [300.0, 805.0, 309.0, 812.0]))
+
     records = parse_st25_blocks(blocks, "sha256:fixture")
     # Three pages, each declaring its own SEQ ID; the running header, page
     # number and line-number column are filtered and never reach residues.
@@ -181,6 +198,37 @@ def test_running_header_and_line_numbers_never_become_residues() -> None:
         assert "EP" not in record.normalized_sequence
         assert "B1" not in record.raw_sequence
         assert record.normalized_sequence == "AGLK"
+
+
+def test_repeated_legit_residue_lines_without_margin_evidence_survive() -> None:
+    """D03 acceptance repro: three pages each declaring 'Ala Cys 2' in the
+    body — repetition is content, not furniture: all three must recover AC."""
+
+    PAGE_W, PAGE_H = 595.22, 842.0
+
+    def body_block(text: str, page: int, y: float) -> dict:
+        return {
+            "text": text,
+            "page_number": page,
+            "bbox": [88.0, y, 300.0, y + 10.0],
+            "page_width": PAGE_W,
+            "page_height": PAGE_H,
+            "semantic_role": "unknown",
+        }
+
+    blocks: list[dict] = []
+    for n in (1, 2, 3):
+        blocks.append(body_block(f"<210> {n}", n, 200.0))
+        blocks.append(body_block("<211> 2", n, 212.0))
+        blocks.append(body_block("<212> PRT", n, 224.0))
+        blocks.append(body_block(f"<400> {n}", n, 236.0))
+        blocks.append(body_block("Ala Cys 2", n, 248.0))
+
+    records = parse_st25_blocks(blocks, "sha256:fixture")
+    assert len(records) == 3, "legitimate repeated residue lines must not be deleted"
+    for record in records:
+        assert record.normalized_sequence == "AC"
+        assert record.observed_length == 2
 
 
 def test_short_nonrepeated_text_is_not_filtered() -> None:

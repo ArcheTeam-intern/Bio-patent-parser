@@ -930,6 +930,12 @@ def _page_blocks(
                     "semantic_role": block.semantic_role,
                     "page_number": page.page_number,
                     "bbox": list(block.bbox) if block.bbox else None,
+                    # D03: page dimensions travel with every block so the
+                    # running-material filter can reason about margins
+                    # (header/footer zones, left line-number columns)
+                    # instead of deleting by mere repetition.
+                    "page_width": page.width_pt,
+                    "page_height": page.height_pt,
                     "block_id": block.block_id,
                     "source_refs": list(block.source_refs),
                     "source_aliases": list(block.source_aliases),

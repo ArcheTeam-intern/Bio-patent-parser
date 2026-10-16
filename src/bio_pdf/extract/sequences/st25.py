@@ -492,35 +492,66 @@ _ST25_TAG_LINE_RE = re.compile(r"^\s*<\s*\d{3}\s*>")
 
 
 def _running_texts(blocks: list[dict[str, Any]], *, min_pages: int = 3) -> set[str]:
-    """Line texts repeated on >= ``min_pages`` pages: headers/footers/columns.
+    """Line texts that are running material, with GEOMETRIC/ROLE evidence.
 
-    Real catalogs print a running header ("EP 3 027 649 B1") and a left-margin
-    line-number column on every listing page. Fed into the residue state,
-    those lines fabricate residues like ``EPB1`` (C03) — they are excluded
-    from parsing while the original blocks stay untouched for audit. Only
-    digit-bearing or very short repeats qualify, and ST.25 tag lines are
-    never filtered, so genuinely repeated declaration lines survive.
-    Counted per LINE so the rule is independent of block granularity.
+    D03: repetition alone must never delete content. Real residue lines often
+    carry position counts and different SEQ IDs legitimately share identical
+    fragments (acceptance repro: three pages each declaring ``Ala Cys 2``).
+    A line is only treated as header/footer/line-number material when, in
+    addition to repeating on >= ``min_pages`` pages, every evidence-bearing
+    occurrence sits where running material lives:
+
+    - ``semantic_role`` is ``header``/``footer`` (layout-engine furniture), or
+    - the bbox is inside the top/bottom 8% page margin, or
+    - the bbox is a narrow left-margin column (``x1 < 12%`` of page width)
+      with a short text (line numbers like ``5``/``10``).
+
+    Occurrences without geometry/role evidence count as neutral: they can
+    neither justify a deletion on their own, and a line with NO evidence-
+    bearing occurrences at all is never filtered. ST.25 tag lines are always
+    exempt.
     """
 
     pages_by_text: dict[str, set[int]] = {}
+    evidence_by_text: dict[str, bool] = {}
     for block in blocks:
         text = str(block.get("text") or "")
         if not text:
             continue
         page = int(block.get("page_number", 1))
+        role = str(block.get("semantic_role") or "").lower()
+        bbox = block.get("bbox")
+        width = float(block.get("page_width") or 0.0)
+        height = float(block.get("page_height") or 0.0)
+
+        in_margin = False
+        in_left_column = False
+        if bbox and width > 0 and height > 0 and len(bbox) >= 4:
+            x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            in_margin = (y1 <= 0.08 * height) or (y0 >= 0.92 * height)
+            in_left_column = x1 <= 0.12 * width
+        role_furniture = role in ("header", "footer")
+
         for line in text.splitlines():
             stripped = line.strip()
-            if stripped and not _ST25_TAG_LINE_RE.match(stripped):
-                pages_by_text.setdefault(stripped, set()).add(page)
+            if not stripped or _ST25_TAG_LINE_RE.match(stripped):
+                continue
+            pages_by_text.setdefault(stripped, set()).add(page)
+            has_evidence = role_furniture or in_margin or (
+                in_left_column and len(stripped) <= 12
+            )
+            if has_evidence:
+                evidence_by_text[stripped] = True
 
     running: set[str] = set()
     for text, pages in pages_by_text.items():
         if len(pages) < min_pages:
             continue
-        has_digit = any(ch.isdigit() for ch in text)
-        if has_digit or len(text) <= 12:
-            running.add(text)
+        if not evidence_by_text.get(text):
+            # Repetition without any header/footer/margin evidence is just
+            # repeated CONTENT (legit duplicate fragments) — keep it.
+            continue
+        running.add(text)
     return running
 
 
