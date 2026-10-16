@@ -354,3 +354,140 @@ def test_effective_parameters_reach_the_upload_body(tmp_path: Path) -> None:
     adapter.parse(second, local_file=second.source_path)
     assert bodies[0]["files"][0]["is_ocr"] is True
     assert bodies[0]["files"][0]["page_ranges"] == "30-32"
+
+
+# ---- E7/P03: comparison measurement pairing -------------------------------
+
+
+def _mic(value, row_ctx, unit="ug/ml"):
+    return {
+        "entity": "compoundX", "metric": "MIC", "target": "S. aureus",
+        "value_raw": value, "unit_raw": unit, "unit_normalized": unit,
+        "row_context": row_ctx, "column_context": None,
+        "table_id": "1:t0", "page_number": 1,
+    }
+
+
+def test_reordered_identical_measurements_pair_without_diffs() -> None:
+    """Recheck repro: A/B both {MIC 1ug/ml@1h, MIC 2ug/ml@2h} in opposite
+    array order → zero value diffs and zero ambiguous force-pairs."""
+
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    ms_a = [_mic("1", "1h"), _mic("2", "2h")]
+    ms_b = [_mic("2", "2h"), _mic("1", "1h")]
+    out = pair_measurements(ms_a, ms_b)
+    assert out["paired"] == 2
+    assert out["value_diffs"] == []
+    assert out["ambiguous"] == 0
+    assert out["keys_only_a"] == [] and out["keys_only_b"] == []
+
+
+def test_repeated_identity_is_ambiguous_never_force_paired() -> None:
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    ms_a = [_mic("1", "same"), _mic("9", "same")]  # same identity, two rows
+    ms_b = [_mic("1", "same")]
+    out = pair_measurements(ms_a, ms_b)
+    assert out["ambiguous"] == 1
+    # Ambiguous groups never produce a force-paired value diff.
+    assert out["value_diffs"] == []
+    assert out["paired"] == 0
+
+
+def test_numeric_format_difference_is_not_a_value_difference() -> None:
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    out = pair_measurements([_mic("1.0", "1h")], [_mic("1", "1h")])
+    assert out["value_diffs"] == [] and out["paired"] == 1
+
+    out = pair_measurements([_mic("1", "1h", unit="µg/mL")], [_mic("1", "1h", unit="ug/ml")])
+    assert out["value_diffs"] == []
+
+    out = pair_measurements([_mic("1", "1h")], [_mic("2", "1h")])
+    assert len(out["value_diffs"]) == 1
+
+
+# ---- E8/P04: page geometry is validated, never assumed --------------------
+
+
+def _a4_zip_bytes() -> bytes:
+    import io
+    import zipfile
+
+    content = json.dumps(
+        [
+            {"type": "text", "text": "Hello", "page_idx": 0, "bbox": [0, 0, 1000, 1000]},
+            {"type": "text", "text": "World", "page_idx": 0, "bbox": [50, 50, 200, 70]},
+        ]
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("x_content_list.json", content)
+        zf.writestr("full.md", "# x")
+    return buf.getvalue()
+
+
+def test_oversized_bbox_is_flagged_not_trusted(tmp_path: Path) -> None:
+    """Recheck repro: A4 page with bbox [0,0,1000,1000] must produce an
+    explicit geometry warning; the manifest never claims verified geometry."""
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas as _canvas
+
+    pdf = tmp_path / "source.pdf"
+    cv = _canvas.Canvas(str(pdf), pagesize=A4)
+    cv.drawString(50, 800, "x")
+    cv.save()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            return httpx.Response(
+                200,
+                json={"data": {"batch_id": "bg", "file_urls": ["https://oss.example/put/g"]}},
+            )
+        if request.method == "PUT":
+            return httpx.Response(200)
+        if "/extract-results/batch/" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {"file_name": "source.pdf", "state": "done", "full_zip_url": "https://oss.example/zip/g"}
+                        ]
+                    }
+                },
+            )
+        if url == "https://oss.example/zip/g":
+            return httpx.Response(200, content=_a4_zip_bytes())
+        raise AssertionError(url)
+
+    import hashlib as _h
+
+    request = ParseRequest(
+        job_id="job-g",
+        document_id="sha256:" + _h.sha256(pdf.read_bytes()).hexdigest(),
+        source_path=pdf,
+        page_numbers=(1,),
+        profile="layout_native",  # type: ignore[arg-type]
+        options_ref="configs/demo.toml",
+        output_dir=tmp_path / "out",
+        parser_options={},
+    )
+    adapter = MinerUAdapter(
+        token="t", transport=httpx.MockTransport(handler), poll_interval=0.0
+    )
+    artifacts = adapter.parse(request, local_file=pdf)
+
+    normalized = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
+    errors = " ".join(normalized.get("errors", []))
+    assert "exceeds" in errors and "unverified" in errors, normalized.get("errors")
+
+    manifest = json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))
+    geometry = manifest["page_geometry"]
+    # The page size WAS real (A4) but a box violated it → not verified.
+    assert geometry["basis"] == "source-pdf"
+    assert geometry["verified"] is False
+    assert geometry["bbox_warnings"]

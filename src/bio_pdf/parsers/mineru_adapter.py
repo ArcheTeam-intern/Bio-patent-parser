@@ -73,6 +73,41 @@ def _write_identity(path: Path, identity: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+
+
+def _validate_page_geometry(document: NormalizedDocument) -> list[str]:
+    """E8/P04: bounding boxes are only trustworthy when they fit the page.
+
+    MinerU's coordinate basis is not independently verified from the
+    protocol (no successful cloud sample yet). Instead of pretending a
+    mapping, each block box is CHECKED against the page's real size; every
+    violation becomes an explicit geometry warning — the manifest marks
+    the basis unverified and downstream never silently clamps or rescales.
+    """
+
+    warnings: list[str] = []
+    for page in document.pages:
+        if page.width_pt <= 0 or page.height_pt <= 0:
+            warnings.append(f"page {page.page_number}: unknown page size — geometry unverified")
+            continue
+        items = list(page.blocks) + list(page.tables) + list(page.figures)
+        for item in items:
+            bbox = getattr(item, "bbox", None)
+            if not bbox or len(bbox) < 4:
+                continue
+            x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            tol = 2.0
+            if (
+                x0 < -tol or y0 < -tol
+                or x1 > page.width_pt + tol or y1 > page.height_pt + tol
+            ):
+                item_id = getattr(item, "block_id", None) or getattr(item, "table_id", None) or getattr(item, "figure_id", "?")
+                warnings.append(
+                    f"page {page.page_number}: box {item_id} ({x0:.0f},{y0:.0f},{x1:.0f},{y1:.0f}) "
+                    f"exceeds the {page.width_pt:.0f}x{page.height_pt:.0f}pt page — "
+                    "MinerU coordinate basis unverified"
+                )
+    return warnings
 def _source_page_geometry(
     source_path: Path, pages: list[int]
 ) -> dict[int, tuple[float, float, int]]:
@@ -1031,6 +1066,13 @@ class MinerUAdapter:
             document_id=request.document_id,
         )
 
+        # E8/P04: validate every block box against the page's real size.
+        geometry_warnings = _validate_page_geometry(document)
+        if geometry_warnings:
+            document = document.model_copy(
+                update={"errors": list(document.errors) + geometry_warnings}
+            )
+
         requested = set(request.page_numbers)
         produced = {p.page_number for p in document.pages}
         if requested:
@@ -1057,7 +1099,8 @@ class MinerUAdapter:
         # available, neutral defaults (recorded as UNVERIFIED) otherwise.
         manifest["page_geometry"] = {
             "basis": "source-pdf" if page_sizes else "unknown-defaults",
-            "verified": bool(page_sizes),
+            "verified": bool(page_sizes) and not geometry_warnings,
+            "bbox_warnings": geometry_warnings[:50],
             "page_count": len(document.pages),
             "rotated_pages": sorted(
                 page_no
