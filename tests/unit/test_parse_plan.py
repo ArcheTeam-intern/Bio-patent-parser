@@ -61,3 +61,18 @@ def test_plan_unknown_route_defaults_native_with_reason() -> None:
     )
     assert plan.tasks[0].kind == "native"
     assert any("insufficient signals" in r for r in plan.tasks[0].reasons)
+
+
+def test_st25_ocr_route_maps_to_layout_ocr_and_respects_disabled() -> None:
+    pages = [_page(1, "st25_ocr")]
+    plan = build_parse_plan(
+        pages, page_numbers=(1,), engine="docling_sdk", ocr_policy="auto"
+    )
+    assert plan.tasks[0].kind == "layout_ocr"
+
+    disabled = build_parse_plan(
+        pages, page_numbers=(1,), engine="docling_sdk", ocr_policy="disabled"
+    )
+    assert disabled.tasks[0].kind == "native"
+    assert any("SCAN_WITH_OCR_DISABLED" in r for r in disabled.tasks[0].reasons)
+    assert disabled.warnings

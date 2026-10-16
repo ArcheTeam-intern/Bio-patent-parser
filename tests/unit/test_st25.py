@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from bio_pdf.extract.sequences.st25 import (
     parse_st25_blocks,
+    parse_st25_blocks_with_scan,
     parse_st25_text,
 )
 
@@ -153,3 +154,91 @@ def test_unresolved_three_letter_token_is_preserved_not_dropped() -> None:
 
 def test_empty_text_returns_no_records() -> None:
     assert parse_st25_text("", document_id="sha256:fixture") == []
+
+def test_running_header_and_line_numbers_never_become_residues() -> None:
+    """C03: EP-style running material must not fabricate residues (EPB1)."""
+
+    def page(seq_id: int) -> str:
+        return "\n".join([
+            "EP 3 027 649 B1",
+            "31",
+            "5",
+            "10",
+            "15",
+            f"<210> {seq_id}",
+            "<211> 4",
+            "<212> PRT",
+            f"<400> {seq_id}",
+            "Ala Gly Leu Lys",
+        ])
+
+    blocks = [{"text": page(n), "page_number": n} for n in (30, 31, 32)]
+    records = parse_st25_blocks(blocks, "sha256:fixture")
+    # Three pages, each declaring its own SEQ ID; the running header, page
+    # number and line-number column are filtered and never reach residues.
+    assert len(records) == 3
+    for record in records:
+        assert "EP" not in record.normalized_sequence
+        assert "B1" not in record.raw_sequence
+        assert record.normalized_sequence == "AGLK"
+
+
+def test_short_nonrepeated_text_is_not_filtered() -> None:
+    """A one-off short line inside a residue block is still residue input."""
+
+    page = "\n".join([
+        "<210> 1",
+        "<211> 3",
+        "<212> PRT",
+        "<400> 1",
+        "Ala",
+        "Gly",
+        "Leu",
+    ])
+    records = parse_st25_blocks([{"text": page, "page_number": 1}], "sha256:fixture")
+    assert records[0].normalized_sequence == "AGL"
+
+
+def test_number_only_region_is_missing_not_a_crash() -> None:
+    """OCR of a line-number column must not build an empty record (C03)."""
+
+    page = "\n".join([
+        "<210> 4",
+        "<211> 10",
+        "<212> PRT",
+        "<400> 4",
+        "1 5",
+        "10 15",
+        "20 25",
+    ])
+    records = parse_st25_blocks([{"text": page, "page_number": 1}], "sha256:fixture")
+    assert records == []
+    _, scan = parse_st25_blocks_with_scan(
+        [{"text": page, "page_number": 1}], "sha256:fixture"
+    )
+    assert scan[0]["saw_400"] is True
+    assert scan[0]["observed_length"] is None
+
+
+def test_repeated_declaration_tag_lines_survive_the_running_filter() -> None:
+    """C03 regression: "<212> DNA"/"<211> 364" repeat across pages in real
+    catalogs — the running-material filter must never drop tag lines."""
+
+    def page(seq_id: int) -> str:
+        return "\n".join([
+            "EP 3 027 649 B1",
+            "5",
+            "10",
+            f"<210> {seq_id}",
+            "<211> 364",
+            "<212> DNA",
+            f"<400> {seq_id}",
+            "atg gtg agc aag ggc gag gag ctg ttc acc ggg gtg gtg ccc atc",
+        ])
+
+    blocks = [{"text": page(n), "page_number": n} for n in (30, 31, 32)]
+    records = parse_st25_blocks(blocks, "sha256:fixture")
+    assert len(records) == 3
+    for record in records:
+        assert record.declared_length == 364
+        assert record.molecule_type == "DNA"

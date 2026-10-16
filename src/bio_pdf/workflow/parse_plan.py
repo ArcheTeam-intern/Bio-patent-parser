@@ -108,7 +108,7 @@ def build_parse_plan(
             tasks.append(PageTask(page_number, "layout_ocr", reasons, route))
             continue
 
-        if route in ("scan_suspect", "text_suspect"):
+        if route in ("scan_suspect", "text_suspect", "st25_ocr"):
             if ocr_policy == "disabled":
                 reasons.append("SCAN_WITH_OCR_DISABLED")
                 warnings.append(

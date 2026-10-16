@@ -19,6 +19,7 @@ RouteLabel = Literal[
     "layout_ocr",
     "scan_suspect",
     "text_suspect",
+    "st25_ocr",
     "mixed",
     "blank",
     "unknown",

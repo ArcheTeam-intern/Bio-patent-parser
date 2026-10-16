@@ -45,7 +45,7 @@ from bio_pdf.extract.relations import link_explicit_relations
 from bio_pdf.extract.sequences.inline import extract_inline_sequences
 from bio_pdf.extract.sequences.references import extract_sequence_references
 from bio_pdf.ingest.inspector import inspect_pdf
-from bio_pdf.pdf.quality import classify_page, inspect_page_signals
+from bio_pdf.pdf.quality import classify_page, inspect_page_signals, st25_residue_gap
 from bio_pdf.storage.artifacts import (
     atomic_write_bytes,
     atomic_write_json,
@@ -196,7 +196,7 @@ class IngestStage(_FileStage):
 
 class InspectStage(_FileStage):
     name = "inspect"
-    implementation = "v3"
+    implementation = "v4-st25-ocr"
 
     def run(self, context: StageContext) -> StageOutcome:
         import pypdfium2 as pdfium
@@ -250,6 +250,24 @@ class InspectStage(_FileStage):
                     page_area_pt2=float(width_pt * height_pt),
                 )
                 decision = classify_page(signals, config)
+                # C03: an ST.25 page whose <400> blocks carry no text-layer
+                # residues must join the OCR plan — the residue region is
+                # rendered (image/outline), and character count alone would
+                # route it to plain native text.
+                if (
+                    st25_residue_gap(text)
+                    and decision.route in ("native", "mixed", "unknown")
+                ):
+                    from bio_pdf.contracts import RouteDecision
+
+                    decision = RouteDecision(
+                        route="st25_ocr",
+                        reasons=[
+                            "ST.25 <400> present without residue text; "
+                            "residue region appears rendered (image/outline)"
+                        ],
+                        rule_version="v1",
+                    )
                 pages_out.append(
                     {
                         "signals": json.loads(signals.model_dump_json()),
@@ -760,6 +778,91 @@ def _source_parser_from_run(parser_run_id: str) -> str:
     return "unknown"
 
 
+def _merge_ocr_page_lines(
+    blocks: list[dict[str, Any]],
+    ocr_lines: dict[int, list[tuple[float, str]]],
+) -> list[dict[str, Any]]:
+    """Interleave OCR'd lines into each page by vertical position (C03).
+
+    Appending a whole page's OCR text after the page's last block loses
+    reading order (page 32's DNA rows were attributed to SEQ ID 8 because
+    they landed after ``<400> 8``). Instead every OCR line is placed at its
+    real y position among the native blocks, so a residue row between
+    ``<400> 7`` and ``<210> 8`` stays exactly there.
+
+    Fuzzy dedup: OCR re-reads text that is already in the native layer
+    (e.g. a page whose residues partly made it through the layout engine
+    as text) — near-identical lines are dropped to avoid double-counting
+    residues.
+    """
+
+    import difflib
+    import re as _re
+
+    def fingerprint(text: str) -> str:
+        return _re.sub(r"[\s\d]+", "", text).casefold()
+
+    output: list[dict[str, Any]] = []
+    page_items: dict[int, list[tuple[float, str, Any]]] = {}
+    for index, block in enumerate(blocks):
+        page = int(block.get("page_number", 1))
+        bbox = block.get("bbox")
+        y = float(bbox[1]) if bbox else 0.0
+        page_items.setdefault(page, []).append((y, "block", (index, block)))
+
+    for page, lines in ocr_lines.items():
+        page_items.setdefault(page, [])
+        native_fps = [
+            fingerprint(str(b.get("text") or ""))
+            for _y, kind, (_i, b) in page_items[page]
+            if kind == "block"
+        ]
+        kept: list[tuple[float, str, Any]] = []
+        for y, text in lines:
+            fp = fingerprint(text)
+            if len(fp) < 2:
+                continue
+            if kept and fingerprint(kept[-1][1]) == fp:
+                continue
+            duplicate = False
+            for native_text in native_fps:
+                if not native_text:
+                    continue
+                if fp in native_text or native_text in fp:
+                    duplicate = True
+                    break
+                if difflib.SequenceMatcher(None, fp, native_text).ratio() >= 0.6:
+                    duplicate = True
+                    break
+            if not duplicate:
+                kept.append((y, "ocr", text))
+        page_items[page].extend(kept)
+
+    for page in sorted(page_items):
+        items = page_items[page]
+        # Stable sort: equal y keeps original order (native blocks first).
+        items.sort(key=lambda item: item[0])
+        for _y, kind, payload in items:
+            if kind == "block":
+                output.append(payload[1])
+            else:
+                output.append(
+                    {
+                        "text": payload,
+                        "kind": "text",
+                        "semantic_role": "unknown",
+                        "page_number": page,
+                        "bbox": None,
+                        "block_id": f"ocr-region:{page}:{int(_y)}",
+                        "source_refs": [],
+                        "source_aliases": [],
+                        "source_parser": "rapidocr_region",
+                        "source_artifact_id": None,
+                    }
+                )
+    return output
+
+
 def _page_blocks(
     document: NormalizedDocument, *, source_artifact_id: str | None = None
 ) -> list[dict[str, Any]]:
@@ -807,7 +910,7 @@ def _table_rows(document: NormalizedDocument) -> list[tuple[Any, dict[str, str]]
 
 class ExtractStage(_FileStage):
     name = "extract"
-    implementation = "v4-inventory"
+    implementation = "v5-region-ocr"
 
     def run(self, context: StageContext) -> StageOutcome:
         targets = set(
@@ -873,16 +976,14 @@ class ExtractStage(_FileStage):
             )
             from bio_pdf.extract.sequences.st25 import parse_st25_blocks_with_scan
 
-            st25_sequences, st25_scan = parse_st25_blocks_with_scan(
-                blocks, doc_id, parser_run_id=parser_run_id, evidence_index=evidence
-            )
-            sequences.extend(st25_sequences)
+            declared_total = extract_declared_total(blocks)
 
-            # C02: the inventory is built from the declaration scan (every
-            # <210>), so "declared count" is reportable independently of
-            # how many residues were recovered. Full-document coverage is
-            # reported honestly: a partial page window never claims the
-            # whole listing.
+            # C02/C03 two-pass flow: the first pass scans declarations ONLY
+            # (no evidence registration yet). Pages whose residue regions
+            # stayed empty then get a targeted OCR pass; the final parse —
+            # with evidence — runs once over the augmented feed, so no
+            # evidence ids are registered twice.
+            _, st25_scan = parse_st25_blocks_with_scan(blocks, doc_id)
             document_page_count: int | None = None
             try:
                 inspection = _read_input_json(
@@ -891,11 +992,75 @@ class ExtractStage(_FileStage):
                 document_page_count = int(inspection.get("page_count") or 0) or None
             except WorkflowError:
                 document_page_count = None
+
+            in_scope = set(context.page_numbers) if context.page_numbers else None
+            missing_pages = sorted(
+                {
+                    int(entry["declaration_page"])
+                    for entry in build_sequence_inventory(
+                        st25_scan, requested_pages=context.page_numbers
+                    )["entries"]
+                    if entry["status"] in ("missing", "declared")
+                    and entry["saw_residue_region"]
+                }
+            )
+            ocr_candidates = [
+                p for p in missing_pages if in_scope is None or p in in_scope
+            ]
+            budget = int(
+                _workflow_options(context).get("reparse_max_regions") or 10
+            )
+            ocr_candidates = ocr_candidates[:budget]
+
+            feed_blocks = blocks
+            ocr_pages_used: list[int] = []
+            if ocr_candidates:
+                from bio_pdf.extract.sequences.region_ocr import ocr_residue_pages
+                from pathlib import Path as _Path
+
+                try:
+                    ocr_text = ocr_residue_pages(
+                        _Path(context.source_path), ocr_candidates
+                    )
+                except Exception as exc:  # noqa: BLE001 — best-effort path
+                    diagnostics.append(
+                        {
+                            "code": "REGION_OCR_FAILED",
+                            "detail": str(exc)[:200],
+                        }
+                    )
+                    ocr_text = {}
+                if ocr_text:
+                    feed_blocks = _merge_ocr_page_lines(blocks, ocr_text)
+                    ocr_pages_used = sorted(ocr_text)
+                    diagnostics.append(
+                        {
+                            "code": "REGION_OCR_PAGES",
+                            "detail": (
+                                "residue regions OCR'd on pages "
+                                + ", ".join(str(p) for p in ocr_pages_used)
+                            ),
+                        }
+                    )
+
+            st25_sequences, st25_scan = parse_st25_blocks_with_scan(
+                feed_blocks,
+                doc_id,
+                parser_run_id=parser_run_id,
+                evidence_index=evidence,
+            )
+            sequences.extend(st25_sequences)
+
+            # C02: the inventory is built from the declaration scan (every
+            # <210>), so "declared count" is reportable independently of
+            # how many residues were recovered. Full-document coverage is
+            # reported honestly: a partial page window never claims the
+            # whole listing.
             sequence_inventory = build_sequence_inventory(
                 st25_scan,
                 requested_pages=context.page_numbers,
                 document_page_count=document_page_count,
-                declared_total=extract_declared_total(blocks),
+                declared_total=declared_total,
             )
             for entry in sequence_inventory["entries"]:
                 if entry["status"] == "missing":
@@ -921,7 +1086,7 @@ class ExtractStage(_FileStage):
 
             st25_pages = {
                 b["page_number"]
-                for b in blocks
+                for b in feed_blocks
                 if "<210>" in b["text"] or "<400>" in b["text"]
             }
             non_st25 = [b for b in blocks if b["page_number"] not in st25_pages]

@@ -27,6 +27,9 @@ _ACTIONABLE = {
     "TEXT_CONFLICT": "region",
     "SEQ_LENGTH_CONFLICT": "region",
     "ZERO_RESIDUE_LISTING": "region",
+    # C03: declaration reached its residue region but no residues were
+    # recoverable (rendered region → OCR candidate).
+    "SEQ_INVENTORY_MISSING": "region",
 }
 
 #: Expected artifact kind per trigger.
@@ -38,6 +41,7 @@ _EXPECTED_KIND = {
     "TEXT_CONFLICT": "text",
     "SEQ_LENGTH_CONFLICT": "sequence",
     "ZERO_RESIDUE_LISTING": "sequence",
+    "SEQ_INVENTORY_MISSING": "sequence",
 }
 
 _PAGE_RE = re.compile(r"p(\d+)|page\s*(\d+)|^(\d+)(?:$|:)", re.IGNORECASE)

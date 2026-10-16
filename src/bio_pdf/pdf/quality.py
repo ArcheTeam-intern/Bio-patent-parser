@@ -6,9 +6,40 @@ it conservative and surface unknowns rather than over-committing to a route.
 
 from __future__ import annotations
 
+import re
+
 from bio_pdf.contracts import PageQuality, QualityConfig, RouteDecision
 
-RULE_VERSION = "v0"
+RULE_VERSION = "v1"
+
+#: ST.25 residue gaps (C03): a listing page whose ``<400>`` blocks carry no
+#: following residue text — the residues are rendered as an image/outline
+#: region, so the page must join the OCR plan even though it has plenty of
+#: native text (character count alone cannot decide this).
+_ST25_400_RE = re.compile(r"<\s*400\s*>")
+_ST25_ANY_TAG_RE = re.compile(r"<\s*\d{3}\s*>")
+_ST25_MIN_RESIDUE_LETTERS = 8
+
+
+def st25_residue_gap(text: str) -> bool:
+    """True when the page declares ``<400>`` blocks but no residue text.
+
+    Looks after each ``<400>`` (up to the next tag) for letter-bearing
+    residue candidates; fewer than 8 letters in total marks the page as an
+    OCR candidate. Pages with real text-layer residues return False.
+    """
+
+    letters = 0
+    saw_400 = False
+    for match in _ST25_400_RE.finditer(text):
+        saw_400 = True
+        rest = text[match.end():]
+        next_tag = _ST25_ANY_TAG_RE.search(rest)
+        segment = rest[: next_tag.start()] if next_tag else rest
+        letters += sum(1 for ch in segment if ch.isalpha())
+    if not saw_400:
+        return False
+    return letters < _ST25_MIN_RESIDUE_LETTERS
 
 
 def inspect_page_signals(

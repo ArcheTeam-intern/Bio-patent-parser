@@ -104,3 +104,22 @@ def test_signals_reject_non_positive_page_area() -> None:
         inspect_page_signals(
             page_number=1, text_chars="x", image_area_pt2=0, page_area_pt2=0
         )
+
+def test_st25_residue_gap_true_when_400_has_no_residues() -> None:
+    from bio_pdf.pdf.quality import st25_residue_gap
+
+    text = "<210> 7\n<211> 364\n<212> DNA\n<400> 7\n<210> 8\n<400> 8\n"
+    assert st25_residue_gap(text) is True
+
+
+def test_st25_residue_gap_false_with_real_residues() -> None:
+    from bio_pdf.pdf.quality import st25_residue_gap
+
+    text = "<400> 1\nAla Gly Leu Lys Ala Gly Leu Lys\n"
+    assert st25_residue_gap(text) is False
+
+
+def test_st25_residue_gap_false_without_400() -> None:
+    from bio_pdf.pdf.quality import st25_residue_gap
+
+    assert st25_residue_gap("just a normal page of text") is False

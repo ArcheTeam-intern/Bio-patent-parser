@@ -111,6 +111,12 @@ def build_sequence_inventory(
         elif declared is not None and observed > declared:
             status = "conflict"
             reasons.append(f"observed {observed} exceeds declared {declared}")
+        elif declared is None:
+            # Residues recovered but the declaration carries no length: the
+            # listing itself is silent, so completeness cannot be verified —
+            # "complete" would be an invented claim.
+            status = "partial"
+            reasons.append("declared length unknown; completeness unverified")
         elif not entry.get("is_complete"):
             status = "partial"
             if declared is not None and observed < declared:

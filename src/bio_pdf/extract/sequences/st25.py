@@ -52,25 +52,37 @@ _POSITION_NUMBER_RE = re.compile(r"^\d+\s*$")
 #: bare position numbers, so any other symbol ends the current residue block.
 _NON_RESIDUE_RE = re.compile(r"[.,:;()\[\]<>\"'±%–—\-/\\|=+*?!&#$@^~`{}]")
 
+#: Nucleic-acid letters for DNA/RNA chunk lines (IUPAC ambiguity included).
+_NUCLEIC_CHARS = set("ACGTUNRYSWKMBDHVacgtunryswkmbdhv")
+
 
 def _looks_like_residue_line(line: str) -> bool:
     """Heuristic: prose lines terminate the residue block.
 
-    A residue line may contain residue tokens and position numbers only.
-    Any sentence punctuation (``.``, ``:``, ``-`` …) or a word longer than
-    eight letters marks prose (ST.25 residue tokens are ≤3 letters, DNA
-    runs are chunked ≤60 chars).
+    A residue line may contain residue tokens, position/count numbers and
+    nucleic chunks (up to 60 chars per ST.25) only. Any sentence punctuation
+    (``.``, ``:``, ``-`` …) marks prose. Long alphabetic tokens are accepted
+    only when every character is a nucleic-acid letter — this admits the
+    60-char DNA chunk rows while still rejecting prose words like
+    "contains" (``o`` is not a nucleic letter).
     """
 
     if _NON_RESIDUE_RE.search(line):
         return False
     tokens = line.split()
-    if any(len(t) > 8 for t in tokens):
-        # A single very long all-alphabetic token is a continuous nucleic
-        # line (ST.25 chunk length is up to 60); prose has punctuation or
-        # mixed words, already caught above.
-        if len(tokens) == 1 and tokens[0].isalpha() and len(tokens[0]) <= 60:
-            return True
+    if not tokens:
+        return False
+    # A single long alphabetic token is a continuous residue run (ST.25
+    # chunk length is up to 60) — kept from the original rule.
+    if len(tokens) == 1 and tokens[0].isalpha() and len(tokens[0]) <= 60:
+        return True
+    for token in tokens:
+        if len(token) <= 8:
+            continue
+        if len(token) > 60:
+            return False
+        if token.isalpha() and all(ch in _NUCLEIC_CHARS for ch in token):
+            continue
         return False
     return True
 
@@ -231,6 +243,15 @@ class _St25StateMachine:
         else:
             normalized, residues = self._normalize_protein(raw)
             representation = self._protein_representation(normalized, residues)
+
+        if not normalized.strip():
+            # The region was reached but held nothing normalisable (OCR of
+            # a line-number column, stray digits): same honesty rule as an
+            # empty region — declared with no recoverable residues, never
+            # a record with an empty sequence (the contract forbids it).
+            self.zero_residue_listings.append((builder.seq_id_no, builder.residue_page))
+            self.scan_entries.append(scan_entry)
+            return
 
         builder.raw_sequence = raw.strip()
         builder.normalized_sequence = normalized
@@ -463,6 +484,46 @@ def parse_st25_blocks(
     return records
 
 
+#: ST.25 tag lines are content, never running material — real catalogs
+#: repeat e.g. "<212> DNA" or "<211> 364" across many pages (several
+#: same-length sequences), and filtering those would silently drop the
+#: declared length and molecule type of every one of them.
+_ST25_TAG_LINE_RE = re.compile(r"^\s*<\s*\d{3}\s*>")
+
+
+def _running_texts(blocks: list[dict[str, Any]], *, min_pages: int = 3) -> set[str]:
+    """Line texts repeated on >= ``min_pages`` pages: headers/footers/columns.
+
+    Real catalogs print a running header ("EP 3 027 649 B1") and a left-margin
+    line-number column on every listing page. Fed into the residue state,
+    those lines fabricate residues like ``EPB1`` (C03) — they are excluded
+    from parsing while the original blocks stay untouched for audit. Only
+    digit-bearing or very short repeats qualify, and ST.25 tag lines are
+    never filtered, so genuinely repeated declaration lines survive.
+    Counted per LINE so the rule is independent of block granularity.
+    """
+
+    pages_by_text: dict[str, set[int]] = {}
+    for block in blocks:
+        text = str(block.get("text") or "")
+        if not text:
+            continue
+        page = int(block.get("page_number", 1))
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not _ST25_TAG_LINE_RE.match(stripped):
+                pages_by_text.setdefault(stripped, set()).add(page)
+
+    running: set[str] = set()
+    for text, pages in pages_by_text.items():
+        if len(pages) < min_pages:
+            continue
+        has_digit = any(ch.isdigit() for ch in text)
+        if has_digit or len(text) <= 12:
+            running.add(text)
+    return running
+
+
 def parse_st25_blocks_with_scan(
     blocks: list[dict[str, Any]],
     document_id: str,
@@ -480,6 +541,10 @@ def parse_st25_blocks_with_scan(
     """
 
     machine = _St25StateMachine(document_id=document_id, default_page=1)
+    # C03: running headers/footers/line numbers never reach the state
+    # machine (they fabricated "EPB1"-style residues); blocks stay intact
+    # for audit — only the feed skips them.
+    running = _running_texts(blocks)
     # Per-page raw residue text, captured while feeding (plan B09): each
     # page's evidence carries ITS OWN fragment, not a copied full sequence.
     page_fragments: dict[int, list[str]] = {}
@@ -489,6 +554,8 @@ def parse_st25_blocks_with_scan(
             continue
         page_number = int(entry.get("page_number", 1))
         for line in str(text).splitlines():
+            if line.strip() and line.strip() in running:
+                continue
             machine.feed_line(line, page_number=page_number)
             if machine.current is not None and machine.current.in_residues:
                 if line.strip():

@@ -161,3 +161,20 @@ def test_out_of_scope_declaration_page_is_flagged() -> None:
     inventory = build_sequence_inventory(scan, requested_pages=list(range(1, 41)))
     assert inventory["entries"][0]["status"] == "outside_scope"
     assert inventory["summary"]["outside_scope"] == 1
+
+
+def test_unknown_declared_length_is_partial_not_complete() -> None:
+    """Residues with no declared length can't claim completeness."""
+
+    text = "\n".join([
+        "<210> 3",
+        "<212> PRT",
+        "<400> 3",
+        "Ala Gly Leu Lys",
+    ])
+    _, scan = parse_st25_blocks_with_scan(_blocks(text), "sha256:fixture")
+    inventory = build_sequence_inventory(scan)
+    entry = inventory["entries"][0]
+    assert entry["status"] == "partial"
+    assert "completeness unverified" in entry["reasons"][0]
+    assert inventory["summary"]["complete"] == 0

@@ -301,3 +301,10 @@
 - 新增 `extract/sequences/inventory.py`（声明级清点：每个 `<210>` 一行，状态 declared/missing/partial/complete/conflict/outside_scope，理由含"需 OCR"候选）+ ST.25 状态机补 `scan_entries`/`saw_400`/同块多标签切分（`<210> 1 <211> 4 <212> PRT` 不再让 SEQ ID 吞标签）+ ExtractStage v4-inventory 写 `sequence_inventory` + `/records` 透出 + 前端"序列清单"面板（统计 chips+逐条表格，非完整项默认置顶，点击跳页）。
 - 真实验收（EP3027649B1，195 页全文 native 任务 job-10fbff9f5374）：observed_declarations=82 = `<160>` 82，unseen=0；complete 0 / partial 39 / missing 43 —— SEQ ID 7（p32, DNA, 声明 364）如实为 missing"文本层为空需区域 OCR"（正是 C03 目标）。40 页范围任务（job-0b05fe714374）：范围内 32 声明（与方案核查一致）/ 全文 82 / 未覆盖 50 / covers_full_document=false —— 不冒充全文。
 - 发现并修复运行期陷阱：worker/API 在改码后未重启导致新字段缺失（runbook 已记）。18 单测全绿（新增 8）。
+
+### C03 完成：标签分词、页眉过滤、混合区域 OCR（真实验收）
+- **标签分词**：同块多标签切分（"<210> 1 <211> 4 <212> PRT" 一行内联）→ SEQ ID 不再吞标签。
+- **页眉/行号过滤**：跨页重复行（≥3 页，含数字或极短）从残基流剔除——EP 全文验证 EPB1 型误提 **归零**（修复前候选含 EPB1/EPB1EPB1）。修复过程中捕获关键回归：真实专利里 "<212> DNA"/"<211> 364" 会跨多页重复（多条同长度序列），过滤器必须先排除标签行，否则声明长度/分子类型全被吞（已加回归测试）。
+- **DNA 行启发式**：≤8 字符旧规则误杀 60 字符 DNA 块行 → 改为">8 字符的 token 必须全部是核酸字母（或整行单 token 连续串）"，SEQ 9/13 DNA 由此可解。
+- **混合区域 OCR（两次修复）**：①inspect 新增 `st25_ocr` 路由（`<400>` 无残基文本的页强制 OCR，不管字符数）；②extract 阶段定向兜底：对声明仍缺失的页整页 300dpi 渲染 + RapidOCR 直调（预算=reparse_max_regions，默认 10 页），**按页内 y 坐标与原生块交织合并**（整页追加会造成残基串位——SEQ 7 的 DNA 曾被错挂到 SEQ 8）+ 模糊去重（防 nativ 已有文本重复计数）。空归一化（纯行号列 OCR）如实记为 missing 不再崩溃。
+- 真实验收（job-819fab3181d3，EP3027649B1 全文 195 页 native + 区域 OCR）：**82/82 声明清点**；complete 8、partial 19（真实序列如 SQTTHAPFT 9/9、KVSNRFS 7/7、DIVMTQSPLSLPVTPGEPASISC 23/23）；SEQ 7 DNA 恢复 90 字符（原 0）；EPB1=0。剩余 54 missing 集中在 OCR 预算（10 页）外的声明页，如实标注（提高预算或 OCR 升档可扩）。501 测试全绿（+4 新回归）。
