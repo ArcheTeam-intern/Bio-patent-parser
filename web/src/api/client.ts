@@ -478,6 +478,27 @@ export function reparseIssue(jobId: string, issueId: string): Promise<{
   return request(`/jobs/${encodeURIComponent(jobId)}/issues/${encodeURIComponent(issueId)}/reparse`, { method: "POST" });
 }
 
+/** E9/P05: per-engine RAW content of one page (source comparison reads
+ * these artifacts — not the fused normalized view). */
+export interface PageChannelLine {
+  text: string;
+  bbox?: number[] | null;
+  kind?: string;
+}
+
+export interface PageChannel {
+  engine: string;
+  artifact_rel: string;
+  lines: PageChannelLine[];
+}
+
+export function getPageChannels(
+  jobId: string,
+  pageNumber: number,
+): Promise<{ api_version: string; job_id: string; page_number: number; channels: PageChannel[] }> {
+  return request(`/jobs/${encodeURIComponent(jobId)}/pages/${pageNumber}/channels`);
+}
+
 export function documentSourceUrl(documentId: string): string {
   return `${API_PREFIX}/documents/${encodeURIComponent(documentId)}/source`;
 }

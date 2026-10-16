@@ -718,6 +718,104 @@ def get_artifact_content(
 __all__ = ["router"]
 
 
+
+@router.get("/pages/{page_number}/channels")
+def page_channels(service: ServiceDep, job_id: str, page_number: int) -> dict:
+    """E9/P05: the RAW per-engine content of one page.
+
+    The fused normalized document answers "what the pipeline read"; this
+    endpoint answers "what each ENGINE produced": every parse stage's own
+    normalized artifact (native glyphs, Docling layout, MinerU) plus the
+    extract-stage region-OCR sidecar, each kept separate so the source
+    comparison can never blur channels. Stage dirs that no longer exist or
+    pages an engine did not produce are honestly absent (or empty lines).
+    """
+
+    _job_or_404(service, job_id)
+    root = service.paths.artifact_root / "jobs" / job_id / "stage_runs"
+    channels: list[dict[str, Any]] = []
+    if not root.is_dir():
+        return {"api_version": "v1", "job_id": job_id, "page_number": page_number, "channels": []}
+
+    for run_dir in sorted(root.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        name = run_dir.name
+        if "--native_parse--" in name:
+            engine = "native"
+        elif "--layout_parse--" in name:
+            # run subdirs may split by profile (layout-native vs layout-ocr).
+            engine = "layout"
+        elif "--extract--" in name:
+            engine = "rapidocr_region"
+        else:
+            continue
+
+        if engine == "rapidocr_region":
+            sidecar = run_dir / "region-ocr.json"
+            if sidecar.is_file():
+                try:
+                    data = json.loads(sidecar.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    data = {}
+                lines = (data.get("pages") or {}).get(str(page_number)) or []
+                if lines:
+                    channels.append(
+                        {
+                            "engine": engine,
+                            "artifact_rel": sidecar.relative_to(service.paths.artifact_root).as_posix(),
+                            "lines": [
+                                {"text": str(ln.get("text") or ""), "bbox": [ln.get("x0"), ln.get("y0"), ln.get("x1"), ln.get("y1")]}
+                                for ln in lines
+                            ],
+                        }
+                    )
+            continue
+
+        # parse stages: normalized.json at the run root or in run-* subdirs
+        candidates = [run_dir / "normalized.json", *sorted(run_dir.glob("run-*/normalized.json"))]
+        for path in candidates:
+            if not path.is_file():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            for page in data.get("pages", []) or []:
+                if not isinstance(page, dict) or int(page.get("page_number", -1)) != page_number:
+                    continue
+                lines = [
+                    {
+                        "text": str(block.get("text_raw") or ""),
+                        "bbox": block.get("bbox"),
+                        "kind": str(block.get("kind") or "text"),
+                    }
+                    for block in page.get("blocks", []) or []
+                    if isinstance(block, dict)
+                ]
+                if lines:
+                    sub = path.parent.name if path.parent != run_dir else None
+                    channels.append(
+                        {
+                            # The canonical engine label stays stable; the
+                            # concrete run (e.g. profile split) is its own
+                            # field, so readers can group or drill down.
+                            "engine": engine,
+                            "run": sub,
+                            "artifact_rel": path.relative_to(service.paths.artifact_root).as_posix(),
+                            "lines": lines,
+                        }
+                    )
+
+    channels.sort(key=lambda ch: ch["engine"])
+    return {
+        "api_version": "v1",
+        "job_id": job_id,
+        "page_number": page_number,
+        "channels": channels,
+    }
+
+
 # ---- D09 issue actions (backend + audit log) -------------------------------
 
 

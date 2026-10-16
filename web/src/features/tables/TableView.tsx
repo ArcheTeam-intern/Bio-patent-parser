@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getPage, pageFigureUrl } from "../../api/client";
+import { getPage, getPageChannels, pageFigureUrl } from "../../api/client";
 
 /**
  * 表格与原文视图（plan B12）：
@@ -241,7 +241,7 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
           </tbody>
         </table>
       ) : view === "source" ? (
-        <SourceCompareView channels={channels} />
+        <SourceCompareView jobId={jobId} pageNumber={pageNumber} fallbackChannels={channels} />
       ) : (
         <div className="reading-flow">
           {paragraphs.map((g, i) => (
@@ -253,18 +253,67 @@ export function TextTab({ jobId, pageNumber }: { jobId: string; pageNumber: numb
   );
 }
 
-/** D08: per-source channel presentation. Same column/role rules per
- * channel, so a Docling and an OCR channel rendered on the same page
- * stay visually comparable and never silently merge.
+const CHANNEL_LABELS: Record<string, string> = {
+  native: "原生字形层",
+  layout: "结构引擎（Docling/MinerU）",
+  rapidocr_region: "区域 OCR（RapidOCR）",
+  unknown: "未知通道",
+};
+
+/**
+ * E9/P05: the source comparison reads the RAW per-engine artifacts
+ * (GET …/pages/n/channels — native parse, layout run dirs, region-OCR
+ * sidecar), never the fused normalized view alone. Each channel keeps
+ * its own lines with boxes so the reader can compare what every engine
+ * actually produced. When a job has no readable stage artifacts (e.g.
+ * very old runs), it falls back to the fused channel buckets — with the
+ * fallback honestly labelled.
  */
-function SourceCompareView({ channels }: { channels: SourceChannel[] }) {
-  if (channels.length === 0) return null;
+function SourceCompareView({
+  jobId,
+  pageNumber,
+  fallbackChannels,
+}: {
+  jobId: string;
+  pageNumber: number;
+  fallbackChannels: SourceChannel[];
+}) {
+  const channelsQuery = useQuery({
+    queryKey: ["page-channels", jobId, pageNumber],
+    queryFn: () => getPageChannels(jobId, pageNumber),
+    enabled: !!jobId,
+  });
+  const rawChannels = channelsQuery.data?.channels ?? [];
+  if (rawChannels.length > 0) {
+    return (
+      <div className="source-compare">
+        {rawChannels.map((ch) => (
+          <div key={ch.engine} className="source-channel">
+            <div className="source-channel-head">
+              <strong>{CHANNEL_LABELS[ch.engine] ?? ch.engine}</strong>
+              <span className="dim"> · {ch.lines.length} 行 · {ch.artifact_rel}</span>
+            </div>
+            <div className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.7 }}>
+              {ch.lines.map((ln, i) => (
+                <div key={i}>{ln.text}</div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  const channels = fallbackChannels;
+  if (channels.length === 0) return <div className="dim">本页暂无可对照的原始文本。</div>;
   return (
     <div className="source-compare">
+      <div className="wb-hint" style={{ marginBottom: 6 }}>
+        该任务的阶段制品不可读，退化为按融合块的来源标注分桶（非各引擎原始文件）。
+      </div>
       {channels.map((c) => (
         <div key={c.parser} className="source-channel">
           <div className="source-channel-head">
-            <strong>{c.parser}</strong>
+            <strong>{CHANNEL_LABELS[c.parser] ?? c.parser}</strong>
             <span className="dim"> · {c.blockCount} 块 · {c.paragraphs.length} 段</span>
           </div>
           {c.paragraphs.length === 0 ? (

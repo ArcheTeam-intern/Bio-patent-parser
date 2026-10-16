@@ -1058,6 +1058,10 @@ class ExtractStage(_FileStage):
                 }
             )
 
+        # E9: artifact refs contributed during the sequence pass (region OCR
+        # sidecar) are published alongside extract.json.
+        extract_extra_refs: list[Any] = []
+
         # ---- sequences ----------------------------------------------------
         sequences: list[SequenceRecord] = []
         sequence_inventory: dict[str, Any] | None = None
@@ -1126,6 +1130,28 @@ class ExtractStage(_FileStage):
                 if ocr_text:
                     feed_blocks, ocr_conflicts = _merge_ocr_page_lines(blocks, ocr_text)
                     ocr_pages_used = sorted(ocr_text)
+                    # E9/P05: persist the region OCR as its own auditable
+                    # artifact so the 来源对照 view can read EXACTLY what
+                    # the fallback contributed, per page, with boxes.
+                    from bio_pdf.storage.artifacts import atomic_write_json as _awj
+
+                    region_payload = {
+                        "schema_version": "1.0",
+                        "engine": "rapidocr_region",
+                        "dpi": 300,
+                        "policy": "st25-residue-fallback",
+                        "pages": {
+                            str(page): [
+                                {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "text": t}
+                                for (x0, y0, x1, y1, t) in lines
+                            ]
+                            for page, lines in sorted(ocr_text.items())
+                        },
+                    }
+                    region_ref = _awj(Path(context.stage_dir()), "region-ocr.json", region_payload)
+                    extract_extra_refs.append(
+                        _stage_ref(context, "region-ocr.json", region_ref)
+                    )
                     diagnostics.append(
                         {
                             "code": "REGION_OCR_PAGES",
