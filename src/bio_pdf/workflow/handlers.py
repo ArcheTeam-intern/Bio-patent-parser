@@ -803,71 +803,94 @@ def _source_parser_from_run(parser_run_id: str) -> str:
 
 def _merge_ocr_page_lines(
     blocks: list[dict[str, Any]],
-    ocr_lines: dict[int, list[tuple[float, str]]],
-) -> list[dict[str, Any]]:
-    """Interleave OCR'd lines into each page by vertical position (C03).
+    ocr_lines: dict[int, list[tuple[float, float, str]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Interleave OCR'd lines into each page by vertical position (C03/D02).
 
-    Appending a whole page's OCR text after the page's last block loses
-    reading order (page 32's DNA rows were attributed to SEQ ID 8 because
-    they landed after ``<400> 8``). Instead every OCR line is placed at its
-    real y position among the native blocks, so a residue row between
-    ``<400> 7`` and ``<210> 8`` stays exactly there.
+    Reading order: every OCR line is placed at its real y position among the
+    native blocks, so a residue row between ``<400> 7`` and ``<210> 8`` stays
+    exactly there.
 
-    Fuzzy dedup: OCR re-reads text that is already in the native layer
-    (e.g. a page whose residues partly made it through the layout engine
-    as text) — near-identical lines are dropped to avoid double-counting
-    residues.
+    D02 position-aware merge — the previous whole-page fuzzy dedup deleted
+    legitimate content: an OCR line was dropped whenever it merely RESEMBLED
+    any native text on the page (ratio >= 0.6), regardless of position, so
+    different regions lost their residues and native/OCR character conflicts
+    were silently resolved. The rules now:
+
+    - **same physical region, equal content** (normalized fingerprints
+      match) → merged: the OCR copy is dropped (the native layer already
+      carries it).
+    - **same physical region, different content** → the native text stays
+      in the feed, the OCR variant is NOT silently chosen away: a
+      ``SOURCE_CONFLICT`` record (page, y-range, both texts) is returned so
+      the caller can raise an issue and refuse completeness.
+    - **different region** → kept, whatever it resembles. Only exact
+      normalized equality merges, never a similarity threshold.
+
+    Returns ``(merged_blocks, conflicts)``.
     """
 
-    import difflib
     import re as _re
 
     def fingerprint(text: str) -> str:
-        return _re.sub(r"[\s\d]+", "", text).casefold()
+        return _re.sub(r"[\s\d]+", "", text).upper()
 
     output: list[dict[str, Any]] = []
-    page_items: dict[int, list[tuple[float, str, Any]]] = {}
+    conflicts: list[dict[str, Any]] = []
+    # Uniform item shape: (y, order, kind, payload) where kind is
+    # "block" (payload = block dict) or "ocr" (payload = line text).
+    page_items: dict[int, list[tuple[float, int, str, Any]]] = {}
     for index, block in enumerate(blocks):
         page = int(block.get("page_number", 1))
         bbox = block.get("bbox")
-        y = float(bbox[1]) if bbox else 0.0
-        page_items.setdefault(page, []).append((y, "block", (index, block)))
+        y0 = float(bbox[1]) if bbox else 0.0
+        page_items.setdefault(page, []).append((y0, index, "block", block))
 
     for page, lines in ocr_lines.items():
-        page_items.setdefault(page, [])
-        native_fps = [
-            fingerprint(str(b.get("text") or ""))
-            for _y, kind, (_i, b) in page_items[page]
+        natives = [
+            (float(b.get("bbox")[1]) if b.get("bbox") else 0.0,
+             float(b.get("bbox")[3]) if b.get("bbox") else 0.0,
+             fingerprint(str(b.get("text") or "")),
+             str(b.get("text") or ""))
+            for _y, _o, kind, b in page_items.get(page, [])
             if kind == "block"
         ]
-        kept: list[tuple[float, str, Any]] = []
-        for y, text in lines:
+        kept: list[tuple[float, int, str, Any]] = []
+        for order, (y_top, y_bottom, text) in enumerate(lines):
             fp = fingerprint(text)
             if len(fp) < 2:
                 continue
-            if kept and fingerprint(kept[-1][1]) == fp:
+            if kept and fingerprint(str(kept[-1][3])) == fp:
                 continue
-            duplicate = False
-            for native_text in native_fps:
-                if not native_text:
-                    continue
-                if fp in native_text or native_text in fp:
-                    duplicate = True
-                    break
-                if difflib.SequenceMatcher(None, fp, native_text).ratio() >= 0.6:
-                    duplicate = True
-                    break
-            if not duplicate:
-                kept.append((y, "ocr", text))
-        page_items[page].extend(kept)
+            # Same physical region: vertical intervals intersect (2pt slack).
+            overlapping = [
+                (n_fp, n_text)
+                for n_y0, n_y1, n_fp, n_text in natives
+                if n_fp and n_y0 - 2.0 <= y_bottom and n_y1 + 2.0 >= y_top
+            ]
+            if any(n_fp == fp for n_fp, _t in overlapping):
+                continue  # same region, same content -> merged
+            if overlapping:
+                conflicts.append(
+                    {
+                        "page_number": page,
+                        "y_top": round(y_top, 1),
+                        "y_bottom": round(y_bottom, 1),
+                        "native_text": overlapping[0][1],
+                        "ocr_text": text,
+                    }
+                )
+                continue  # native stays in the feed; conflict is recorded
+            kept.append((y_top, order, "ocr", text))
+        page_items.setdefault(page, []).extend(kept)
 
     for page in sorted(page_items):
         items = page_items[page]
-        # Stable sort: equal y keeps original order (native blocks first).
+        # Stable sort: equal y keeps native-first order (registered first).
         items.sort(key=lambda item: item[0])
-        for _y, kind, payload in items:
+        for _y, _order, kind, payload in items:
             if kind == "block":
-                output.append(payload[1])
+                output.append(payload)
             else:
                 output.append(
                     {
@@ -876,14 +899,14 @@ def _merge_ocr_page_lines(
                         "semantic_role": "unknown",
                         "page_number": page,
                         "bbox": None,
-                        "block_id": f"ocr-region:{page}:{int(_y)}",
+                        "block_id": f"ocr-region:{page}:{int(_y)}:{_order}",
                         "source_refs": [],
                         "source_aliases": [],
                         "source_parser": "rapidocr_region",
                         "source_artifact_id": None,
                     }
                 )
-    return output
+    return output, conflicts
 
 
 def _page_blocks(
@@ -1037,6 +1060,7 @@ class ExtractStage(_FileStage):
 
             feed_blocks = blocks
             ocr_pages_used: list[int] = []
+            conflict_pages: set[int] = set()
             if ocr_candidates:
                 from bio_pdf.extract.sequences.region_ocr import ocr_residue_pages
                 from pathlib import Path as _Path
@@ -1054,7 +1078,7 @@ class ExtractStage(_FileStage):
                     )
                     ocr_text = {}
                 if ocr_text:
-                    feed_blocks = _merge_ocr_page_lines(blocks, ocr_text)
+                    feed_blocks, ocr_conflicts = _merge_ocr_page_lines(blocks, ocr_text)
                     ocr_pages_used = sorted(ocr_text)
                     diagnostics.append(
                         {
@@ -1065,6 +1089,36 @@ class ExtractStage(_FileStage):
                             ),
                         }
                     )
+                    # D02: same-region native/OCR disagreements are recorded
+                    # — never silently resolved to one side. Each conflict
+                    # keeps both texts and the real position.
+                    for conflict in ocr_conflicts:
+                        _issue(
+                            "page",
+                            "SOURCE_CONFLICT",
+                            [
+                                f"p{conflict['page_number']}:y{int(conflict['y_top'])}",
+                            ],
+                            (
+                                f"page {conflict['page_number']} y={conflict['y_top']}-{conflict['y_bottom']}: "
+                                f"native text {conflict['native_text']!r} differs from OCR "
+                                f"{conflict['ocr_text']!r} at the same position"
+                            ),
+                        )
+                    if ocr_conflicts:
+                        diagnostics.append(
+                            {
+                                "code": "SOURCE_CONFLICT_COUNT",
+                                "detail": str(len(ocr_conflicts)),
+                            }
+                        )
+                        conflict_pages = {
+                            int(c["page_number"]) for c in ocr_conflicts
+                        }
+                    else:
+                        conflict_pages = set()
+                else:
+                    conflict_pages = set()
 
             st25_sequences, st25_scan = parse_st25_blocks_with_scan(
                 feed_blocks,
@@ -1085,6 +1139,30 @@ class ExtractStage(_FileStage):
                 document_page_count=document_page_count,
                 declared_total=declared_total,
             )
+            # D02: a page-level native/OCR content conflict blocks the
+            # "complete" claim for declarations whose residues run through
+            # that page — completeness is unverified while two sources
+            # disagree about the same region.
+            if conflict_pages:
+                for entry in sequence_inventory["entries"]:
+                    if entry["status"] != "complete":
+                        continue
+                    if conflict_pages & set(entry.get("residue_pages") or []):
+                        entry["status"] = "conflict"
+                        entry["reasons"].append(
+                            "native/OCR content conflict on this page's residue region; "
+                            "completeness unverified"
+                        )
+                summary = sequence_inventory["summary"]
+                summary["complete"] = sum(
+                    1 for e in sequence_inventory["entries"] if e["status"] == "complete"
+                )
+                summary["conflict"] = sum(
+                    1 for e in sequence_inventory["entries"] if e["status"] == "conflict"
+                )
+                summary["located"] = (
+                    summary["complete"] + summary["partial"] + summary["conflict"]
+                )
             for entry in sequence_inventory["entries"]:
                 if entry["status"] == "missing":
                     _issue(

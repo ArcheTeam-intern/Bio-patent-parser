@@ -36,14 +36,16 @@ _MAX_OCR_LINES = 800
 def ocr_residue_pages(
     pdf_path: Path,
     page_numbers: list[int],
-) -> dict[int, list[tuple[float, str]]]:
+) -> dict[int, list[tuple[float, float, str]]]:
     """OCR whole pages with RapidOCR.
 
-    Returns ``page → [(y_top_pt, text), ...]`` sorted top-to-bottom, where
-    ``y_top_pt`` is the line's top edge in PDF points with a top-left origin
-    — the same space the block bboxes use, so callers can interleave OCR
-    lines with native blocks into true reading order. Tag-like lines are
-    dropped (the native layer already carries them).
+    Returns ``page → [(y_top_pt, y_bottom_pt, text), ...]`` sorted
+    top-to-bottom, where the y values are the line's top/bottom edges in PDF
+    points with a top-left origin — the same space the block bboxes use, so
+    callers can (a) interleave OCR lines with native blocks into true reading
+    order and (b) compare positions to decide whether two texts describe the
+    SAME physical region. Tag-like lines are dropped (the native layer
+    already carries them).
     """
 
     import numpy as np
@@ -53,7 +55,7 @@ def ocr_residue_pages(
     scale = _REGION_DPI / 72
     engine = RapidOCR()
     doc = pdfium.PdfDocument(str(pdf_path))
-    out: dict[int, list[tuple[float, str]]] = {}
+    out: dict[int, list[tuple[float, float, str]]] = {}
     try:
         for page_number in page_numbers:
             if page_number < 1 or page_number > len(doc):
@@ -63,12 +65,12 @@ def ocr_residue_pages(
             image = bitmap.to_pil().convert("RGB")
             result = engine(np.array(image))
             boxes = result.boxes if result.boxes is not None else []
-            lines: list[tuple[float, str]] = []
+            lines: list[tuple[float, float, str]] = []
             for box, text in zip(boxes, result.txts or ()):
                 if not text or not text.strip() or _TAG_LINE_RE.match(text):
                     continue
                 ys = [point[1] for point in box]
-                lines.append((min(ys) / scale, text.strip()))
+                lines.append((min(ys) / scale, max(ys) / scale, text.strip()))
             lines.sort(key=lambda item: item[0])
             if lines:
                 out[page_number] = lines[:_MAX_OCR_LINES]
