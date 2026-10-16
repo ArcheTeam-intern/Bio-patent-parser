@@ -43,8 +43,32 @@ def validate_measurement(
     else:
         checks.append(_check(CHECK_VALUE, "pass", f"value kind: {record.value.kind}"))
 
+    # C05: the unit requirement comes from the metric registry — a
+    # categorical S/R/I susceptibility result has no concentration unit by
+    # design and must not be reported as "missing unit" (255 spurious review
+    # items in the demo corpus).
+    from bio_pdf.extract.activities.metrics import METRIC_REGISTRY
+
+    definition = METRIC_REGISTRY.get(record.metric)
+    unit_requirement = definition.unit_requirement if definition else "required"
     if record.unit_raw:
         checks.append(_check(CHECK_UNIT, "pass", f"unit present: {record.unit_raw}"))
+    elif unit_requirement == "not_applicable":
+        checks.append(
+            _check(
+                CHECK_UNIT,
+                "pass",
+                f"unit not applicable for metric {record.metric}",
+            )
+        )
+    elif unit_requirement == "optional":
+        checks.append(
+            _check(
+                CHECK_UNIT,
+                "unknown",
+                f"unit optional for metric {record.metric}; none recorded",
+            )
+        )
     else:
         checks.append(_check(CHECK_UNIT, "unknown", "no unit recorded"))
         reasons.append("measurement has no unit")

@@ -112,3 +112,32 @@ def test_evidence_exists_with_geometry_passes() -> None:
 def test_evidence_missing_reference_is_conflict() -> None:
     result = validate_evidence(["ev-missing"], evidence_index={})
     assert result.validation_state == "conflict"
+
+def test_categorical_susceptibility_does_not_require_unit() -> None:
+    """C05: S/R/I results are categorical — no concentration unit exists."""
+
+    from bio_pdf.contracts import ActivityValue, Measurement
+    from bio_pdf.validation.activities import CHECK_UNIT, validate_measurement
+
+    def _measurement(metric: str, value: ActivityValue) -> Measurement:
+        return Measurement(
+            measurement_id="m1",
+            document_id="sha256:x",
+            metric=metric,
+            value=value,
+            unit_raw=None,
+            evidence_ids=["ev-1"],
+        )
+
+    categorical = ActivityValue(kind="categorical", qualifier="S", raw="S")
+    result = validate_measurement(_measurement("antimicrobial_susceptibility", categorical))
+    unit_check = next(c for c in result.checks if c.check_id == CHECK_UNIT)
+    assert unit_check.outcome == "pass"
+    assert "not applicable" in unit_check.details["message"]
+    assert "measurement has no unit" not in result.review_reasons
+
+    numeric = ActivityValue(kind="scalar", number="3.5", raw="3.5")
+    result = validate_measurement(_measurement("ic50", numeric))
+    unit_check = next(c for c in result.checks if c.check_id == CHECK_UNIT)
+    assert unit_check.outcome == "unknown"
+    assert "measurement has no unit" in result.review_reasons
