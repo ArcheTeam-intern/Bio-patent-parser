@@ -106,6 +106,184 @@ class MinerUAdapter:
 
     # ---- public interface ------------------------------------------------
 
+    # ---- v4 batch protocol (C10) -----------------------------------------
+
+    def request_upload_slots(
+        self,
+        file_path: Path,
+        *,
+        data_id: str,
+        enable_formula: bool = True,
+        enable_table: bool = True,
+        language: str = "en",
+        is_ocr: bool = True,
+    ) -> tuple[str, list[str], str]:
+        """``POST /file-urls/batch`` → ``(batch_id, signed_put_urls, file_name)``.
+
+        The signed PUT URL is an *upload* slot only. The old flow treated it
+        as a public read URL and re-submitted it to the parse endpoint — the
+        v4 contract is: PUT the bytes, and the batch result is polled by
+        ``batch_id``. This method returns the batch identity, never a
+        pretend-public URL.
+        """
+
+        file_name = file_path.name
+        body = {
+            "enable_formula": enable_formula,
+            "enable_table": enable_table,
+            "language": language,
+            "model_version": self.model_version,
+            "files": [
+                {
+                    "name": file_name,
+                    "is_ocr": is_ocr,
+                    "data_id": data_id,
+                }
+            ],
+        }
+
+        with self._client() as client:
+            try:
+                response = client.post("/file-urls/batch", json=body)
+            except httpx.HTTPError as exc:
+                raise NetworkTransientError(
+                    f"failed to request MinerU upload URL: {exc}",
+                    details={"base_url": self.base_url},
+                ) from exc
+
+            if response.status_code in (401, 403):
+                raise EngineUnavailableError(
+                    "MinerU rejected the Bearer token on upload request",
+                    details={"status": response.status_code, "body": response.text[:200]},
+                )
+            if response.status_code >= 400:
+                raise EngineProtocolUnsupportedError(
+                    f"MinerU file-urls returned {response.status_code}: {response.text[:300]}",
+                    details={"status": response.status_code},
+                )
+
+            payload = response.json()
+            data_block = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data_block, dict):
+                raise EngineProtocolUnsupportedError(
+                    "MinerU file-urls response has no 'data' object",
+                    details={"body": str(payload)[:300]},
+                )
+            batch_id = str(data_block.get("batch_id") or "")
+            file_urls = data_block.get("file_urls")
+            if not batch_id or not isinstance(file_urls, list) or not file_urls:
+                raise EngineProtocolUnsupportedError(
+                    "MinerU file-urls response lacks batch_id or upload slots",
+                    details={"data_keys": sorted(data_block.keys())},
+                )
+            upload_url = str(file_urls[0])
+            if not upload_url.startswith(("http://", "https://")):
+                raise EngineProtocolUnsupportedError(
+                    "MinerU file-urls slot is not a URL",
+                    details={"slot": upload_url[:200]},
+                )
+
+            # PUT the bytes. No Content-Type (the OSS signature was computed
+            # without it) and — critically — no MinerU auth header: signed
+            # URLs must never see the platform token. A bare client keeps the
+            # injected transport (tests) while dropping the auth headers.
+            try:
+                with httpx.Client(
+                    timeout=self.timeout, transport=self._transport
+                ) as raw_client:
+                    put_resp = raw_client.put(
+                        upload_url,
+                        content=file_path.read_bytes(),
+                    )
+            except httpx.HTTPError as exc:
+                raise NetworkTransientError(
+                    f"failed to PUT file to MinerU: {exc}",
+                    details={"upload_url": upload_url[:200]},
+                ) from exc
+            if put_resp.status_code not in (200, 201, 204):
+                raise EngineUnavailableError(
+                    f"MinerU file PUT returned {put_resp.status_code}",
+                    details={"upload_url": upload_url[:200], "body": put_resp.text[:200]},
+                )
+        return batch_id, [str(u) for u in file_urls], file_name
+
+    def poll_batch_entry(
+        self,
+        client: httpx.Client,
+        batch_id: str,
+        *,
+        file_name: str,
+    ) -> dict[str, Any]:
+        """Poll ``GET /extract-results/batch/{batch_id}`` for our file's entry."""
+
+        for _ in range(self.max_polls):
+            try:
+                response = client.get(f"/extract-results/batch/{batch_id}")
+            except httpx.HTTPError as exc:
+                raise NetworkTransientError(
+                    f"batch polling failed for {batch_id}: {exc}",
+                    details={"batch_id": batch_id},
+                ) from exc
+            if response.status_code in (401, 403):
+                raise EngineUnavailableError(
+                    "MinerU rejected the Bearer token while polling batch",
+                    details={"batch_id": batch_id, "status": response.status_code},
+                )
+            if response.status_code == 404:
+                raise EngineProtocolUnsupportedError(
+                    f"MinerU batch {batch_id} no longer exists (server-side eviction?)",
+                    details={"batch_id": batch_id},
+                )
+            try:
+                payload = response.json()
+            except json.JSONDecodeError as exc:
+                raise EngineProtocolUnsupportedError(
+                    "MinerU batch poll response was not JSON",
+                    details={"batch_id": batch_id, "body": response.text[:200]},
+                ) from exc
+
+            data_block = payload.get("data") if isinstance(payload, dict) else None
+            entries = (data_block or {}).get("extract_result")
+            if not isinstance(entries, list):
+                raise EngineProtocolUnsupportedError(
+                    "MinerU batch response has no extract_result list",
+                    details={"data_keys": sorted((data_block or {}).keys())},
+                )
+            entry = next(
+                (
+                    e
+                    for e in entries
+                    if isinstance(e, dict) and str(e.get("file_name") or "") == file_name
+                ),
+                None,
+            )
+            if entry is None:
+                # The batch result may still be filling in; keep polling.
+                time.sleep(self.poll_interval)
+                continue
+
+            if entry.get("full_zip_url"):
+                return entry
+            state = str(entry.get("state") or "unknown").lower()
+            if state in _FAILED_STATES:
+                raise EngineUnavailableError(
+                    f"MinerU batch file {file_name} failed with state {state!r}",
+                    details={"batch_id": batch_id, "state": state, "entry": entry},
+                )
+            if state in _COMPLETED_STATES and not entry.get("full_zip_url"):
+                raise EngineProtocolUnsupportedError(
+                    "MinerU reported completion without a result package URL",
+                    details={"batch_id": batch_id, "entry": entry},
+                )
+            time.sleep(self.poll_interval)
+
+        raise EngineTimeoutError(
+            f"timed out polling MinerU batch {batch_id} after {self.max_polls} attempts",
+            details={"batch_id": batch_id, "max_polls": self.max_polls},
+        )
+
+    # ---- v1 public-url flow (unchanged, only for already-public sources) --
+
     def upload_local_file(
         self,
         file_path: Path,
@@ -258,10 +436,10 @@ class MinerUAdapter:
         """
 
         if local_file is not None and source_url is None:
-            source_url = self.upload_local_file(local_file)
+            return self._parse_via_batch(request, local_file)
         if not source_url or not source_url.lower().startswith(("http://", "https://")):
             raise EngineProtocolUnsupportedError(
-                "MinerU V1 requires a public http(s) URL or a local_file to upload",
+                "MinerU requires a public http(s) URL or a local_file to upload",
                 details={"source_url": source_url, "local_file": str(local_file) if local_file else None},
             )
 
@@ -522,7 +700,10 @@ class MinerUAdapter:
         import zipfile
 
         try:
-            response = client.get(zip_url)
+            # The result package URL is pre-signed; download WITHOUT the
+            # platform token (bare client, injected transport preserved).
+            with httpx.Client(timeout=self.timeout, transport=self._transport) as raw_client:
+                response = raw_client.get(zip_url)
         except httpx.HTTPError as exc:
             raise NetworkTransientError(
                 f"failed to download MinerU result zip for {task_id}: {exc}",
@@ -567,7 +748,160 @@ class MinerUAdapter:
             "markdown": full_md,
         }
 
-    # ---- manifest --------------------------------------------------------
+    def _parse_via_batch(self, request: ParseRequest, local_file: Path) -> ParseArtifacts:
+        """C10: the v4 batch flow for local files (upload → poll → zip).
+
+        - SHA-256 is verified BEFORE anything is uploaded.
+        - The remote identity (batch_id / data_id / file name) is persisted
+          in the output dir, so a retry or resume POLLS the existing batch
+          instead of re-creating the remote task.
+        - ``full_zip_url`` is downloaded with the plain (non-authenticated)
+          client, mirroring the upload path: signed URLs never see the
+          platform token.
+        """
+
+        from datetime import datetime, timezone
+
+        from bio_pdf.ingest.inspector import compute_sha256
+
+        local_sha = compute_sha256(local_file)
+        if request.document_id not in (f"sha256:{local_sha}", local_sha):
+            raise EngineProtocolUnsupportedError(
+                "MinerU run mixes source identities: local_file hash does not match document_id",
+                details={
+                    "document_id": request.document_id,
+                    "local_file_sha256": local_sha,
+                },
+            )
+
+        request.output_dir.mkdir(parents=True, exist_ok=True)
+        raw_path = request.output_dir / "raw_response.json"
+        normalized_path = request.output_dir / "normalized.json"
+        manifest_path = request.output_dir / "manifest.json"
+        identity_path = request.output_dir / "remote_identity.json"
+
+        identity: dict[str, Any] | None = None
+        if identity_path.is_file():
+            try:
+                loaded = json.loads(identity_path.read_text(encoding="utf-8"))
+                if (
+                    isinstance(loaded, dict)
+                    and loaded.get("batch_id")
+                    and loaded.get("base_url") == self.base_url
+                ):
+                    identity = loaded
+            except (OSError, json.JSONDecodeError):
+                identity = None
+
+        if identity is None:
+            batch_id, _slots, file_name = self.request_upload_slots(
+                local_file,
+                data_id=local_sha[:16],
+            )
+            identity = {
+                "batch_id": batch_id,
+                "data_id": local_sha[:16],
+                "file_name": file_name,
+                "base_url": self.base_url,
+                "model_version": self.model_version,
+                "submitted_at": datetime.now(tz=timezone.utc).isoformat(),
+            }
+            identity_path.write_text(
+                json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+        with self._client() as client:
+            entry = self.poll_batch_entry(
+                client, str(identity["batch_id"]), file_name=str(identity["file_name"])
+            )
+            result_payload = self._fetch_zip_result(
+                client, str(entry["full_zip_url"]), str(identity["batch_id"])
+            )
+
+        raw_path.write_text(
+            json.dumps(
+                {
+                    **identity,
+                    "final_state": "done",
+                    "extract_progress": entry.get("extract_progress"),
+                    "result": result_payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        return self._finalize_outputs(
+            request=request,
+            result_payload=result_payload,
+            remote_id=str(identity["batch_id"]),
+            raw_path=raw_path,
+            normalized_path=normalized_path,
+            manifest_path=manifest_path,
+            source_identity_verified=True,
+            extra_manifest={"remote_identity": identity, "protocol": "v4-batch"},
+        )
+
+    def _finalize_outputs(
+        self,
+        *,
+        request: ParseRequest,
+        result_payload: dict[str, Any],
+        remote_id: str,
+        raw_path: Path,
+        normalized_path: Path,
+        manifest_path: Path,
+        source_identity_verified: bool,
+        extra_manifest: dict[str, Any] | None = None,
+    ) -> ParseArtifacts:
+        """Shared tail: project → normalize → filter pages → write manifest."""
+
+        projected = _project_mineru_payload(
+            result_payload, page_numbers=set(request.page_numbers)
+        )
+        document = normalize_docling_document(
+            projected,
+            parser_run_id=f"{request.job_id}:mineru",
+            document_id=request.document_id,
+        )
+
+        requested = set(request.page_numbers)
+        produced = {p.page_number for p in document.pages}
+        if requested:
+            unexpected = sorted(produced - requested)
+            if unexpected:
+                document = document.model_copy(
+                    update={
+                        "pages": [p for p in document.pages if p.page_number in requested],
+                        "errors": list(document.errors)
+                        + [f"mineru returned pages outside the request: {unexpected}"],
+                    }
+                )
+        normalized_path.write_text(document.model_dump_json(), encoding="utf-8")
+
+        manifest = self._manifest(
+            request=request,
+            document=document,
+            task_id=remote_id,
+            raw_path=raw_path,
+            normalized_path=normalized_path,
+            source_identity_verified=source_identity_verified,
+        )
+        if extra_manifest:
+            manifest.update(extra_manifest)
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return ParseArtifacts(
+            normalized_path=normalized_path,
+            raw_response_path=raw_path,
+            manifest_path=manifest_path,
+        )
+
+
 
     def _manifest(
         self,
@@ -636,27 +970,16 @@ def _project_mineru_payload(
     if "content_list" in payload and isinstance(payload["content_list"], list):
         return _project_content_list(payload["content_list"])
 
-    if "markdown" in payload and isinstance(payload["markdown"], str):
-        # We have no per-page geometry; build a single synthetic page that
-        # preserves the markdown as a single block. Downstream code can
-        # split by line if it needs finer granularity.
-        return {
-            "pages": [
-                {
-                    "page": next(iter(page_numbers), 1),
-                    "size": {"width": 612.0, "height": 792.0},
-                    "width": 612.0,
-                    "height": 792.0,
-                    "texts": [
-                        {
-                            "self_ref": "mineru:md:0",
-                            "label": "text",
-                            "text": payload["markdown"],
-                        }
-                    ],
-                }
-            ]
-        }
+    if "markdown" in payload and isinstance(payload["markdown"], str) and payload["markdown"].strip():
+        # C10 (plan §5.4): markdown alone carries NO per-page structure.
+        # Stuffing the whole document into one fabricated page would lie
+        # about page identity, page counts and every downstream page
+        # analysis — refuse instead, with a machine-readable code.
+        raise EngineProtocolUnsupportedError(
+            "MinerU result contains only markdown and no per-page structure "
+            "(content_list/page payload missing)",
+            details={"code": "MARKDOWN_ONLY_NO_PAGE_STRUCTURE"},
+        )
 
     if "pages" in payload and isinstance(payload["pages"], list) and payload["pages"]:
         return {"pages": payload["pages"]}

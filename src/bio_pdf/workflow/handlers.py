@@ -66,7 +66,7 @@ OPT_ENGINE = "engine"
 
 #: Engine names that provide layout parsing (the canonical config name is
 #: ``docling_sdk``; ``docling`` is the legacy CLI spelling).
-_LAYOUT_ENGINES = {"docling", "docling_sdk"}
+_LAYOUT_ENGINES = {"docling", "docling_sdk", "mineru_http"}
 OPT_TARGETS = "targets"
 OPT_DOCUMENT_TYPE = "document_type_hint"
 
@@ -465,7 +465,26 @@ class LayoutParseStage(_FileStage):
                 output_dir=run_dir,
                 parser_options=dict(workflow_cfg.get("parser_options") or {}),
             )
-            artifacts = DoclingAdapter().parse(request)
+            # C10: real engine dispatch — the configured engine runs its own
+            # adapter. An unavailable engine fails loudly (raised at creation
+            # time AND here); it is never silently substituted with Docling
+            # while the manifest claims "mineru".
+            if engine == "mineru_http":
+                import os as _os
+
+                from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+                token = _os.environ.get("MINERU_TOKEN", "")
+                if not token:
+                    raise WorkflowError(
+                        "mineru_http requires MINERU_TOKEN; refusing to substitute another engine",
+                        details={"engine": engine, "code": "ENGINE_UNAVAILABLE"},
+                    )
+                artifacts = MinerUAdapter(token=token).parse(
+                    request, local_file=Path(context.source_path)
+                )
+            else:
+                artifacts = DoclingAdapter().parse(request)
 
             produced = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
             for page in produced.get("pages", []):

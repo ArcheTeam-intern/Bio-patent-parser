@@ -192,13 +192,17 @@ def test_failed_state_raises_unavailable(tmp_path: Path) -> None:
         adapter.parse(_build_request(tmp_path), source_url="https://example.com/x.pdf")
 
 
-def test_result_fallback_to_markdown(tmp_path: Path) -> None:
+def test_markdown_only_result_is_refused_with_clear_code(tmp_path: Path) -> None:
+    """C10 (plan §5.4): markdown alone has no per-page structure — the old
+    behaviour fabricated a single 612x792 page for the whole document, which
+    lies about page identity. It must refuse instead."""
+
+    from bio_pdf.errors import EngineProtocolUnsupportedError
+
     adapter = _adapter(_handler(result_payload={"markdown": "# heading\n\nbody"}))
-    artifacts = adapter.parse(_build_request(tmp_path), source_url="https://example.com/x.pdf")
-    normalized = json.loads(artifacts.normalized_path.read_text(encoding="utf-8"))
-    assert normalized["schema_version"]
-    assert len(normalized["pages"]) == 1
-    assert any("# heading" in b["text_raw"] for b in normalized["pages"][0]["blocks"])
+    with pytest.raises(EngineProtocolUnsupportedError) as excinfo:
+        adapter.parse(_build_request(tmp_path), source_url="https://example.com/x.pdf")
+    assert excinfo.value.details["code"] == "MARKDOWN_ONLY_NO_PAGE_STRUCTURE"
 
 
 def test_result_content_list_is_projected(tmp_path: Path) -> None:

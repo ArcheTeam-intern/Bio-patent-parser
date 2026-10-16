@@ -325,3 +325,10 @@
 - 分组：/reviews 响应新增 groups（对整条筛选队列聚合，不是当前页）：由 record_id 推导 第N页·药敏矩阵/表格/正文、序列记录等。实测 job-62f430801980 → 250 条 = 2 组（第8页药敏矩阵 192 + 第9页药敏矩阵 58）。
 - 批量决定：POST /reviews/decisions/batch——两阶段（先全量预检记录存在/仍 open/base_revision==live，任一冲突返回 409 全部冲突清单且不落任何决定；通过后逐项经 apply_decision 提交，逐条保留版本/决定日志/修订号）。前端队列：分组行（组头=全选/折叠计数）、行勾选、"批量确认所选(N)"、冲突横幅。浏览器实测通过。
 - 508 后端（+4）+ 28 vitest 全绿。
+
+### C10 完成（协议与分派；真实云实测未完成——无 MINERU_TOKEN）
+- v4 批量协议替换错误流程（原实现把 PUT 签名 URL 当公开 PDF URL 再提交）：新 request_upload_slots（POST /file-urls/batch→PUT，凭据不转发给签名 URL）+ poll_batch_entry（GET /extract-results/batch/{batch_id} 按 file_name 定位本文件）+ 身份持久化 remote_identity.json（重试/续跑只轮询不重建远端任务，MockTransport 测试锁定"resume 不再上传"）。源 SHA-256 校验先于上传；401/403→EngineUnavailable；失败态带 err_msg；超时→EngineTimeout。
+- 归一化：markdown-only 结果不再伪造 612×792 单页（改抛 MARKDOWN_ONLY_NO_PAGE_STRUCTURE）；zip 结果下载改为裸客户端（not token）。
+- 引擎分派：_LAYOUT_ENGINES 增 mineru_http；run 循环按配置调对应 adapter，缺 MINERU_TOKEN 时显式失败（绝不静默回退 Docling）；可用性在任务创建时同样拦截（既有）。
+- 测试：+5 MockTransport 协议测试（全流程/鉴权失败/远端失败/resume 免重提交/hash 不符先拒）；513 后端全绿。
+- **未完成**：真实 MinerU 云实测（本环境无 MINERU_TOKEN；按方案如实标注未实测，不伪造结果）。
