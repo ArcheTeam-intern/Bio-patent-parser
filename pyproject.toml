@@ -81,6 +81,7 @@ pythonpath = ["src"]
 markers = [
     "live: marks tests that require real external systems (deselect with -m 'not live')",
     "integration: marks tests that exercise multiple modules end-to-end",
+    "slow: marks heavier tests (real engine subprocesses) still in the non-live suite",
 ]
 
 [tool.ruff]

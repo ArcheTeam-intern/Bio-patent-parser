@@ -39,6 +39,72 @@ _ROW_LABEL_HEADERS = {"peptide", "compound", "antibody", "entity", "variant", "c
 _SRI_VALUE = re.compile(r"^\s*(S|R|I|SDD)\s*$")
 _NUMERICISH = re.compile(r"^\s*(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*$")
 
+#: G07/P02: experiment-condition patterns (time / temperature / dose /
+#: method / atmosphere) for header cells, captions and table notes.
+#: Deliberately small and auditable — no speculative parsing; every match
+#: keeps its source text so a reviewer can check it.
+_CONDITION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "time",
+        re.compile(
+            r"(?i)(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*"
+            r"(h|hr|hrs|hour|hours|min|mins|minute|minutes|day|days)(?![A-Za-z0-9])"
+        ),
+    ),
+    (
+        "temperature",
+        re.compile(r"(?i)(?<![A-Za-z0-9])(\d{1,3})\s*°?\s*C(?![A-Za-z0-9])"),
+    ),
+    (
+        "dose",
+        re.compile(
+            r"(?i)(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*"
+            r"(µg|μg|ug|mg|ng|pg|kg|mM|µM|μM|uM|nM|%)(?![A-Za-z0-9])"
+        ),
+    ),
+    (
+        "method",
+        re.compile(
+            r"(?i)(broth microdilution|microdilution|disc diffusion|disk diffusion"
+            r"|checkerboard|time[- ]kill|serial dilution)"
+        ),
+    ),
+    ("atmosphere", re.compile(r"(?i)(aerobic|anaerobic|\d+%\s*CO2)")),
+]
+
+
+def conditions_from_text(
+    text: str, *, source: str, evidence: str = "", block_id: str = ""
+) -> list[dict[str, str]]:
+    """G07: structured conditions found in one piece of table-adjacent text."""
+
+    out: list[dict[str, str]] = []
+    for kind, pattern in _CONDITION_PATTERNS:
+        for match in pattern.finditer(text or ""):
+            value = re.sub(r"\s+", " ", match.group(0)).strip()
+            condition = {"kind": kind, "value": value, "source": source, "evidence": evidence}
+            if block_id:
+                condition["block_id"] = block_id
+            out.append(condition)
+    return out
+
+
+def merge_conditions(
+    *groups: list[dict[str, str]] | None,
+) -> list[dict[str, str]]:
+    """Dedupe conditions by (kind, value); first occurrence keeps its source."""
+
+    merged: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for group in groups:
+        for condition in group or []:
+            key = (str(condition.get("kind") or ""), str(condition.get("value") or "").lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append({str(k): str(v) for k, v in condition.items()})
+    return merged
+
 #: Vocabulary evidence for the susceptibility-matrix axis decision: an
 #: antibiotic-name side vs an organism/isolate-label side. Suffix-driven so
 #: the same paper's drug families match without a maintained drug list.
@@ -162,6 +228,7 @@ def extract_table_measurements(
     evidences: dict[str, str],
     evidence_kind: str = "undetermined",
     metric: str | None = None,  # accepted for compatibility; NOT an override
+    context_conditions: list[dict[str, str]] | None = None,
 ) -> list[Measurement]:
     """Extract measurements from a :class:`Table` by classified kind.
 
@@ -175,6 +242,10 @@ def extract_table_measurements(
             evidence.
         metric: Legacy parameter, IGNORED (kept so old call sites do not
             silently reintroduce the table-level override).
+        context_conditions: G07/P02 — conditions resolved from the table's
+            caption / referenced notes by the caller (which owns the
+            document blocks). Header-cell conditions are added HERE from
+            the measurement's own header path.
     """
 
     del metric  # B06: no table-level metric override, ever.
@@ -185,6 +256,7 @@ def extract_table_measurements(
         return _extract_susceptibility(
             table, cell_index, document_id=document_id, evidences=evidences,
             evidence_kind=evidence_kind,
+            context_conditions=context_conditions,
         )
     if kind is not TableKind.ACTIVITY_NUMERIC:
         return []
@@ -194,6 +266,22 @@ def extract_table_measurements(
             return []
         eid = evidences.get(cell.cell_id)
         return [eid] if eid else []
+
+    def _path_conditions(path) -> list[dict[str, str]]:
+        """G07: conditions from this measurement's own header path."""
+
+        found: list[dict[str, str]] = []
+        column_ids = {id(c) for c in path.column_headers}
+        for cell in list(path.column_headers) + list(path.row_headers):
+            source = "column_header" if id(cell) in column_ids else "row_header"
+            found.extend(
+                conditions_from_text(
+                    cell.text_raw or "",
+                    source=source,
+                    evidence=evidences.get(cell.cell_id, ""),
+                )
+            )
+        return found
 
     measurements: list[Measurement] = []
     for path in build_header_paths(table):
@@ -259,7 +347,7 @@ def extract_table_measurements(
                 unit_raw=unit_raw,
                 unit_normalized=unit_normalized,
                 target_raw=target_raw,
-                conditions=[],
+                conditions=merge_conditions(context_conditions, _path_conditions(path)),
                 evidence_kind=evidence_kind,  # type: ignore[arg-type]
                 field_evidence=field_evidence,
                 evidence_ids=evidence_ids,
@@ -278,6 +366,7 @@ def _extract_susceptibility(
     document_id: str,
     evidences: dict[str, str],
     evidence_kind: str,
+    context_conditions: list[dict[str, str]] | None = None,
 ) -> list[Measurement]:
     """S/R/I matrix: entity = DRUG, target = STRAIN/isolate.
 
@@ -346,7 +435,8 @@ def _extract_susceptibility(
                 unit_raw=None,
                 unit_normalized=None,
                 target_raw=strain_cell.text_raw.strip(),
-                conditions=[],
+                # G07/P02: caption/note conditions resolved by the caller.
+                conditions=merge_conditions(context_conditions),
                 evidence_kind=evidence_kind,  # type: ignore[arg-type]
                 field_evidence=field_evidence,
                 evidence_ids=evidence_ids,

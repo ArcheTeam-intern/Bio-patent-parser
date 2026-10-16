@@ -48,19 +48,26 @@ class ParserOptions(_StrictModel):
 
 
 class AdoptedCandidate(_StrictModel):
-    """F09: an explicitly ADOPTED reparse candidate.
+    """F09/G01: an explicitly ADOPTED reparse candidate.
 
     Adoption is not a rename of "reparse": the new job's inputs record the
-    immutable candidate identity (id + content hash), its source SHA, the
-    ORIGIN baseline (audit trail), the target page/region and the coverage
-    policy — and the extract stage actually CONSUMES the candidate content
-    as an OCR source for that page. The content travels under
+    immutable candidate identity (id + content hash + META hash), its
+    source SHA, the ORIGIN baseline (audit trail), the target
+    page/region and the coverage policy — and the extract stage actually
+    CONSUMES the candidate content as an OCR source for that page. The
+    content travels under
     ``jobs/<job_id>/adopted/<candidate_id>/<artifact_name>``.
+
+    G01/S01: ``meta_sha256`` locks the metadata file that carries the
+    line boxes and text actually fed to the parser. Without it the worker
+    trusted an unverified meta whose tampering changed the final residues
+    while every content hash still checked out.
     """
 
     candidate_id: str
     content_sha256: str
     artifact_name: str = "candidate.txt"
+    meta_sha256: str | None = None
     source_sha256: str | None = None
     baseline_id: str | None = None
     origin_job_id: str | None = None

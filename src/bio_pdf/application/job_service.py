@@ -248,13 +248,19 @@ class JobService:
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 (dest_dir / artifact_name).write_bytes(payload)
                 meta_text = raw.get("meta_json")
+                meta_sha256: str | None = None
                 if isinstance(meta_text, str) and meta_text:
-                    (dest_dir / "candidate.meta.json").write_text(meta_text, encoding="utf-8")
+                    meta_bytes = meta_text.encode("utf-8")
+                    # G01/S01: hash the meta file itself — the worker
+                    # verifies this hash before consuming ANY line from it.
+                    meta_sha256 = _hashlib.sha256(meta_bytes).hexdigest()
+                    (dest_dir / "candidate.meta.json").write_bytes(meta_bytes)
                 adopted_specs.append(
                     AdoptedCandidate(
                         candidate_id=str(raw["candidate_id"]),
                         content_sha256=digest,
                         artifact_name=artifact_name,
+                        meta_sha256=meta_sha256,
                         source_sha256=str(raw["source_sha256"]) if raw.get("source_sha256") else None,
                         baseline_id=str(raw["baseline_id"]) if raw.get("baseline_id") else None,
                         origin_job_id=str(raw["origin_job_id"]) if raw.get("origin_job_id") else None,

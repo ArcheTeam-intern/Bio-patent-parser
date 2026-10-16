@@ -1209,6 +1209,9 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         "SEQ_INVENTORY_MISSING",
         "ZERO_RESIDUE_LISTING",
         "SOURCE_CONFLICT",
+        # G11/P07: a distorted table grid invites a bounded region re-parse.
+        "TABLE_STRUCTURE_NO_EXTRACTION",
+        "TABLE_STRUCTURE_SUSPECT",
     }
     if reason not in reparse_pages or page is None:
         raise HTTPException(

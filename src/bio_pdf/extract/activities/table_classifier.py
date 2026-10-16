@@ -81,11 +81,17 @@ def _header_texts(table: Table) -> list[str]:
 
 def _data_cells(table: Table) -> list:
     header_ids = set(table.header_cell_ids or [])
-    return [
+    data = [
         c
         for c in table.cells
         if c.cell_id not in header_ids and c.header_role == "data"
     ]
+    if data:
+        return data
+    # G11/P07: tables whose roles were never normalised (td-only sources,
+    # legacy exports) have NO role=data cells — counting only those made
+    # every S/R/I matrix look empty. Fall back to all non-header cells.
+    return [c for c in table.cells if c.cell_id not in header_ids and c.text_raw.strip()]
 
 
 def _data_values(table: Table) -> list[str]:

@@ -43,6 +43,10 @@ class BlockRef:
     cell_id: str | None = None
     source_parser: str = "unknown"
     source_artifact_id: str | None = None
+    #: G09/P05: ``False`` = the block's coordinate FRAME is unverified
+    #: (raw values kept for the engine's own artifact, but no precise
+    #: location may be claimed) — spans degrade to page-level geometry.
+    bbox_verified: bool | None = None
 
 
 def make_evidence_id(
@@ -133,19 +137,31 @@ def span_from_block_match(
                 source_artifact_id=artifact,
             )
         )
-    geometry = "block" if block.bbox is not None else "none"
+    # G09/P05: an unverified frame NEVER yields a block/cell geometry
+    # claim — the span keeps its page and characters, the box is withheld.
+    if getattr(block, "bbox_verified", None) is False:
+        geometry = "page"
+        bbox_out_value = None
+        for fragment in fragments:
+            fragment.bbox = None
+    elif block.bbox is not None:
+        geometry = "block"
+        bbox_out_value = block.bbox
+    else:
+        geometry = "none"
+        bbox_out_value = None
     return EvidenceSpan(
         evidence_id=evidence_id,
         document_id=block.document_id,
         page_number=block.page_number,
-        bbox=block.bbox,
+        bbox=bbox_out_value,
         char_start=char_start,
         char_end=char_end,
         raw_text=text_raw,
         source_parser=block.source_parser,
         source_locator=block.block_id,
         fragments=fragments,
-        location_precision="block" if geometry == "block" else "none",
+        location_precision="block" if geometry == "block" else ("page" if geometry == "page" else "none"),
         text_precision="offset",
         geometry_precision=geometry,
     )

@@ -91,7 +91,12 @@ class _StubAdapter:
 
 
 @pytest.fixture()
-def client(tmp_path: Path):
+def client(tmp_path: Path, monkeypatch):
+    # G03: production supervises each side in a terminable CHILD process;
+    # these tests patch the engine factory in-process, and a spawned child
+    # could not see the patch — so the API fixture pins the thread mode.
+    # The process mode itself is covered by dedicated G03 tests below.
+    monkeypatch.setenv("BIO_PDF_COMPARISON_RUN_MODE", "thread")
     settings = ApiSettings(
         data_dir=tmp_path / "data",
         samples_dir=tmp_path / "samples",
@@ -283,6 +288,7 @@ def test_stale_attempt_cannot_publish(client) -> None:
         repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
         artifact_root=tmp_path / "data",
         lease_seconds=3600.0,
+        run_mode="thread",
     )
     cid = svc.create(
         document_id=document_id,
@@ -339,6 +345,7 @@ def test_expired_lease_side_is_recovered_like_a_restart(client, monkeypatch) -> 
         repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
         artifact_root=tmp_path / "data",
         lease_seconds=0.0,  # the "crash": lease already expired when we stop
+        run_mode="thread",
     )
     cid = first.create(
         document_id=document_id,
@@ -357,6 +364,7 @@ def test_expired_lease_side_is_recovered_like_a_restart(client, monkeypatch) -> 
     second = ComparisonService(
         repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
         artifact_root=tmp_path / "data",
+        run_mode="thread",
     )
     ids = second.recover_orphans()
     assert cid in ids
@@ -462,6 +470,7 @@ def test_plain_pass_cannot_rearm_a_failed_side_only_explicit_retry_can(client, m
         repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
         artifact_root=tmp_path / "data",
         lease_seconds=3600.0,
+        run_mode="thread",
     )
     cid = svc.create(
         document_id=document_id,
@@ -524,6 +533,7 @@ def test_heartbeat_keeps_a_live_long_run_leased(client, monkeypatch) -> None:
         artifact_root=tmp_path / "data",
         lease_seconds=0.3,
         heartbeat_interval=0.05,
+        run_mode="thread",
     )
     cid = svc.create(document_id=document_id, source_path=tmp_path / "cmp.pdf", pages=[1], engines=["docling"])
     svc.start(cid)
@@ -534,6 +544,7 @@ def test_heartbeat_keeps_a_live_long_run_leased(client, monkeypatch) -> None:
         repository=Repository(db, check_same_thread=False),
         artifact_root=tmp_path / "data",
         lease_seconds=0.3,
+        run_mode="thread",
     )
     assert other._claim_side(cid, "docling") is None, "live heartbeat must protect the lease"
 
@@ -580,6 +591,7 @@ def test_stopped_heartbeat_allows_takeover_and_stale_attempt_publishes_nothing(
         artifact_root=tmp_path / "data",
         lease_seconds=0.2,
         heartbeat_interval=10.0,  # effectively stopped for this test
+        run_mode="thread",
     )
     cid = svc.create(document_id=document_id, source_path=tmp_path / "cmp.pdf", pages=[1], engines=["docling"])
     svc.start(cid)
@@ -590,6 +602,7 @@ def test_stopped_heartbeat_allows_takeover_and_stale_attempt_publishes_nothing(
         repository=Repository(db, check_same_thread=False),
         artifact_root=tmp_path / "data",
         lease_seconds=0.2,
+        run_mode="thread",
     )
     claimed = other._claim_side(cid, "docling")
     assert claimed is not None, "an expired lease (stopped heartbeat) must be claimable"
@@ -634,6 +647,7 @@ def test_execution_budget_exceeded_is_published_as_failure(client, monkeypatch) 
         lease_seconds=30.0,
         heartbeat_interval=0.05,
         execution_budget_seconds=0.3,
+        run_mode="thread",
     )
     cid = svc.create(document_id=document_id, source_path=tmp_path / "cmp.pdf", pages=[1], engines=["docling"])
     svc.start(cid)
@@ -666,6 +680,9 @@ def test_restart_with_valid_lease_recovers_periodically_without_retry(tmp_path, 
         return _StubAdapter("Ala Gly Leu Lys", "doc-sweep")
 
     monkeypatch.setattr(cs, "_side_engine", factory)
+    # G03: the patched factory is in-process; pin the app's comparisons to
+    # the thread mode (the process mode is covered by dedicated tests).
+    monkeypatch.setenv("BIO_PDF_COMPARISON_RUN_MODE", "thread")
 
     settings = ApiSettings(
         data_dir=tmp_path / "data",

@@ -350,6 +350,9 @@ def normalize_page(
                     item.get("label") or item.get("content_layer"), block_kind
                 ),
                 bbox=bbox,
+                # G09/P05: the projection records whether the frame is
+                # trusted; None keeps legacy producers unchanged.
+                bbox_verified=item.get("bbox_verified"),
                 text_raw=str(raw_text),
                 provenance=[
                     Provenance(
@@ -517,6 +520,24 @@ def _coerce_tables(
             if bbox is None:
                 prov_bbox, _locators = _bbox_from_prov(cell_dict, page_height_pt=height_pt)
                 bbox = prov_bbox
+            # G11/P07: honour the column/row header flags when the
+            # projection provides them (MinerU td/th mapping + td-only
+            # positional inference). No flags → role stays "unknown"
+            # (legacy payloads), and downstream fallbacks apply.
+            has_flag = "column_header" in cell_dict or "row_header" in cell_dict
+            is_col = bool(cell_dict.get("column_header"))
+            is_row = bool(cell_dict.get("row_header"))
+            if has_flag:
+                if is_col and is_row:
+                    header_role = "both"
+                elif is_col:
+                    header_role = "column"
+                elif is_row:
+                    header_role = "row"
+                else:
+                    header_role = "data"
+            else:
+                header_role = "unknown"
             cells.append(
                 TableCell(
                     cell_id=f"{page_number}:t{idx}:c{c_idx}",
@@ -525,6 +546,7 @@ def _coerce_tables(
                     rowspan=rowspan,
                     colspan=colspan,
                     text_raw=text,
+                    header_role=header_role,
                     bbox=bbox,
                 )
             )
@@ -540,10 +562,15 @@ def _coerce_tables(
             prov_bbox, _locators = _bbox_from_prov(table_dict, page_height_pt=height_pt)
             table_bbox = prov_bbox
         headers = [
-            cell.cell_id
-            for cell in cells
-            if cell.row_index == 0
+            cell.cell_id for cell in cells if cell.header_role in ("column", "row", "both")
         ]
+        if not headers:
+            headers = [cell.cell_id for cell in cells if cell.row_index == 0]
+        list_issues = _structure_issues(cells)
+        for extra_issue in table_dict.get("structure_issues") or []:
+            text_issue = str(extra_issue)
+            if text_issue and text_issue not in list_issues:
+                list_issues.append(text_issue)
         out.append(
             Table(
                 table_id=f"{page_number}:t{idx}",
@@ -554,6 +581,8 @@ def _coerce_tables(
                 header_cell_ids=headers,
                 caption=str(table_dict.get("caption") or "") or None,
                 bbox=table_bbox,
+                bbox_verified=table_dict.get("bbox_verified"),
+                structure_issues=list_issues,
             )
         )
     return out
@@ -791,6 +820,7 @@ def _expand_top_level_pages(
                     text.get("label") or text.get("content_layer"), block_kind
                 ),
                 bbox=bbox,
+                bbox_verified=text.get("bbox_verified"),
                 text_raw=raw_text,
                 provenance=provenance,
             )
@@ -855,6 +885,13 @@ def _expand_top_level_pages(
             continue
         table_bbox, _table_locators = _bbox_from_prov(table, page_height_pt=target["height"])
         issues = _structure_issues(cells)
+        # G11/P07: issues raised by the projection itself (td-only role
+        # inference, suspicious grids) travel with the table — a distorted
+        # matrix must never be presented as healthy.
+        for extra_issue in table.get("structure_issues") or []:
+            text_issue = str(extra_issue)
+            if text_issue and text_issue not in issues:
+                issues.append(text_issue)
         header_ids = [c.cell_id for c in cells if c.header_role in ("column", "row", "both")]
         if not header_ids:
             # No explicit flags (older Docling exports): fall back to row 0.
@@ -871,6 +908,7 @@ def _expand_top_level_pages(
             header_cell_ids=header_ids,
             caption=str(caption_raw or "") or None,
             bbox=table_bbox,
+            bbox_verified=table.get("bbox_verified") if isinstance(table, dict) else None,
             structure_issues=issues,
         )
         tables_out.append(table_obj)

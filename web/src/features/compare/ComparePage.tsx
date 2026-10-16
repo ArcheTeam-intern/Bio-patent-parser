@@ -41,6 +41,8 @@ function DiffView({ comparisonId }: { comparisonId: string }) {
       keys_only_a?: string[][];
       keys_only_b?: string[][];
       value_diffs?: { seq_id_no?: string; entity?: string | null }[];
+      pairs_with_unverified_conditions?: number;
+      conditions_note?: string;
     };
     evaluation?: { status?: string; note?: string };
   };
@@ -70,6 +72,9 @@ function DiffView({ comparisonId }: { comparisonId: string }) {
             <td>活性（按 实体/指标/靶标）</td>
             <td>
               {meas.paired ?? 0}（歧义 {meas.ambiguous ?? 0}）
+              {(meas.pairs_with_unverified_conditions ?? 0) > 0 && (
+                <span className="dim"> · 条件未核对 {meas.pairs_with_unverified_conditions}</span>
+              )}
             </td>
             <td>
               {meas.keys_only_a?.length ?? 0} / {meas.keys_only_b?.length ?? 0}

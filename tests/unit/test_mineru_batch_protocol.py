@@ -401,8 +401,12 @@ def test_numeric_format_difference_is_not_a_value_difference() -> None:
     out = pair_measurements([_mic("1.0", "1h")], [_mic("1", "1h")])
     assert out["value_diffs"] == [] and out["paired"] == 1
 
-    out = pair_measurements([_mic("1", "1h", unit="µg/mL")], [_mic("1", "1h", unit="ug/ml")])
+    # G08/P03: µ (U+00B5) vs u is a glyph equivalence; ug/mL vs ug/ml is a
+    # SI CASE difference and must be reported, not flattened.
+    out = pair_measurements([_mic("1", "1h", unit="µg/mL")], [_mic("1", "1h", unit="ug/mL")])
     assert out["value_diffs"] == []
+    out = pair_measurements([_mic("1", "1h", unit="ug/mL")], [_mic("1", "1h", unit="ug/ml")])
+    assert len(out["value_diffs"]) == 1
 
     out = pair_measurements([_mic("1", "1h")], [_mic("2", "1h")])
     assert len(out["value_diffs"]) == 1
@@ -415,9 +419,12 @@ def _a4_zip_bytes() -> bytes:
     import io
     import zipfile
 
+    # G09: [0,0,1000,1000] is a LEGAL content_list box (full page in the
+    # 0–1000 protocol frame); the "oversized" acceptance needs a value that
+    # cannot come from that protocol at all.
     content = json.dumps(
         [
-            {"type": "text", "text": "Hello", "page_idx": 0, "bbox": [0, 0, 1000, 1000]},
+            {"type": "text", "text": "Hello", "page_idx": 0, "bbox": [0, 0, 1500, 1200]},
             {"type": "text", "text": "World", "page_idx": 0, "bbox": [50, 50, 200, 70]},
         ]
     )
@@ -493,7 +500,9 @@ def test_oversized_bbox_is_flagged_not_trusted(tmp_path: Path) -> None:
     assert geometry["page_size_verified"] is True
     assert geometry["bounds_valid"] is False
     assert geometry["coordinate_basis_verified"] is False
-    assert geometry["declared_coordinate_basis"] is None
+    # G09: the protocol basis IS declared, but the out-of-range box keeps it
+    # from being verified (a partially converted frame is not advertised).
+    assert geometry["declared_coordinate_basis"]["unit"] == "normalized_1000"
     assert geometry["bbox_warnings"]
 
 
@@ -705,24 +714,69 @@ def _mineru_parse(tmp_path: Path, items, *, monkeypatch=None, rotation=None):
     return normalized, manifest
 
 
-def test_in_bounds_box_with_unknown_basis_is_not_verified(tmp_path: Path) -> None:
-    """F07 recheck repro: an in-bounds box [0,0,100,100] on A4 WITHOUT any
-    declared unit/origin must not be reported as a verified coordinate
-    basis — fitting the page proves nothing about the frame."""
+def test_content_list_coordinates_are_converted_per_protocol(tmp_path: Path) -> None:
+    """G09/P04 (real protocol): content_list coordinates are 0–1000
+    normalised by page size; they must be CONVERTED to page points and the
+    basis verified — the recheck's real [142,108,605,122] sample style."""
 
     normalized, manifest = _mineru_parse(
-        tmp_path, [{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [0, 0, 100, 100]}]
+        tmp_path, [{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [142, 108, 605, 122]}]
     )
     geometry = manifest["page_geometry"]
     assert geometry["page_size_verified"] is True
-    assert geometry["bounds_valid"] is True
-    assert geometry["coordinate_basis_verified"] is False
-    assert geometry["raw_bbox_retained"] is True
-    assert any("not guaranteed" in note for note in geometry["basis_notes"])
-    assert any("coordinate basis unverified" in e for e in normalized["errors"])
-    # Raw values pass through unchanged (no rescale, no clamp).
+    assert geometry["coordinate_basis_verified"] is True
+    assert geometry["basis_notes"] == []
+    assert geometry["declared_coordinate_basis"]["unit"] == "normalized_1000"
+    assert geometry["declared_coordinate_basis"]["protocol"] == "mineru-content-list-v1"
+
+    # A4 = 595.28 x 841.89 pt; per-axis conversion with the SOURCE size.
     block = normalized["pages"][0]["blocks"][0]
-    assert block["bbox"] == [0.0, 0.0, 100.0, 100.0]
+    x0, y0, x1, y1 = block["bbox"]
+    assert abs(x0 - 142 / 1000 * 595.276) < 1.0
+    assert abs(y0 - 108 / 1000 * 841.89) < 1.0
+    assert abs(x1 - 605 / 1000 * 595.276) < 1.0
+    assert abs(y1 - 122 / 1000 * 841.89) < 1.0
+    # The converted box fits the real page; bounds are valid.
+    assert geometry["bounds_valid"] is True
+    assert block["bbox_verified"] is True
+
+
+def test_cached_pages_payload_without_basis_stays_unverified() -> None:
+    """F07 semantics carried into G09: an undeclared 'pages' payload has no
+    justified transform — its boxes stay raw, bbox_verified=False, and the
+    manifest reports the basis as unverified."""
+
+    from bio_pdf.parsers.mineru_adapter import (
+        _page_geometry_descriptor,
+        _project_mineru_payload,
+    )
+    from bio_pdf.parsers.normalize_docling import normalize_docling_document
+
+    payload = {
+        "pages": [
+            {
+                "page": 1,
+                "width": 595.0,
+                "height": 842.0,
+                "texts": [
+                    {"self_ref": "#/texts/0", "label": "text", "text": "Hello",
+                     "bbox": {"l": 10.0, "t": 20.0, "r": 100.0, "b": 30.0}}
+                ],
+            }
+        ]
+    }
+    projected = _project_mineru_payload(
+        payload, page_numbers={1}, page_order=[1], page_sizes={1: (595.0, 842.0, 0)}
+    )
+    projected.pop("_projection_warnings", None)
+    document = normalize_docling_document(projected, parser_run_id="run", document_id="doc")
+    block = document.pages[0].blocks[0]
+    assert block.bbox_verified is False, "an undeclared frame is explicitly untrusted"
+    descriptor = _page_geometry_descriptor(
+        document, page_sizes={1: (595.0, 842.0, 0)}, declared_basis=None
+    )
+    assert descriptor["coordinate_basis_verified"] is False
+    assert descriptor["basis_notes"]
 
 
 def test_declared_pt_basis_verifies_coordinate_basis() -> None:
@@ -857,3 +911,40 @@ def test_inverted_box_fails_bounds_but_basis_facts_stay_separate() -> None:
     # …while the BOX itself is invalid — separate facts, not conflated.
     assert descriptor["bounds_valid"] is False
     assert any("inverted" in w for w in descriptor["bbox_warnings"])
+
+
+# ---- G08/P03: SI unit case is semantic ------------------------------------
+
+
+def test_si_case_and_dimension_are_not_flattened() -> None:
+    """G08 recheck repro: 5 µM vs 5 µm must NOT pair as equal; the micro
+    GLYPH forms are equivalent; case and dimension survive normalization."""
+
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    # Glyph equivalence: micro sign vs Greek mu.
+    out = pair_measurements([_mic("5", "1h", unit="µM")], [_mic("5", "1h", unit="\u03bcM")])
+    assert out["paired"] == 1 and out["value_diffs"] == []
+
+    # SI case / dimension: µM vs µm is concentration vs length.
+    out = pair_measurements([_mic("5", "1h", unit="µM")], [_mic("5", "1h", unit="µm")])
+    assert len(out["value_diffs"]) == 1
+    assert "unit" in out["value_diffs"][0]["kind"]
+
+    # M vs mM is a magnitude difference — reported, never unified.
+    out = pair_measurements([_mic("5", "1h", unit="M")], [_mic("5", "1h", unit="mM")])
+    assert len(out["value_diffs"]) == 1 and "unit" in out["value_diffs"][0]["kind"]
+
+    # 1 mM vs 1000 µM: no magnitude conversion is implemented, so this is an
+    # explicit unit difference (with the normalization note saying so) —
+    # never a silent "equal".
+    out = pair_measurements([_mic("1", "1h", unit="mM")], [_mic("1000", "1h", unit="µM")])
+    assert len(out["value_diffs"]) >= 1
+    assert "no magnitude conversion" in out["unit_normalization_note"]
+
+
+def test_mcg_alias_is_explicitly_equivalent() -> None:
+    from bio_pdf.application.comparison_service import pair_measurements
+
+    out = pair_measurements([_mic("1", "1h", unit="mcg/mL")], [_mic("1", "1h", unit="ug/mL")])
+    assert out["value_diffs"] == []

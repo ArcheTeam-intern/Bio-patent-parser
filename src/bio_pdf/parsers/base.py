@@ -27,6 +27,12 @@ class ParseRequest:
     #: Effective engine options from the persisted WorkflowConfig (B04):
     #: tableformer_mode / do_table_structure / ocr_lang / timeout.
     parser_options: dict[str, Any] = field(default_factory=dict)
+    #: G05/S05: explicit directory for CROSS-ATTEMPT remote state (the
+    #: cloud task identity). Comparisons pass a side-level directory here —
+    #: their attempt dirs change every retry, so without this the identity
+    #: search fell back to the attempt dir and every retry re-uploaded.
+    #: None → the adapter keeps its legacy (workflow) discovery.
+    remote_state_dir: str | None = None
 
 
 @dataclass(frozen=True)

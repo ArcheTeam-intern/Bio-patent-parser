@@ -160,7 +160,33 @@ def _page_geometry_descriptor(
         origin = str(spec.get("origin") or "").lower()
         rotation_applied = bool(spec.get("rotation_applied"))
         crop_applied = bool(spec.get("crop_applied"))
-        if unit != "pt":
+        if unit == "normalized_1000":
+            # G09/P04: the content_list protocol's documented frame — the
+            # conversion was applied per page (see _project_bbox); it is a
+            # verified basis exactly when page sizes were real, rotation
+            # was handled, and the pages were not cropped.
+            if crop_applied:
+                basis_notes.append(
+                    "a crop transform was applied upstream — page-space mapping unverified"
+                )
+            else:
+                rotated = sorted(
+                    pn
+                    for pn in produced
+                    if int(page_sizes.get(pn, (0.0, 0.0, 0))[2] or 0) % 360 != 0
+                )
+                if rotated and not rotation_applied:
+                    basis_notes.append(
+                        f"pages {rotated} are rotated and rotation_applied is not declared — "
+                        "the box frame cannot be trusted"
+                    )
+                elif not page_size_verified:
+                    basis_notes.append(
+                        "page sizes are not verified — the box→page mapping cannot be trusted"
+                    )
+                else:
+                    coordinate_basis_verified = True
+        elif unit != "pt":
             basis_notes.append(
                 f"declared unit {unit!r} is not pt — no conversion is invented; boxes stay raw"
             )
@@ -191,6 +217,17 @@ def _page_geometry_descriptor(
             else:
                 coordinate_basis_verified = True
 
+    # G09: boxes the protocol transform could not explain (outside the
+    # 0–1000 range) keep the WHOLE basis unverified — a partially converted
+    # frame must not be advertised as verified.
+    range_failures = [w for w in (projection_warnings or []) if "protocol range" in w]
+    if range_failures:
+        coordinate_basis_verified = False
+        basis_notes.append(
+            f"{len(range_failures)} box(es) fall outside the 0–1000 content_list "
+            "protocol range — those boxes stay raw and the basis is not verified"
+        )
+
     return {
         "page_size_verified": page_size_verified,
         "coordinate_basis_verified": coordinate_basis_verified,
@@ -199,6 +236,8 @@ def _page_geometry_descriptor(
         "unverified_pages": sorted(set(unverified_pages)),
         "basis_notes": basis_notes,
     }
+
+
 def _source_page_geometry(
     source_path: Path, pages: list[int]
 ) -> dict[int, tuple[float, float, int]]:
@@ -667,7 +706,7 @@ class MinerUAdapter:
         # project it into a Docling-shaped document before normalising.
         ordered_pages = sorted(int(p) for p in request.page_numbers)
         page_sizes = _source_page_geometry(request.source_path, ordered_pages)
-        declared_basis = (
+        payload_basis = (
             result_payload.get("coord_basis") if isinstance(result_payload, dict) else None
         )
         projected = _project_mineru_payload(
@@ -675,9 +714,12 @@ class MinerUAdapter:
             page_numbers=set(request.page_numbers),
             page_order=ordered_pages or None,
             page_sizes=page_sizes,
-            declared_basis=declared_basis,
+            declared_basis=payload_basis,
         )
         projection_warnings = projected.pop("_projection_warnings", [])
+        # G09: the EFFECTIVE basis is what governed the conversion — the
+        # payload's own declaration, or the content_list protocol default.
+        declared_basis = projected.pop("_coordinate_basis", None) or payload_basis
         document = normalize_docling_document(
             projected,
             parser_run_id=f"{request.job_id}:mineru",
@@ -1019,13 +1061,23 @@ class MinerUAdapter:
         }
 
     def _stable_job_dir(self, request: ParseRequest) -> Path:
-        """D06: the cross-attempt state directory for this job.
+        """D06/G05: the cross-attempt state directory for this job.
 
         Attempt dirs (``jobs/<job>/stage_runs/<run>/run-N``) are recreated on
         every workflow retry, so the remote identity must live one level up
         at ``jobs/<job_id>/`` — otherwise every real retry re-submitted the
         document to the cloud.
+
+        G05/S05: comparison sides pass an EXPLICIT ``remote_state_dir``
+        (``comparisons/<cid>/<engine>/remote``) because their ``job_id`` is
+        ``<cid>:<engine>`` and their attempt dirs are per-attempt — the
+        ancestor search below could never find such a directory, so every
+        comparison retry re-uploaded. The explicit directory wins whenever
+        it is provided.
         """
+
+        if request.remote_state_dir:
+            return Path(request.remote_state_dir)
 
         for candidate in (request.output_dir, *request.output_dir.parents):
             if candidate.name == request.job_id:
@@ -1187,7 +1239,7 @@ class MinerUAdapter:
 
         ordered_pages = sorted(int(p) for p in request.page_numbers)
         page_sizes = _source_page_geometry(request.source_path, ordered_pages)
-        declared_basis = (
+        payload_basis = (
             result_payload.get("coord_basis") if isinstance(result_payload, dict) else None
         )
         projected = _project_mineru_payload(
@@ -1195,9 +1247,12 @@ class MinerUAdapter:
             page_numbers=set(request.page_numbers),
             page_order=ordered_pages or None,
             page_sizes=page_sizes,
-            declared_basis=declared_basis,
+            declared_basis=payload_basis,
         )
         projection_warnings = projected.pop("_projection_warnings", [])
+        # G09: the EFFECTIVE basis is what governed the conversion — the
+        # payload's own declaration, or the content_list protocol default.
+        declared_basis = projected.pop("_coordinate_basis", None) or payload_basis
         document = normalize_docling_document(
             projected,
             parser_run_id=f"{request.job_id}:mineru",
@@ -1332,17 +1387,25 @@ def _project_bbox(
     page_no: int,
     item_ref: str,
     warnings: list[str],
+    basis_unit: str | None = None,
+    page_size: tuple[float, float] | None = None,
+    rotation_ok: bool = True,
 ) -> dict[str, Any] | None:
-    """Coerce a raw MinerU bbox into the Docling-shaped dict (F07/P03).
+    """Coerce a raw MinerU bbox into the Docling-shaped dict (F07/G09).
 
     - The RAW box always travels along under ``raw_bbox`` so nothing is
       lost when the frame is not trusted.
     - A non-finite box is DROPPED with an explicit warning (the raw payload
       keeps it) — never silently serialized or clamped.
-    - ``coord_origin`` is claimed ONLY when the payload declared a basis;
-      otherwise the key is omitted and the manifest records the basis as
-      unverified (the normalizer's TOPLEFT default is a last-resort reading,
-      not a verified fact).
+    - ``coord_origin`` is claimed ONLY for a justified basis (declared, or
+      the content_list protocol's normalised frame).
+    - G09/P04: for the MinerU ``content_list`` protocol the official
+      exporter normalises every coordinate to 0–1000 by page width/height
+      (``_build_bbox``: ``pt * 1000 / page_size``); the inverse transform is
+      applied here per axis with the SOURCE PDF page size — text, tables,
+      figures and cells all share it. Pages whose real size is unknown, or
+      rotated pages without a declared rotation_applied, keep RAW values and
+      ``bbox_verified=False`` (page-level navigation only).
     """
 
     import math
@@ -1385,6 +1448,40 @@ def _project_bbox(
         out["coord_origin"] = "TOPLEFT"
     elif origin in ("bottom_left", "bottomleft"):
         out["coord_origin"] = "BOTTOMLEFT"
+
+    if basis_unit == "normalized_1000":
+        # The protocol frame is only claimed when the transform can actually
+        # be applied: real page size AND an unrotated (or rotation-applied)
+        # page. Values outside 0–1000 could not have come from this
+        # exporter — they stay raw and unverified.
+        in_range = all(-2.0 <= v <= 1002.0 for v in values)
+        if page_size and page_size[0] > 0 and page_size[1] > 0 and rotation_ok and in_range:
+            width, height = page_size
+            converted = [
+                values[0] / 1000.0 * width,
+                values[1] / 1000.0 * height,
+                values[2] / 1000.0 * width,
+                values[3] / 1000.0 * height,
+            ]
+            out["l"], out["t"], out["r"], out["b"] = (
+                round(converted[0], 2),
+                round(converted[1], 2),
+                round(converted[2], 2),
+                round(converted[3], 2),
+            )
+            out["bbox_verified"] = True
+        else:
+            if not in_range:
+                warnings.append(
+                    f"page {page_no}: {item_ref} bbox {values!r} is outside the 0–1000 "
+                    "content_list protocol range — basis unverified, raw retained"
+                )
+            out["bbox_verified"] = False
+    elif origin:
+        # A declared basis with an origin: raw values are already page-space
+        # pt (declared and trusted by the payload author).
+        out["bbox_verified"] = True
+
     return out
 
 
@@ -1412,18 +1509,30 @@ def _project_mineru_payload(
     """
 
     spec = declared_basis if isinstance(declared_basis, dict) else None
-    declared_origin = str(spec.get("origin") or "") if spec else None
     warnings: list[str] = []
 
     if "content_list" in payload and isinstance(payload["content_list"], list):
+        # G09/P04: the content_list exporter normalises to 0–1000 by page
+        # size (official pipeline `_build_bbox`). That IS the protocol basis
+        # unless the payload explicitly declares a different one.
+        if spec and spec.get("unit"):
+            effective_basis = spec
+        else:
+            effective_basis = {
+                "unit": "normalized_1000",
+                "origin": "top_left",
+                "protocol": "mineru-content-list-v1",
+                "transform": "coord / 1000 * source_page_size",
+            }
         projected = _project_content_list(
             payload["content_list"],
             page_order=page_order,
             page_sizes=page_sizes,
-            declared_origin=declared_origin,
+            declared_basis=effective_basis,
             warnings=warnings,
         )
         projected["_projection_warnings"] = warnings
+        projected["_coordinate_basis"] = effective_basis
         return projected
 
     if "markdown" in payload and isinstance(payload["markdown"], str) and payload["markdown"].strip():
@@ -1438,7 +1547,30 @@ def _project_mineru_payload(
         )
 
     if "pages" in payload and isinstance(payload["pages"], list) and payload["pages"]:
-        return {"pages": payload["pages"], "_projection_warnings": warnings}
+        pages = payload["pages"]
+        # G09/P05: a cached/alternative payload declares its basis, or its
+        # boxes are untrusted — mark unverified frames explicitly so
+        # evidence degrades to page level instead of pretending precision.
+        if spec and spec.get("unit"):
+            marked = pages
+        else:
+            marked = []
+            for page in pages:
+                if not isinstance(page, dict):
+                    marked.append(page)
+                    continue
+                page_copy = dict(page)
+                for key in ("texts", "tables", "figures"):
+                    items = page_copy.get(key)
+                    if isinstance(items, list):
+                        page_copy[key] = [
+                            {**item, "bbox_verified": item.get("bbox_verified", False)}
+                            if isinstance(item, dict)
+                            else item
+                            for item in items
+                        ]
+                marked.append(page_copy)
+        return {"pages": marked, "_projection_warnings": warnings}
 
     # Last resort: empty pages list. The normaliser will raise a clear error.
     return {"pages": [], "_projection_warnings": warnings}
@@ -1457,6 +1589,9 @@ def _project_table_item(
     *,
     declared_origin: str | None = None,
     warnings: list[str] | None = None,
+    basis_unit: str | None = None,
+    page_size: tuple[float, float] | None = None,
+    rotation_ok: bool = True,
 ) -> dict[str, Any] | None:
     """Convert a MinerU table item (``table_body`` HTML) into a Docling-shaped table.
 
@@ -1479,6 +1614,9 @@ def _project_table_item(
             page_no=page_no,
             item_ref=f"table {seq}",
             warnings=warnings if warnings is not None else [],
+            basis_unit=basis_unit,
+            page_size=page_size,
+            rotation_ok=rotation_ok,
         )
         if bbox is not None
         else None
@@ -1511,13 +1649,20 @@ def _project_table_item(
                 for c in range(col_idx, col_idx + colspan):
                     occupied.add((r, c))
 
+            is_th = cell_m.group(1).lower() == "th"
             cells.append(
                 {
                     "start_row_offset_idx": row_idx,
                     "start_col_offset_idx": col_idx,
                     "row_span": rowspan,
                     "col_span": colspan,
-                    "is_header": cell_m.group(1).lower() == "th",
+                    "is_header": is_th,
+                    # G11/P07: the normaliser derives roles from the
+                    # column_header/row_header flags — a th in the first row
+                    # is a column header, a th in the first column is a row
+                    # header (a (0,0) th is both).
+                    "column_header": is_th and row_idx == 0,
+                    "row_header": is_th and col_idx == 0,
                     "text": inner,
                 }
             )
@@ -1532,13 +1677,63 @@ def _project_table_item(
     if not cells:
         return None
 
+    structure_issues: list[str] = []
+    if not any(c.get("is_header") for c in cells):
+        # G11/P07: td-only tables (real MinerU output) — infer the axes
+        # from POSITION (first row = column headers, first column = row
+        # headers) with an explicit note; without this every S/R/I cell had
+        # an unknown role and susceptibility matrices were silently dropped
+        # as inventories.
+        for cell in cells:
+            if cell["start_row_offset_idx"] == 0:
+                cell["column_header"] = True
+            if cell["start_col_offset_idx"] == 0:
+                cell["row_header"] = True
+        structure_issues.append(
+            "HEADER_ROLES_INFERRED: td-only table — first row/column used as axes"
+        )
+
+    row_count = max(c["start_row_offset_idx"] + c.get("row_span", 1) for c in cells)
+    col_count = max(c["start_col_offset_idx"] + c.get("col_span", 1) for c in cells)
+    # G11/P07: structural sanity. The malformed real response projected a
+    # 12x392 table with 4588 cells — that must be VISIBLE (issue + no
+    # silent activity generation), not extracted as a healthy matrix.
+    if row_count > 150 or col_count > 120 or len(cells) > 4000:
+        structure_issues.append(
+            f"GRID_SIZE_SUSPECT: {row_count}x{col_count} grid with {len(cells)} cells "
+            "(possible colspan/rowspan mis-parse — region re-parse or human check required)"
+        )
+    row_ends = sorted(
+        {c["start_col_offset_idx"] + c.get("col_span", 1) for c in cells}
+    )
+    if len(row_ends) > 2 and (row_ends[-1] - row_ends[0]) > 3:
+        # G11/P07: a severe width spread means the HTML grid is distorted
+        # (merge/split mis-parse, rotated continuations) — activities from
+        # it would be fabricated pairings, so extraction is refused for
+        # this table and the issue invites a region re-parse.
+        structure_issues.append(
+            f"RAGGED_ROWS_SEVERE: row widths range {row_ends[0]}..{row_ends[-1]} "
+            "(structure distorted — no activity extraction; region re-parse or human check)"
+        )
+    elif len(row_ends) > 2:
+        structure_issues.append(
+            f"RAGGED_ROWS: row widths range {row_ends[0]}..{row_ends[-1]} "
+            "(structure may be distorted)"
+        )
+
     table: dict[str, Any] = {
         "self_ref": f"mineru:table:{page_no}:{seq}",
         "prov": [{"page_no": page_no}],
         "data": {"table_cells": cells},
+        "structure_issues": structure_issues,
     }
     if bbox_out is not None:
-        table["prov"][0]["bbox"] = {**bbox_out, "coord_origin": "TOPLEFT"}
+        # The origin comes from the (declared or protocol) basis — never
+        # hard-claimed here.
+        table["prov"][0]["bbox"] = dict(bbox_out)
+        if "coord_origin" not in table["prov"][0]["bbox"]:
+            table["prov"][0]["bbox"]["coord_origin"] = "TOPLEFT"
+        table["bbox_verified"] = bbox_out.get("bbox_verified")
 
     # Keep the raw HTML available as evidence (attribute named like Docling
     # captions so downstream consumers can display it).
@@ -1555,7 +1750,7 @@ def _project_content_list(
     *,
     page_order: list[int] | None = None,
     page_sizes: dict[int, tuple[float, float, int]] | None = None,
-    declared_origin: str | None = None,
+    declared_basis: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a Docling-shaped pages dict from a MinerU ``content_list`` (D07).
@@ -1566,11 +1761,17 @@ def _project_content_list(
       wrong for any non-contiguous request.
     - Page size comes from the SOURCE PDF (``page_sizes``), not a fixed
       612x792; each page's rotation is carried along.
-    - F07/P03: boxes go through :func:`_project_bbox` — origin only claimed
-      when declared, raw box retained, non-finite boxes dropped loudly.
+    - F07/G09: boxes go through :func:`_project_bbox` — the declared basis
+      (default: the content_list protocol's 0–1000 normalised frame)
+      decides whether a justified conversion applies; raw boxes are
+      retained and unverified frames flagged ``bbox_verified=False``.
     """
 
     warnings = warnings if warnings is not None else []
+    spec = declared_basis if isinstance(declared_basis, dict) else None
+    basis_unit = str(spec.get("unit") or "") if spec else None
+    declared_origin = str(spec.get("origin") or "") if spec else None
+    rotation_applied = bool(spec.get("rotation_applied")) if spec else False
 
     pages: dict[int, dict[str, Any]] = {}
     for item in items:
@@ -1589,7 +1790,12 @@ def _project_content_list(
         else:
             page_no = idx + 1
 
-        width, height, rotation = (page_sizes or {}).get(page_no, (612.0, 792.0, 0))
+        real_size = (page_sizes or {}).get(page_no)
+        width, height, rotation = real_size or (612.0, 792.0, 0)
+        # G09: conversion needs a REAL page size; a rotated page is only
+        # convertible when the payload says the rotation was applied.
+        projection_size = (width, height) if real_size else None
+        rotation_ok = (rotation % 360 == 0) or rotation_applied
         page = pages.setdefault(
             page_no,
             {
@@ -1610,7 +1816,11 @@ def _project_content_list(
         if item_type in _TABLE_TYPES and (item.get("table_body") or ""):
             table_payload = _project_table_item(
                 item, page_no, len(page["tables"]),
-                declared_origin=declared_origin, warnings=warnings,
+                declared_origin=declared_origin,
+                warnings=warnings,
+                basis_unit=basis_unit,
+                page_size=projection_size,
+                rotation_ok=rotation_ok,
             )
             if table_payload is not None:
                 page["tables"].append(table_payload)
@@ -1628,6 +1838,9 @@ def _project_content_list(
                 page_no=page_no,
                 item_ref=f"text {len(page['texts'])}",
                 warnings=warnings,
+                basis_unit=basis_unit,
+                page_size=projection_size,
+                rotation_ok=rotation_ok,
             )
             if bbox is not None
             else None
@@ -1639,6 +1852,7 @@ def _project_content_list(
                 "self_ref": f"mineru:p{page_no}:{len(page['texts'])}",
                 "label": label,
                 "bbox": bbox_out,
+                "bbox_verified": (bbox_out or {}).get("bbox_verified"),
                 "text": str(text),
             }
         )

@@ -39,6 +39,13 @@ _TAG_RE = re.compile(r"^\s*<(\d{3})>\s*(.*)$")
 #: Any further tag embedded in the same line's remainder (C03 splitting).
 _INLINE_TAG_RE = re.compile(r"<\s*(\d{3})\s*>")
 
+#: G06/P06: a MARGIN line-number prefix directly before a tag. Real MinerU
+#: output printed page-30 lines as ``50 <400> 1`` — the anchor at column 0
+#: missed the tag and the sequence never entered residue state. The prefix
+#: is stripped ONLY when a ST.25 tag immediately follows (digits + space +
+#: ``<nnn>``); the raw line is preserved in the clean→raw mapping.
+_MARGIN_TAG_RE = re.compile(r"^\s*(\d{1,4})[ \t]+(?=<\s*\d{3}\s*>)(.*)$")
+
 _MOLECULE_TYPE: dict[str, MoleculeType] = {
     "PRT": "protein",
     "DNA": "DNA",
@@ -128,9 +135,25 @@ class _St25StateMachine:
         self.scan_entries: list[dict[str, Any]] = []
         self.current: _SequenceBuilder | None = None
         self.mapper = ResidueMapper()
+        #: G06/P06 clean→raw mapping: every margin-stripped line records
+        #: what was removed, so evidence/diagnostics can cite the ORIGINAL
+        #: line while the lexer works on the cleaned one.
+        self.lex_mappings: list[dict[str, Any]] = []
 
     def feed_line(self, line: str, *, page_number: int) -> None:
-        match = _TAG_RE.match(line)
+        cleaned_line = line
+        margin = _MARGIN_TAG_RE.match(line)
+        if margin is not None:
+            cleaned_line = margin.group(2)
+            self.lex_mappings.append(
+                {
+                    "page_number": page_number,
+                    "raw": line,
+                    "clean": cleaned_line,
+                    "stripped_margin": margin.group(1),
+                }
+            )
+        match = _TAG_RE.match(cleaned_line)
         if not match:
             # Non-tag line: could be a continuation of the residue block.
             if self.current is not None and self.current.in_residues:

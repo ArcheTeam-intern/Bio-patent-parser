@@ -169,6 +169,13 @@ class TextBlock(_StrictModel):
     ordinal: int | None = Field(default=None, ge=0)
     provenance: list[Provenance] = Field(default_factory=list)
     source_refs: list[NonEmptyStr] = Field(default_factory=list)
+    #: G09/P05: whether ``bbox``'s coordinate FRAME is trusted. ``None`` =
+    #: produced by an engine whose geometry has always been trusted
+    #: (native/pdf text layer, docling pt); ``False`` = the source engine's
+    #: basis could NOT be verified/converted (raw coordinates, no precise
+    #: location promises). Evidence built from an untrusted block degrades
+    #: to page-level precision.
+    bbox_verified: bool | None = None
     #: Consumed other-channel blocks (id + text) recorded by fusion, so the
     #: extractor can attach alias evidence ONLY to the lines that actually
     #: contain a matched expression (plan B02 — no blanket claims).
@@ -223,6 +230,9 @@ class Table(_StrictModel):
     bbox: BoundingBox | None = None
     continuation_group: NonEmptyStr | None = None
     structure_issues: list[NonEmptyStr] = Field(default_factory=list)
+    #: G09/P05: see :class:`TextBlock.bounding` — ``False`` means the frame
+    #: is unverified and cell evidence must degrade to page level.
+    bbox_verified: bool | None = None
     #: How the table structure was obtained. ``geometry_reconstructed``
     #: means the parser produced no table object for this region and the
     #: grid was rebuilt from text-block geometry — downstream consumers

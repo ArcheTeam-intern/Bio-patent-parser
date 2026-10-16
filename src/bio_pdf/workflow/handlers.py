@@ -844,8 +844,31 @@ def _merge_ocr_page_lines(
 
     import re as _re
 
+    #: G06/P01: ST.25 tags make digits CONTENT — ``<210> 1`` vs ``<210> 2``
+    #: (and ``<211> 10`` vs ``<211> 20``) must never merge silently.
+    _tag_in_text = _re.compile(r"<\s*\d{3}\s*>")
+    #: Standalone position/count tokens (the 1 5 10 15… margin counters of
+    #: residue rows) — the ONLY digits that may differ between two texts at
+    #: the same mention and still be considered the same content.
+    _standalone_int = _re.compile(r"(?<![\w])\d{1,4}(?![\w])")
+
     def fingerprint(text: str) -> str:
-        return _re.sub(r"[\s\d]+", "", text).upper()
+        """STRICT fingerprint: whitespace removed, digits KEPT."""
+
+        return _re.sub(r"\s+", "", text).upper()
+
+    def loose_fingerprint(text: str) -> str | None:
+        """Count-tolerant fingerprint — only for tag-free texts.
+
+        None means "no count tolerance for this text" (it contains an ST.25
+        tag, whose numbers are content, per the recheck's P01)."""
+
+        if _tag_in_text.search(text):
+            return None
+        return _re.sub(r"\s+", "", _standalone_int.sub("", text)).upper()
+
+    def letter_len(fp: str) -> int:
+        return len(_re.sub(r"\d+", "", fp))
 
     def _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
         return a0 - 2.0 <= b1 and b0 - 2.0 <= a1
@@ -888,6 +911,7 @@ def _merge_ocr_page_lines(
                     else None
                 ),
                 fingerprint(str(b.get("text") or "")),
+                loose_fingerprint(str(b.get("text") or "")),
                 str(b.get("text") or ""),
                 str(b.get("block_id") or ""),
             )
@@ -897,24 +921,35 @@ def _merge_ocr_page_lines(
         kept: list[tuple[float, int, str, Any]] = []
         for order, (x0, y0, x1, y1, text) in enumerate(lines):
             fp = fingerprint(text)
-            if len(fp) < 2:
+            ocr_loose = loose_fingerprint(text)
+            if letter_len(fp) < 2:
                 continue
             overlapping = [
-                (item_index, n_fp, n_text, n_block_id)
-                for item_index, n_box, n_fp, n_text, n_block_id in natives
+                (item_index, n_fp, n_loose, n_text, n_block_id)
+                for item_index, n_box, n_fp, n_loose, n_text, n_block_id in natives
                 if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
             ]
-            merge_equal = any(n_fp == fp for _i, n_fp, _t, _b in overlapping)
+            # Exact (digit-preserving) equality merges — tags included.
+            merge_equal = any(n_fp == fp for _i, n_fp, _nl, _t, _b in overlapping)
+            # G06/P01: count-marker tolerance applies ONLY to tag-free texts
+            # and ONLY when the difference is standalone integer tokens (the
+            # 1 5 10… margin counters of residue rows). ``<210> 1`` vs
+            # ``<210> 2`` never reaches this branch (loose is None for tags).
+            if not merge_equal and ocr_loose is not None:
+                merge_equal = any(
+                    n_loose is not None and n_loose == ocr_loose
+                    for _i, n_fp, n_loose, _t, _b in overlapping
+                )
             # F05: only retained content that FULLY COVERS the OCR text may
             # consume it; equal already merged above.
             covered = any(
-                n_fp and n_fp != fp and fp in n_fp for _i, n_fp, _t, _b in overlapping
+                n_fp and n_fp != fp and fp in n_fp for _i, n_fp, _nl, _t, _b in overlapping
             )
             if merge_equal or covered:
                 continue  # nothing beyond the retained text could be lost
             supersedes = [
                 (item_index, n_fp, n_text, n_block_id)
-                for item_index, n_fp, n_text, n_block_id in overlapping
+                for item_index, n_fp, _n_loose, n_text, n_block_id in overlapping
                 if n_fp and n_fp != fp and n_fp in fp  # native fragment ⊂ OCR
             ]
             if supersedes:
@@ -948,10 +983,14 @@ def _merge_ocr_page_lines(
                     (y0, order, "ocr", (x0, y0, x1, y1, text, superseded_native))
                 )
                 continue
+            # Comparability on the LETTER content (digits no longer dilute
+            # the length comparison): <210> 1 vs <210> 2 stays comparable →
+            # recorded as a content conflict, never merged.
             disagree = [
                 (n_fp, n_text)
-                for _i, n_fp, n_text, _b in overlapping
-                if max(len(fp), len(n_fp)) <= 2 * max(min(len(fp), len(n_fp)), 1)
+                for _i, n_fp, _nl, n_text, _b in overlapping
+                if max(letter_len(fp), letter_len(n_fp))
+                <= 2 * max(min(letter_len(fp), letter_len(n_fp)), 1)
             ]
             if disagree:
                 records.append(
@@ -1049,6 +1088,9 @@ def _page_blocks(
                     "source_aliases": list(block.source_aliases),
                     "source_parser": parser,
                     "source_artifact_id": source_artifact_id,
+                    # G09/P05: the coordinate-frame trust travels with the
+                    # block so evidence can degrade to page level.
+                    "bbox_verified": getattr(block, "bbox_verified", None),
                 }
             )
     return blocks
@@ -1066,6 +1108,42 @@ def _table_rows(document: NormalizedDocument) -> list[tuple[Any, dict[str, str]]
             }
             out.append((table, evidences))
     return out
+
+
+def _table_context_conditions(table: Any, document: NormalizedDocument) -> list[dict[str, str]]:
+    """G07/P02: conditions from the table's caption and its referenced notes.
+
+    Scans the caption text plus the blocks the table references as caption/
+    footnotes (that is where incubation times, doses and method phrases
+    really live). Every condition keeps the source text and the block id it
+    came from; nothing is invented from proximity alone.
+    """
+
+    from bio_pdf.extract.activities.tables import conditions_from_text, merge_conditions
+
+    blocks_by_id: dict[str, Any] = {}
+    for page in document.pages:
+        for block in page.blocks:
+            blocks_by_id[block.block_id] = block
+
+    found: list[dict[str, str]] = []
+    caption = getattr(table, "caption", None)
+    if caption:
+        found.extend(conditions_from_text(str(caption), source="caption"))
+    for ref in list(getattr(table, "caption_refs", []) or []) + list(
+        getattr(table, "footnote_refs", []) or []
+    ):
+        block = blocks_by_id.get(str(ref))
+        if block is None:
+            continue
+        found.extend(
+            conditions_from_text(
+                str(getattr(block, "text_raw", "") or ""),
+                source="footnote",
+                block_id=str(ref),
+            )
+        )
+    return merge_conditions(found)
 
 
 class ExtractStage(_FileStage):
@@ -1330,6 +1408,16 @@ class ExtractStage(_FileStage):
                             f"adopted candidate artifact missing for {candidate_id}",
                             details={"candidate_id": candidate_id, "path": str(artifact_path)},
                         )
+                    # G01/S01: the FULL input tuple is hash-locked — content,
+                    # meta (line boxes/text), source identity and coverage
+                    # policy. Every check fails loudly BEFORE any line is
+                    # consumed; nothing ever falls back to unverified bytes.
+                    policy = str(spec.get("coverage_policy") or "merge-with-evidence")
+                    if policy != "merge-with-evidence":
+                        raise WorkflowError(
+                            f"adopted candidate {candidate_id} declares unsupported coverage_policy {policy!r}",
+                            details={"candidate_id": candidate_id, "coverage_policy": policy},
+                        )
                     payload_bytes = artifact_path.read_bytes()
                     digest = _hashlib.sha256(payload_bytes).hexdigest()
                     expected = str(spec.get("content_sha256") or "")
@@ -1343,15 +1431,73 @@ class ExtractStage(_FileStage):
                             },
                         )
                     text = payload_bytes.decode("utf-8", errors="replace")
-                    boxes: list[dict[str, Any]] = []
+                    spec_source = str(spec.get("source_sha256") or "")
+                    context_source = str(getattr(context, "document_sha256", "") or "")
+                    if spec_source and context_source:
+                        if spec_source.replace("sha256:", "") != context_source.replace("sha256:", ""):
+                            raise WorkflowError(
+                                f"adopted candidate {candidate_id} was produced from a different source document",
+                                details={
+                                    "candidate_id": candidate_id,
+                                    "candidate_source_sha256": spec_source,
+                                    "job_source_sha256": context_source,
+                                },
+                            )
                     meta_path = artifact_path.with_name("candidate.meta.json")
-                    if meta_path.is_file():
-                        try:
-                            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                        except json.JSONDecodeError:
-                            meta = {}
-                        if isinstance(meta.get("lines"), list):
-                            boxes = [ln for ln in meta["lines"] if isinstance(ln, dict)]
+                    expected_meta_sha = str(spec.get("meta_sha256") or "")
+                    if not expected_meta_sha:
+                        raise WorkflowError(
+                            f"adopted candidate {candidate_id} has no hash-locked metadata — "
+                            "it cannot be consumed (adopt candidates through the reparse flow)",
+                            details={"candidate_id": candidate_id, "code": "ADOPT_META_UNLOCKED"},
+                        )
+                    if not meta_path.is_file():
+                        raise WorkflowError(
+                            f"adopted candidate metadata missing for {candidate_id}",
+                            details={"candidate_id": candidate_id, "path": str(meta_path)},
+                        )
+                    meta_bytes = meta_path.read_bytes()
+                    meta_digest = _hashlib.sha256(meta_bytes).hexdigest()
+                    if meta_digest != expected_meta_sha:
+                        raise WorkflowError(
+                            f"adopted candidate metadata hash mismatch for {candidate_id}",
+                            details={
+                                "candidate_id": candidate_id,
+                                "expected_sha256": expected_meta_sha,
+                                "actual_sha256": meta_digest,
+                            },
+                        )
+                    try:
+                        meta = json.loads(meta_bytes.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                        raise WorkflowError(
+                            f"adopted candidate metadata is unreadable for {candidate_id}",
+                            details={"candidate_id": candidate_id, "error": str(exc)},
+                        ) from exc
+                    lines_meta = meta.get("lines")
+                    boxes = [ln for ln in lines_meta if isinstance(ln, dict)] if isinstance(lines_meta, list) else []
+                    if not boxes:
+                        raise WorkflowError(
+                            f"adopted candidate {candidate_id} metadata carries no lines — "
+                            "content cannot be positioned (never consumed blindly)",
+                            details={"candidate_id": candidate_id},
+                        )
+                    joined = "\n".join(str(ln.get("text") or "") for ln in boxes)
+                    if joined != text:
+                        raise WorkflowError(
+                            f"adopted candidate {candidate_id} text does not match its ordered line texts",
+                            details={
+                                "candidate_id": candidate_id,
+                                "meta_text_sha256_first16": _hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16],
+                                "content_sha256_first16": digest[:16],
+                            },
+                        )
+                    meta_page = int(meta.get("page_number") or 0)
+                    if meta_page and meta_page != page_no:
+                        raise WorkflowError(
+                            f"adopted candidate {candidate_id} targets page {meta_page}, config says {page_no}",
+                            details={"candidate_id": candidate_id, "meta_page": meta_page, "configured_page": page_no},
+                        )
                     if boxes:
                         for ln in boxes:
                             adopted_lines.setdefault(page_no, []).append(
@@ -1488,19 +1634,25 @@ class ExtractStage(_FileStage):
                 document_page_count=document_page_count,
                 declared_total=declared_total,
             )
-            # D02: a page-level native/OCR content conflict blocks the
-            # "complete" claim for declarations whose residues run through
-            # that page — completeness is unverified while two sources
-            # disagree about the same region.
+            # D02 + G06/P01: a page-level native/OCR content conflict blocks
+            # the "complete" claim for declarations whose residues run
+            # through that page — completeness is unverified while two
+            # sources disagree about the same region. A conflict ON the
+            # declaration page (e.g. ``<210> 1`` vs ``<210> 2``) counts
+            # too: the identifier itself is in dispute.
             if conflict_pages:
                 for entry in sequence_inventory["entries"]:
                     if entry["status"] != "complete":
                         continue
-                    if conflict_pages & set(entry.get("residue_pages") or []):
+                    declaration_page = int(entry.get("declaration_page") or 0)
+                    affected_pages = set(entry.get("residue_pages") or [])
+                    if declaration_page:
+                        affected_pages.add(declaration_page)
+                    if conflict_pages & affected_pages:
                         entry["status"] = "conflict"
                         entry["reasons"].append(
-                            "native/OCR content conflict on this page's residue region; "
-                            "completeness unverified"
+                            "native/OCR content conflict on this page's residue region "
+                            "or declaration; completeness unverified"
                         )
                 summary = sequence_inventory["summary"]
                 summary["complete"] = sum(
@@ -1586,7 +1738,13 @@ class ExtractStage(_FileStage):
                         table_id=table.table_id,
                         cell_id=cell.cell_id,
                         text_raw=cell.text_raw,
-                        bbox=cell.bbox,
+                        # G09/P05: an unverified table frame yields page-level
+                        # cell evidence — the box is withheld, never claimed.
+                        bbox=(
+                            None
+                            if getattr(table, "bbox_verified", None) is False
+                            else cell.bbox
+                        ),
                     )
                     evidence.add(span)
                     cell_evidence[cell.cell_id] = span.evidence_id
@@ -1631,6 +1789,36 @@ class ExtractStage(_FileStage):
                     )
                     continue
 
+                fatal_structure = [
+                    str(issue)
+                    for issue in table.structure_issues
+                    if str(issue).startswith(("GRID_SIZE_SUSPECT", "RAGGED_ROWS_SEVERE"))
+                ]
+                if fatal_structure:
+                    # G11/P07: a structurally distorted grid must not be
+                    # silently converted into activities — explicit issue,
+                    # no extraction, region re-parse or human check.
+                    _issue(
+                        "table",
+                        "TABLE_STRUCTURE_NO_EXTRACTION",
+                        [table.table_id],
+                        (
+                            f"page {table.page_number}: distorted grid structure — "
+                            + "; ".join(fatal_structure)
+                            + "; no activity was extracted from this table"
+                        ),
+                        page=int(table.page_number),
+                        region={"table_id": table.table_id},
+                    )
+                    diagnostics.append(
+                        {
+                            "code": "TABLE_STRUCTURE_NO_EXTRACTION",
+                            "table_id": table.table_id,
+                            "page": str(table.page_number),
+                            "detail": "; ".join(fatal_structure)[:300],
+                        }
+                    )
+                    continue
                 for structure_issue in table.structure_issues:
                     _issue(
                         "table",
@@ -1646,6 +1834,9 @@ class ExtractStage(_FileStage):
                         document_id=doc_id,
                         evidences=cell_evidence,
                         evidence_kind="undetermined",
+                        # G07/P02: caption/note-referenced conditions resolved
+                        # against THIS document's blocks (evidence preserved).
+                        context_conditions=_table_context_conditions(table, document),
                     )
                 )
 
@@ -1681,6 +1872,7 @@ class ExtractStage(_FileStage):
                         bbox=tuple(block["bbox"]) if block.get("bbox") else None,
                         source_parser=str(block.get("source_parser") or "unknown"),
                         source_artifact_id=block.get("source_artifact_id"),
+                        bbox_verified=block.get("bbox_verified"),
                     ),
                     text_raw=ref.mention_raw,
                     char_start=start,

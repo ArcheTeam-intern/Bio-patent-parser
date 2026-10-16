@@ -252,3 +252,144 @@ def test_outward_baseline_id_is_one_value(client, monkeypatch) -> None:
             f"/api/v1/jobs/{job_id}/evidence/{spans[0]['evidence_id']}"
         ).json()
         assert evidence["baseline_id"] == db_baseline
+
+
+# ---- G01/S01: adoption input integrity ------------------------------------
+
+
+def _create_adopted_job(
+    tmp_path: Path,
+    *,
+    candidate_text: str = "Ala Gly Leu Lys",
+    lines: list[dict] | None = None,
+    source_sha256: str | None = None,
+):
+    """Create a REAL adopted job through JobService (native engine) and
+    return (service, job, adopted_dir) so a test can tamper the copied
+    inputs before the worker consumes them."""
+
+    import hashlib as _h
+
+    from bio_pdf.application.job_service import JobPaths, JobService
+
+    data_dir = tmp_path / "data"
+    svc = JobService(JobPaths.under(data_dir))
+    pdf = _sample_pdf(tmp_path / "g01.pdf")
+
+    candidate_file = tmp_path / "fake-candidate-g01.txt"
+    candidate_file.write_text(candidate_text, encoding="utf-8")
+    candidate_sha = _h.sha256(candidate_text.encode("utf-8")).hexdigest()
+    meta = {
+        "candidate_id": "cand-g01",
+        "page_number": 1,
+        "source_sha256": source_sha256,
+        "lines": lines
+        if lines is not None
+        else [{"x0": 40.0, "y0": 700.0, "x1": 200.0, "y1": 710.0, "text": candidate_text}],
+    }
+    job, _ = svc.create_job(
+        pdf,
+        engine="native",
+        adopted_candidates=[
+            {
+                "candidate_id": "cand-g01",
+                "artifact_path": str(candidate_file),
+                "content_sha256": candidate_sha,
+                "meta_json": json.dumps(meta),
+                "source_sha256": source_sha256,
+                "page_number": 1,
+                "origin_job_id": "job-origin",
+                "origin_issue_id": "iss-origin",
+            }
+        ],
+    )
+    adopted_dir = data_dir / "jobs" / job.job_id / "adopted" / "cand-g01"
+    return svc, job, adopted_dir
+
+
+def _run_and_expect_extract_failure(svc, job) -> str:
+    from bio_pdf.workflow.queue_worker import run_worker
+
+    data_dir = svc.paths.artifact_root
+    run_worker(data_dir, once=True)
+    done = svc.get_job(job.job_id)
+    assert done is not None and done.status == "failed", done
+    assert svc.repository.get_publication(job.job_id) is None, "no publication may exist"
+    row = svc.repository.connection.execute(
+        "SELECT error_json FROM stage_runs WHERE job_id = ? AND stage_name = 'extract'"
+        " ORDER BY attempt DESC LIMIT 1",
+        (job.job_id,),
+    ).fetchone()
+    assert row is not None
+    return str(row["error_json"] or "")
+
+
+def test_tampered_candidate_txt_is_refused_before_extraction(tmp_path: Path) -> None:
+    svc, job, adopted_dir = _create_adopted_job(tmp_path)
+    (adopted_dir / "candidate.txt").write_text("Gly Gly Gly Gly", encoding="utf-8")
+    error = _run_and_expect_extract_failure(svc, job)
+    assert "content hash mismatch" in error, error
+    svc.close()
+
+
+def test_tampered_candidate_meta_text_is_refused(tmp_path: Path) -> None:
+    """The recheck repro: the txt stays byte-identical, only the meta LINE
+    TEXT changes — the old code published GGGG/complete off unverified
+    meta. Now the meta hash gate refuses before extraction."""
+
+    svc, job, adopted_dir = _create_adopted_job(tmp_path)
+    meta_path = adopted_dir / "candidate.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["lines"][0]["text"] = "Gly Gly Gly Gly"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    error = _run_and_expect_extract_failure(svc, job)
+    assert "metadata hash mismatch" in error, error
+    svc.close()
+
+
+def test_tampered_candidate_meta_box_is_refused(tmp_path: Path) -> None:
+    svc, job, adopted_dir = _create_adopted_job(tmp_path)
+    meta_path = adopted_dir / "candidate.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["lines"][0]["x0"] = 999.0
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    error = _run_and_expect_extract_failure(svc, job)
+    assert "metadata hash mismatch" in error, error
+    svc.close()
+
+
+def test_candidate_claiming_a_different_source_is_refused(tmp_path: Path) -> None:
+    """Source-identity check: a hash-locked candidate whose recorded source
+    SHA differs from the job's document is refused (meta itself intact)."""
+
+    svc, job, _adopted_dir = _create_adopted_job(
+        tmp_path, source_sha256="sha256:" + "0" * 64
+    )
+    error = _run_and_expect_extract_failure(svc, job)
+    assert "different source document" in error, error
+    svc.close()
+
+
+def test_legit_adopted_candidate_still_recovers_through_a_real_worker(tmp_path: Path) -> None:
+    """The negative cases above must not break the legitimate path: the
+    untouched candidate still yields the original residues."""
+
+    svc, job, _adopted_dir = _create_adopted_job(tmp_path)
+    from bio_pdf.workflow.queue_worker import run_worker
+
+    run_worker(svc.paths.artifact_root, once=True)
+    done = svc.get_job(job.job_id)
+    assert done is not None and done.status in {"succeeded", "succeeded_with_review"}
+    from bio_pdf.storage.result_reader import ResultReader
+
+    extract = ResultReader(svc.paths.artifact_root).read_json(job.job_id, "extract")
+    entry = (extract.get("sequence_inventory") or {})["entries"][0]
+    assert entry["status"] == "complete"
+    assert entry["observed_length"] == 4
+    consumed = extract["adopted_candidates"]
+    assert consumed and consumed[0]["merged_block_ids"]
+    # The config records the meta hash, not just the content hash.
+    config = svc.repository.get_job_config(job.job_id)
+    spec = config["effective_config"]["adopted_candidates"][0]
+    assert spec["content_sha256"] and spec["meta_sha256"]
+    svc.close()
