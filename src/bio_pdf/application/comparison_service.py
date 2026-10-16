@@ -62,6 +62,10 @@ class ComparisonService:
     artifact_root: Path
     #: tests patch this to a fake adapter factory
     engine_factory: Callable[..., Any] = staticmethod(_side_engine)
+    #: E2: side execution lease. A running side whose lease has expired
+    #: (its process died) becomes claimable again — this is what makes
+    #: restarts recover without double-executing live work.
+    lease_seconds: float = 900.0
 
     @classmethod
     def from_service(cls, service):
@@ -118,7 +122,13 @@ class ComparisonService:
         return comparison_id
 
     def start(self, comparison_id: str) -> None:
-        """Run pending/failed sides on a daemon thread (DB-backed status)."""
+        """Execute every CLAIMABLE side on a daemon thread (E2/S02+S05).
+
+        Claiming is atomic per side (lease + fenced completion), so two
+        concurrent starts/retries can never run the same side twice: the
+        second caller finds nothing claimable while the first lease lives.
+        Expired leases (a crashed process) are claimable again.
+        """
 
         thread = threading.Thread(
             target=self._run_sides, args=(comparison_id,), daemon=True
@@ -126,21 +136,36 @@ class ComparisonService:
         thread.start()
 
     def retry(self, comparison_id: str) -> dict[str, Any]:
-        conn = self.repository.connection
-        conn.execute(
-            """
-            UPDATE comparison_sides SET status = 'queued', error = NULL
-            WHERE comparison_id = ? AND status IN ('failed', 'queued')
-            """,
-            (comparison_id,),
-        )
-        conn.execute(
-            "UPDATE comparisons SET status = 'queued', updated_at = ? WHERE comparison_id = ?",
-            (_now(), comparison_id),
-        )
-        conn.commit()
+        """E2: retry just re-arms execution — the claim SQL decides what is
+        actually runnable (failed, queued, or lease-expired running). No
+        bulk status rewrite, so a side running with a VALID lease is never
+        re-executed by a retry from another thread or process."""
+
         self.start(comparison_id)
         return self.get(comparison_id)
+
+    def recover_orphans(self) -> list[str]:
+        """E2/S05: restart recovery — sides left 'running' by a dead
+        process have expired leases and become claimable; 'queued' sides
+        never reached by a vanished thread also restart. 'failed' stays
+        manual (retry button) — a restart must not silently re-run
+        something that legitimately errored."""
+
+        import datetime as _dt
+
+        now = _dt.datetime.now(tz=_dt.timezone.utc).isoformat()
+        rows = self.repository.connection.execute(
+            """
+            SELECT DISTINCT comparison_id FROM comparison_sides
+            WHERE status = 'queued'
+               OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?))
+            """,
+            (now,),
+        ).fetchall()
+        ids = [str(row["comparison_id"]) for row in rows]
+        for comparison_id in ids:
+            self.start(comparison_id)
+        return ids
 
     def get(self, comparison_id: str) -> dict[str, Any]:
         conn = self.repository.connection
@@ -172,6 +197,9 @@ class ComparisonService:
                     "summary": json.loads(sr["summary_json"] or "{}"),
                     "started_at": sr["started_at"],
                     "ended_at": sr["ended_at"],
+                    # E2: execution lifecycle visibility for the UI/tests.
+                    "attempt": int(sr["attempt"]) if "attempt" in sr.keys() else 0,
+                    "lease_until": (sr["lease_until"] if "lease_until" in sr.keys() else None),
                 }
                 for sr in side_rows
             ]
@@ -197,40 +225,148 @@ class ComparisonService:
 
     # ---- execution --------------------------------------------------------
 
+    def _next_lease_token(self) -> str:
+        import uuid
+
+        return f"lease-{uuid.uuid4().hex}"
+
+    def _claim_side(self, comparison_id: str, side: str) -> tuple[str, int] | None:
+        """Atomically claim one side (E2/S02). Returns (lease_token,
+        attempt) or None when not claimable.
+
+        Claimable: queued, failed, or running with an EXPIRED lease (a dead
+        worker). The attempt counter increments per execution so each run
+        writes its own immutable directory; the lease token fences the
+        completion write.
+        """
+
+        import datetime as _dt
+
+        conn = self.repository.connection
+        now = _dt.datetime.now(tz=_dt.timezone.utc)
+        lease_until = (now + _dt.timedelta(seconds=self.lease_seconds)).isoformat()
+        token = self._next_lease_token()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = conn.execute(
+                """
+                UPDATE comparison_sides
+                SET status = 'running', lease_token = ?, lease_until = ?,
+                    attempt = attempt + 1, started_at = ?, error = NULL
+                WHERE comparison_id = ? AND side = ?
+                  AND (
+                        status IN ('queued', 'failed')
+                        OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?))
+                  )
+                """,
+                (token, lease_until, _now(), comparison_id, side, now.isoformat()),
+            )
+            if cur.rowcount != 1:
+                conn.execute("ROLLBACK")
+                return None
+            row = conn.execute(
+                "SELECT attempt FROM comparison_sides WHERE comparison_id = ? AND side = ?",
+                (comparison_id, side),
+            ).fetchone()
+            conn.execute(
+                "UPDATE comparisons SET status = 'running', updated_at = ? WHERE comparison_id = ?",
+                (_now(), comparison_id),
+            )
+            conn.execute("COMMIT")
+            return token, int(row["attempt"])
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def _publish_side_result(
+        self,
+        comparison_id: str,
+        side: str,
+        lease_token: str,
+        *,
+        status: str,
+        summary_json: str = "{}",
+        artifact_dir: str | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """Fenced completion write (E2): succeeds only while this attempt
+        still owns the lease. A stale attempt (its lease was taken over by
+        a recovering worker) MUST NOT publish — returns False and its
+        artifacts remain as forensic records under its own attempt dir."""
+
+        conn = self.repository.connection
+        cur = conn.execute(
+            """
+            UPDATE comparison_sides
+            SET status = ?, summary_json = ?, artifact_dir = COALESCE(?, artifact_dir),
+                error = ?, ended_at = ?, lease_until = NULL
+            WHERE comparison_id = ? AND side = ? AND lease_token = ?
+            """,
+            (status, summary_json, artifact_dir, error, _now(), comparison_id, side, lease_token),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+
+    def _claimable_sides(self, comparison_id: str) -> list[tuple[str, str]]:
+        """Side names a claim could currently grab (queued/failed/expired).
+
+        Used only as a hint for the loop; the claim SQL remains the
+        authority (a hint that went stale simply fails to claim)."""
+
+        import datetime as _dt
+
+        now = _dt.datetime.now(tz=_dt.timezone.utc).isoformat()
+        rows = self.repository.connection.execute(
+            """
+            SELECT side FROM comparison_sides
+            WHERE comparison_id = ?
+              AND (
+                    status IN ('queued', 'failed')
+                    OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?))
+              )
+            ORDER BY side
+            """,
+            (comparison_id, now),
+        ).fetchall()
+        return [str(row["side"]) for row in rows]
+
     def _run_sides(self, comparison_id: str) -> None:
+        """Claim-and-run pass: every side is executed by exactly one live
+        lease holder; restart/recover needs no special path (expired leases
+        simply become claimable again on the next start/retry)."""
+
         info = self.get(comparison_id)
         pages = [int(p) for p in info["pages"]]
-        conn = self.repository.connection
-        for side in info["sides"]:
-            if side["status"] != "queued":
-                continue
-            engine = side["side"]
-            conn.execute(
-                "UPDATE comparison_sides SET status = 'running', started_at = ? WHERE comparison_id = ? AND side = ?",
-                (_now(), comparison_id, engine),
-            )
-            conn.commit()
+        source_path = Path(self._source_path_of(comparison_id))
+        # ONE pass over the claimable snapshot: a side that FAILS in this
+        # run stays 'failed' (a fresh retry() re-arms execution) — no
+        # self-spinning over the same failure.
+        for engine in self._claimable_sides(comparison_id):
+            claimed = self._claim_side(comparison_id, engine)
+            if claimed is None:
+                continue  # another worker holds a live lease
+            lease_token, attempt = claimed
             try:
                 summary = self._run_one(
                     comparison_id=comparison_id,
                     engine=engine,
+                    attempt=attempt,
                     document_id=str(info["document_id"]),
-                    source_path=Path(self._source_path_of(comparison_id)),
+                    source_path=source_path,
                     pages=pages,
                 )
-                conn.execute(
-                    """
-                    UPDATE comparison_sides SET status = 'done', summary_json = ?,
-                        artifact_dir = ?, ended_at = ? WHERE comparison_id = ? AND side = ?
-                    """,
-                    (
-                        json.dumps(summary, ensure_ascii=False),
-                        summary.get("artifact_dir"),
-                        _now(),
-                        comparison_id,
-                        engine,
-                    ),
+                published = self._publish_side_result(
+                    comparison_id,
+                    engine,
+                    lease_token,
+                    status="done",
+                    summary_json=json.dumps(summary, ensure_ascii=False),
+                    artifact_dir=summary.get("artifact_dir"),
                 )
+                if not published:
+                    # Our lease was taken over while running: keep the
+                    # artifacts (attempt dir) but publish NOTHING.
+                    continue
             except Exception as exc:  # noqa: BLE001 — one side's failure is data
                 err_msg = f"{type(exc).__name__}: {exc}"[:500]
                 details = getattr(exc, "details", None) or {}
@@ -238,14 +374,13 @@ class ComparisonService:
                     code = details.get("code")
                     if code and code not in err_msg:
                         err_msg = f"{err_msg} [code={code}]"
-                conn.execute(
-                    """
-                    UPDATE comparison_sides SET status = 'failed', error = ?, ended_at = ?
-                    WHERE comparison_id = ? AND side = ?
-                    """,
-                    (err_msg[:500], _now(), comparison_id, engine),
+                self._publish_side_result(
+                    comparison_id,
+                    engine,
+                    lease_token,
+                    status="failed",
+                    error=err_msg[:500],
                 )
-            conn.commit()
         self._refresh_status(comparison_id)
 
     def _source_path_of(self, comparison_id: str) -> str:
@@ -281,12 +416,22 @@ class ComparisonService:
         document_id: str,
         source_path: Path,
         pages: list[int],
+        attempt: int = 1,
     ) -> dict[str, Any]:
-        """One side: adapter parse → shared domain rules → side summary."""
+        """One side execution → shared domain rules → side summary.
+
+        E2: each attempt writes into its OWN immutable directory
+        (``comparisons/<cid>/<side>/attempt-<n>/``), so a recovering
+        worker's run never overwrites the previous attempt's artifacts —
+        both remain readable evidence even when the older attempt's lease
+        expired.
+        """
 
         from bio_pdf.parsers.base import ParseRequest
 
-        side_dir = self.artifact_root / "comparisons" / comparison_id / engine
+        side_dir = (
+            self.artifact_root / "comparisons" / comparison_id / engine / f"attempt-{attempt}"
+        )
         side_dir.mkdir(parents=True, exist_ok=True)
         request = ParseRequest(
             job_id=f"{comparison_id}:{engine}",
@@ -314,6 +459,7 @@ class ComparisonService:
         summary = self._domain_pass(normalized, document_id=document_id, engine=engine)
         summary["artifact_dir"] = str(side_dir.relative_to(self.artifact_root))
         summary["manifest"] = str(artifacts.manifest_path.relative_to(self.artifact_root))
+        summary["attempt"] = attempt
         return summary
 
     def _domain_pass(

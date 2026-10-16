@@ -9,6 +9,7 @@ only matches non-API page paths — an unknown ``/api`` route stays a JSON
 from __future__ import annotations
 
 import mimetypes
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -39,6 +40,25 @@ async def _lifespan(app: FastAPI):
         return JobService(JobPaths.under(settings.data_dir))
 
     app.state.service_factory = service_factory
+
+    # E2/S05: restart recovery for comparison experiments. A process that
+    # died mid-run leaves sides 'running' with leases that expire; on boot
+    # those (and never-started 'queued' ones) become claimable again and
+    # continue in a background pass — startup never blocks, and 'failed'
+    # is left for the explicit retry action.
+    def _recover_comparisons() -> None:
+        try:
+            from bio_pdf.application.comparison_service import ComparisonService
+
+            svc = service_factory()
+            try:
+                ComparisonService.from_service(svc).recover_orphans()
+            finally:
+                svc.close()
+        except Exception:  # noqa: BLE001 — recovery is best-effort at boot
+            pass
+
+    threading.Thread(target=_recover_comparisons, daemon=True).start()
     yield
 
 

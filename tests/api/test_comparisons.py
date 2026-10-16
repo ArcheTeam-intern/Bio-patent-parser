@@ -224,3 +224,153 @@ def test_mineru_without_token_fails_honestly(client) -> None:
     sides = {s["side"]: s for s in body["sides"]}
     assert sides["mineru_http"]["status"] == "failed"
     assert "MINERU_TOKEN" in (sides["mineru_http"]["error"] or "")
+
+# ---- E2/S02+S05: lease-claimed execution, fenced publish, recovery --------
+
+
+def test_concurrent_retry_never_double_executes_a_side(client, monkeypatch) -> None:
+    """A retry while a side is mid-run must not execute it a second time
+    (the recheck's ['docling','mineru','mineru'] sequence is forbidden)."""
+
+    c, tmp_path = client
+    document_id = _upload_doc(c, tmp_path)
+
+    from bio_pdf.application import comparison_service as cs
+
+    calls: list[str] = []
+    entered = __import__("threading").Event()
+    release = __import__("threading").Event()
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        calls.append(engine)
+        if engine == "docling":
+            entered.set()
+            release.wait(timeout=10)
+        return _StubAdapter("Ala Gly Leu Lys", document_id)
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    res = c.post(
+        "/api/v1/comparisons",
+        json={"document_id": document_id, "pages": [1], "engines": ["docling", "mineru_http"]},
+    )
+    comparison_id = res.json()["comparison_id"]
+    assert entered.wait(timeout=10)
+
+    # Retry WHILE docling is mid-run: it may claim only mineru.
+    retry = c.post(f"/api/v1/comparisons/{comparison_id}/retry")
+    assert retry.status_code == 200
+    release.set()
+
+    body = _wait_done(c, comparison_id, timeout=30.0)
+    assert calls.count("docling") == 1, calls
+    assert calls.count("mineru_http") == 1, calls
+    statuses = {s["side"]: s["status"] for s in body["sides"]}
+    assert statuses == {"docling": "done", "mineru_http": "done"} or statuses["docling"] == "done"
+
+
+def test_stale_attempt_cannot_publish(client) -> None:
+    c, tmp_path = client
+    """The completion write is fenced by the lease token: an attempt whose
+    lease was taken over publishes NOTHING (its artifacts remain)."""
+
+    from bio_pdf.application.comparison_service import ComparisonService
+    from bio_pdf.storage.repository import Repository
+
+    document_id = _upload_doc(c, tmp_path)
+    svc = ComparisonService(
+        repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=3600.0,
+    )
+    cid = svc.create(
+        document_id=document_id,
+        source_path=tmp_path / "cmp.pdf",
+        pages=[1],
+        engines=["docling"],
+    )
+    # Manually claim with an "old" lease…
+    old_token, old_attempt = svc._claim_side(cid, "docling")
+    assert old_token and old_attempt == 1
+    # …then simulate takeover: expire it and claim again.
+    svc.repository.connection.execute(
+        "UPDATE comparison_sides SET lease_until = '2000-01-01T00:00:00+00:00' WHERE comparison_id = ? AND side = 'docling'",
+        (cid,),
+    )
+    svc.repository.connection.commit()
+    new_token, new_attempt = svc._claim_side(cid, "docling")
+    assert new_attempt == 2
+    # The stale attempt's publish is rejected outright.
+    published = svc._publish_side_result(
+        cid, "docling", old_token, status="done", summary_json="{}", artifact_dir=None
+    )
+    assert published is False
+    # The current holder still publishes normally.
+    published2 = svc._publish_side_result(
+        cid, "docling", new_token, status="done", summary_json="{}", artifact_dir=None
+    )
+    assert published2 is True
+    svc.repository.close()
+
+
+def test_expired_lease_side_is_recovered_like_a_restart(client, monkeypatch) -> None:
+    _c, tmp_path = client
+    """S05: a side left 'running' by a dead process (expired lease) is
+    picked up by recover_orphans() — the subprocess-restart path in one
+    process, driven purely through persisted state."""
+
+    import datetime as _dt
+
+    from bio_pdf.application import comparison_service as cs
+    from bio_pdf.application.comparison_service import ComparisonService
+    from bio_pdf.storage.repository import Repository
+
+    document_id = _upload_doc(_c, tmp_path)
+    calls: list[str] = []
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        calls.append(engine)
+        return _StubAdapter("Ala Gly Leu Lys", document_id)
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+
+    first = ComparisonService(
+        repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
+        artifact_root=tmp_path / "data",
+        lease_seconds=0.0,  # the "crash": lease already expired when we stop
+    )
+    cid = first.create(
+        document_id=document_id,
+        source_path=tmp_path / "cmp.pdf",
+        pages=[1],
+        engines=["docling", "mineru_http"],
+    )
+    # Claim both sides but never publish (simulating process death).
+    tok_d, _att_d = first._claim_side(cid, "docling")
+    tok_m, _att_m = first._claim_side(cid, "mineru_http")
+    assert tok_d and tok_m
+    first.repository.close()
+
+    # "New process": recover_orphans must re-claim the expired running
+    # sides and finish them.
+    second = ComparisonService(
+        repository=Repository(tmp_path / "data" / "bio.sqlite", check_same_thread=False),
+        artifact_root=tmp_path / "data",
+    )
+    ids = second.recover_orphans()
+    assert cid in ids
+    for _ in range(200):
+        info = second.get(cid)
+        if all(s["status"] == "done" for s in info["sides"]):
+            break
+        time.sleep(0.05)
+    info = second.get(cid)
+    assert all(s["status"] == "done" for s in info["sides"]), info
+    # Each side ran exactly once in THIS process; attempts kept history
+    # (attempt 2 in the DB because the crash consumed attempt 1).
+    assert calls.count("docling") == 1 and calls.count("mineru_http") == 1
+    by_side = {s["side"]: s for s in info["sides"]}
+    assert by_side["docling"]["attempt"] == 2
+    # Per-attempt dirs: the recovered run wrote to attempt-2.
+    assert "attempt-2" in (by_side["docling"]["artifact_dir"] or "")
+    second.repository.close()

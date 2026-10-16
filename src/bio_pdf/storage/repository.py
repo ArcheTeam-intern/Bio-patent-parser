@@ -235,6 +235,14 @@ CREATE TABLE IF NOT EXISTS comparison_sides (
     summary_json  TEXT NOT NULL DEFAULT '{}',
     started_at    TEXT,
     ended_at      TEXT,
+    -- E2/S02+S05: persisted execution lease. A side is claimed by ONE
+    -- worker atomically (queued/failed or lease-expired running); the
+    -- completion write is fenced by lease_token so a stale attempt can
+    -- never publish. attempt numbers each execution into its own
+    -- immutable artifact directory.
+    attempt       INTEGER NOT NULL DEFAULT 0,
+    lease_token   TEXT,
+    lease_until   TEXT,
     PRIMARY KEY (comparison_id, side)
 );
 """
@@ -325,6 +333,20 @@ def init_repository(
         }
         if "baseline_id" not in review_cols:
             conn.execute("ALTER TABLE review_items ADD COLUMN baseline_id TEXT")
+        # E2: comparison side lease columns.
+        side_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(comparison_sides)").fetchall()
+        }
+        if side_cols:
+            if "attempt" not in side_cols:
+                conn.execute(
+                    "ALTER TABLE comparison_sides ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0"
+                )
+            if "lease_token" not in side_cols:
+                conn.execute("ALTER TABLE comparison_sides ADD COLUMN lease_token TEXT")
+            if "lease_until" not in side_cols:
+                conn.execute("ALTER TABLE comparison_sides ADD COLUMN lease_until TEXT")
         # D09: real page/region references on issues (set at creation time).
         issue_cols = {
             row[1]
