@@ -188,7 +188,8 @@ def test_bounded_reparse_stores_a_candidate(client, monkeypatch) -> None:
     )
 
     def fake_ocr(pdf_path, pages):  # noqa: ANN001
-        return {int(pages[0]): [(100.0, 110.0, "MKTG AcGT")]}
+        # region_ocr shape (E5): (x0, y0, x1, y1, text)
+        return {int(pages[0]): [(40.0, 100.0, 120.0, 110.0, "MKTG AcGT")]}
 
     monkeypatch.setattr(
         "bio_pdf.extract.sequences.region_ocr.ocr_residue_pages", fake_ocr
@@ -217,3 +218,58 @@ def test_reparse_refuses_unsupported_scope_with_reason(client) -> None:
     res = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "ISSUE_REPARSE_UNSUPPORTED"
+
+def test_issue_endpoints_enforce_job_ownership(client) -> None:
+    """E4/S04: an issue from job A cannot be read, mutated or reparsed
+    through job B's URLs — 404 with zero writes."""
+
+    c, tmp_path = client
+    import sqlite3
+
+    def _new_job(tag: str) -> str:
+        pdf = _sample_pdf(tmp_path / f"{tag}.pdf")
+        doc = c.post(
+            "/api/v1/documents",
+            files={"file": (f"{tag}.pdf", pdf.read_bytes(), "application/pdf")},
+        ).json()
+        return c.post(
+            "/api/v1/jobs",
+            json={"document_id": doc["document_id"], "parser": "native"},
+        ).json()["job_id"]
+
+    job_a = _new_job("own-a")
+    job_b = _new_job("own-b")
+
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    conn.execute(
+        "INSERT INTO parse_issues (issue_id, job_id, scope, reason_code, source_json, detail, state, created_at)"
+        " VALUES ('iss-owned', ?, 'table', 'TABLE_SCORING', '[]', 'page 8: scoring', 'open', '2026-10-16T00:00:00+00:00')",
+        (job_a,),
+    )
+    conn.commit()
+    conn.close()
+
+    # reads
+    assert c.get(f"/api/v1/jobs/{job_b}/issues/iss-owned").status_code == 404
+    assert c.get(f"/api/v1/jobs/{job_a}/issues/iss-owned").status_code == 200
+
+    # actions must not cross jobs
+    res = c.post(
+        f"/api/v1/jobs/{job_b}/issues/iss-owned/actions",
+        json={"action": "dismiss", "note": "wrong job"},
+    )
+    assert res.status_code == 404
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    state = conn.execute(
+        "SELECT state FROM parse_issues WHERE issue_id = 'iss-owned'"
+    ).fetchone()[0]
+    events = conn.execute(
+        "SELECT COUNT(*) FROM issue_events WHERE issue_id = 'iss-owned'"
+    ).fetchone()[0]
+    conn.close()
+    assert state == "open", "cross-job action must leave zero writes"
+    assert events == 0
+
+    # reparse must not cross jobs either (it would mix source + page)
+    rep = c.post(f"/api/v1/jobs/{job_b}/issues/iss-owned/reparse")
+    assert rep.status_code == 404

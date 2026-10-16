@@ -290,3 +290,46 @@ def test_repeated_declaration_tag_lines_survive_the_running_filter() -> None:
     for record in records:
         assert record.declared_length == 364
         assert record.molecule_type == "DNA"
+
+
+def test_one_header_occurrence_never_blacklists_body_duplicates() -> None:
+    """E6/P02 recheck repro: three body pages declare SEQ 1/2/3 with the
+    same `Ala Cys 2` line; a fourth page prints the SAME text as a running
+    header. The body residue must still recover AC on all three — a single
+    header occurrence must not blacklist the string globally."""
+
+    PAGE_W, PAGE_H = 595.22, 842.0
+
+    def body(text: str, page: int, y: float) -> dict:
+        return {
+            "text": text,
+            "page_number": page,
+            "bbox": [88.0, y, 300.0, y + 10.0],
+            "page_width": PAGE_W,
+            "page_height": PAGE_H,
+            "semantic_role": "unknown",
+        }
+
+    blocks: list[dict] = []
+    for n in (1, 2, 3):
+        blocks.append(body(f"<210> {n}", n + 29, 200.0))
+        blocks.append(body("<211> 2", n + 29, 212.0))
+        blocks.append(body("<212> PRT", n + 29, 224.0))
+        blocks.append(body(f"<400> {n}", n + 29, 236.0))
+        blocks.append(body("Ala Cys 2", n + 29, 248.0))
+    # Fourth page: the identical text appears as a running header (top margin).
+    blocks.append(
+        {
+            "text": "Ala Cys 2",
+            "page_number": 99,
+            "bbox": [200.0, 30.0, 300.0, 45.0],
+            "page_width": PAGE_W,
+            "page_height": PAGE_H,
+            "semantic_role": "header",
+        }
+    )
+
+    records = parse_st25_blocks(blocks, "sha256:fixture")
+    assert len(records) == 3, "body occurrences must survive a header twin"
+    for record in records:
+        assert record.normalized_sequence == "AC"

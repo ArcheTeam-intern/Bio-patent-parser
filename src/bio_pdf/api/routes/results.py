@@ -725,12 +725,16 @@ class _IssueActionRequest(BaseModel):
     note: str | None = None
 
 
-def _issue_or_404(service, issue_id: str):
+def _issue_or_404(service, job_id: str, issue_id: str):
+    """E4/S04: an issue is addressed by ITS JOB. Reading it through another
+    job's URL is a 404 with zero writes — never a cross-job mutation, and
+    never a reparse whose source/page mix tasks."""
+
     row = service.repository.get_issue(issue_id)
-    if row is None:
+    if row is None or str(row["job_id"]) != str(job_id):
         raise HTTPException(
             status_code=404,
-            detail={"code": "NOT_FOUND", "message": "issue not found"},
+            detail={"code": "NOT_FOUND", "message": "issue not found for this job"},
         )
     return row
 
@@ -786,7 +790,7 @@ def get_issue(service: ServiceDep, job_id: str, issue_id: str) -> dict:
     """One issue with its full action history (D09)."""
 
     _job_or_404(service, job_id)
-    row = _issue_or_404(service, issue_id)
+    row = _issue_or_404(service, job_id, issue_id)
     return {
         "api_version": "v1",
         "issue": _issue_view(service, row),
@@ -811,7 +815,7 @@ def issue_action(
     """
 
     _job_or_404(service, job_id)
-    row = _issue_or_404(service, issue_id)
+    row = _issue_or_404(service, job_id, issue_id)
     action = request.action
     note = (request.note or "").strip()
 
@@ -854,7 +858,7 @@ def issue_action(
     service.repository.append_issue_event(
         issue_id=issue_id, actor=request.actor, action=action, note=note or None
     )
-    refreshed = _issue_or_404(service, issue_id)
+    refreshed = _issue_or_404(service, job_id, issue_id)
     return {
         "api_version": "v1",
         "issue": _issue_view(service, refreshed),
@@ -873,7 +877,7 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
     """
 
     _job_or_404(service, job_id)
-    row = _issue_or_404(service, issue_id)
+    row = _issue_or_404(service, job_id, issue_id)
     view = _issue_view(service, row)
     page = view.get("page_number")
     reason = str(row["reason_code"])
@@ -932,7 +936,8 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         ) from exc
 
     lines = ocr.get(int(page), [])
-    text = "\n".join(line[2] for line in lines)
+    # region_ocr returns (x0, y0, x1, y1, text) — text is index 4 (E5).
+    text = "\n".join(line[4] for line in lines)
     rel_dir = Path("jobs") / job_id / "issues" / issue_id
     out_dir = service.paths.artifact_root / rel_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -952,7 +957,7 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
         ),
         artifact_rel=rel,
     )
-    refreshed = _issue_or_404(service, issue_id)
+    refreshed = _issue_or_404(service, job_id, issue_id)
     return {
         "api_version": "v1",
         "issue": _issue_view(service, refreshed),

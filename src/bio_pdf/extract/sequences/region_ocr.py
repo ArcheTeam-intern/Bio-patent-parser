@@ -36,16 +36,14 @@ _MAX_OCR_LINES = 800
 def ocr_residue_pages(
     pdf_path: Path,
     page_numbers: list[int],
-) -> dict[int, list[tuple[float, float, str]]]:
+) -> dict[int, list[tuple[float, float, float, float, str]]]:
     """OCR whole pages with RapidOCR.
 
-    Returns ``page → [(y_top_pt, y_bottom_pt, text), ...]`` sorted
-    top-to-bottom, where the y values are the line's top/bottom edges in PDF
-    points with a top-left origin — the same space the block bboxes use, so
-    callers can (a) interleave OCR lines with native blocks into true reading
-    order and (b) compare positions to decide whether two texts describe the
-    SAME physical region. Tag-like lines are dropped (the native layer
-    already carries them).
+    Returns ``page → [(x0, y0, x1, y1, text), ...]`` sorted top-to-bottom,
+    the FULL 2D box of each line in PDF points with a top-left origin — the
+    same space the block bboxes use, so callers can (a) interleave OCR lines
+    into reading order and (b) decide SAME-PHYSICAL-MENTION overlap on both
+    axes (E5: a y-overlap alone confuses columns). Tag-like lines dropped.
     """
 
     import numpy as np
@@ -65,17 +63,16 @@ def ocr_residue_pages(
             image = bitmap.to_pil().convert("RGB")
             result = engine(np.array(image))
             boxes = result.boxes if result.boxes is not None else []
-            lines: list[tuple[float, float, str]] = []
+            lines: list[tuple[float, float, float, float, str]] = []
             for box, text in zip(boxes, result.txts or ()):
                 if not text or not text.strip() or _TAG_LINE_RE.match(text):
                     continue
-                ys = [point[1] for point in box]
-                # Plain Python floats: numpy scalars would poison JSON
-                # payloads downstream (issue region coordinates).
+                xs = [float(point[0]) / scale for point in box]
+                ys = [float(point[1]) / scale for point in box]
                 lines.append(
-                    (float(min(ys)) / float(scale), float(max(ys)) / float(scale), text.strip())
+                    (min(xs), min(ys), max(xs), max(ys), text.strip())
                 )
-            lines.sort(key=lambda item: item[0])
+            lines.sort(key=lambda item: item[1])
             if lines:
                 out[page_number] = lines[:_MAX_OCR_LINES]
             page.close()

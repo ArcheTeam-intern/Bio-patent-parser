@@ -491,70 +491,75 @@ def parse_st25_blocks(
 _ST25_TAG_LINE_RE = re.compile(r"^\s*<\s*\d{3}\s*>")
 
 
-def _running_texts(blocks: list[dict[str, Any]], *, min_pages: int = 3) -> set[str]:
-    """Line texts that are running material, with GEOMETRIC/ROLE evidence.
+def _repeated_line_pages(blocks: list[dict[str, Any]]) -> dict[str, set[int]]:
+    """How many distinct pages each non-tag LINE text appears on.
 
-    D03: repetition alone must never delete content. Real residue lines often
-    carry position counts and different SEQ IDs legitimately share identical
-    fragments (acceptance repro: three pages each declaring ``Ala Cys 2``).
-    A line is only treated as header/footer/line-number material when, in
-    addition to repeating on >= ``min_pages`` pages, every evidence-bearing
-    occurrence sits where running material lives:
-
-    - ``semantic_role`` is ``header``/``footer`` (layout-engine furniture), or
-    - the bbox is inside the top/bottom 8% page margin, or
-    - the bbox is a narrow left-margin column (``x1 < 12%`` of page width)
-      with a short text (line numbers like ``5``/``10``).
-
-    Occurrences without geometry/role evidence count as neutral: they can
-    neither justify a deletion on their own, and a line with NO evidence-
-    bearing occurrences at all is never filtered. ST.25 tag lines are always
-    exempt.
+    Repetition alone only marks a text as a CANDIDATE running material —
+    E6: the actual exclusion decision is made per occurrence using that
+    occurrence's own geometry/role. A text that legitimately repeats as
+    BODY residue content (different SEQ IDs with the same fragment) is
+    never dropped.
     """
 
     pages_by_text: dict[str, set[int]] = {}
-    evidence_by_text: dict[str, bool] = {}
     for block in blocks:
         text = str(block.get("text") or "")
         if not text:
             continue
         page = int(block.get("page_number", 1))
-        role = str(block.get("semantic_role") or "").lower()
-        bbox = block.get("bbox")
-        width = float(block.get("page_width") or 0.0)
-        height = float(block.get("page_height") or 0.0)
-
-        in_margin = False
-        in_left_column = False
-        if bbox and width > 0 and height > 0 and len(bbox) >= 4:
-            x0, y0, x1, y1 = (float(v) for v in bbox[:4])
-            in_margin = (y1 <= 0.08 * height) or (y0 >= 0.92 * height)
-            in_left_column = x1 <= 0.12 * width
-        role_furniture = role in ("header", "footer")
-
         for line in text.splitlines():
             stripped = line.strip()
-            if not stripped or _ST25_TAG_LINE_RE.match(stripped):
-                continue
-            pages_by_text.setdefault(stripped, set()).add(page)
-            has_evidence = role_furniture or in_margin or (
-                in_left_column and len(stripped) <= 12
-            )
-            if has_evidence:
-                evidence_by_text[stripped] = True
-
-    running: set[str] = set()
-    for text, pages in pages_by_text.items():
-        if len(pages) < min_pages:
-            continue
-        if not evidence_by_text.get(text):
-            # Repetition without any header/footer/margin evidence is just
-            # repeated CONTENT (legit duplicate fragments) — keep it.
-            continue
-        running.add(text)
-    return running
+            if stripped and not _ST25_TAG_LINE_RE.match(stripped):
+                pages_by_text.setdefault(stripped, set()).add(page)
+    return pages_by_text
 
 
+def _furniture_occurrence(block: dict[str, Any], line_text: str) -> bool:
+    """E6: does THIS occurrence sit where running material lives?
+
+    True only with concrete evidence on the block carrying the line:
+    a header/footer semantic role, or a bbox inside the top/bottom page
+    margins, or a narrow left-margin column (the line-number gutter).
+    Blocks without geometry/role evidence are never furniture.
+    """
+
+    role = str(block.get("semantic_role") or "").lower()
+    if role in ("header", "footer"):
+        return True
+    bbox = block.get("bbox")
+    width = float(block.get("page_width") or 0.0)
+    height = float(block.get("page_height") or 0.0)
+    if bbox and len(bbox) >= 4 and width > 0 and height > 0:
+        x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+        if y1 <= 0.08 * height or y0 >= 0.92 * height:
+            return True
+        if x1 <= 0.12 * width and len(line_text) <= 12:
+            return True
+    return False
+
+
+def _running_line_filter(
+    blocks: list[dict[str, Any]], *, min_pages: int = 3
+):
+    """Return a predicate ``skip(block, line)`` — per-occurrence (E6).
+
+    A line is skipped ONLY when (1) its text repeats on >= min_pages
+    pages, AND (2) THIS occurrence carries furniture evidence. One header
+    occurrence can therefore never blacklist the same text's body uses —
+    the D-round's global-string bug.
+    """
+
+    pages_by_text = _repeated_line_pages(blocks)
+
+    def skip(block: dict[str, Any], line_text: str) -> bool:
+        stripped = line_text.strip()
+        if not stripped or _ST25_TAG_LINE_RE.match(stripped):
+            return False
+        if len(pages_by_text.get(stripped, ())) < min_pages:
+            return False
+        return _furniture_occurrence(block, stripped)
+
+    return skip
 def parse_st25_blocks_with_scan(
     blocks: list[dict[str, Any]],
     document_id: str,
@@ -572,10 +577,11 @@ def parse_st25_blocks_with_scan(
     """
 
     machine = _St25StateMachine(document_id=document_id, default_page=1)
-    # C03: running headers/footers/line numbers never reach the state
-    # machine (they fabricated "EPB1"-style residues); blocks stay intact
-    # for audit — only the feed skips them.
-    running = _running_texts(blocks)
+    # C03/E6: running headers/footers/line numbers never reach the state
+    # machine (they fabricated "EPB1"-style residues) — but the decision is
+    # made PER OCCURRENCE from that occurrence's own geometry/role, so a
+    # header copy can never blacklist the same text used as body residues.
+    is_running_line = _running_line_filter(blocks)
     # Per-page raw residue text, captured while feeding (plan B09): each
     # page's evidence carries ITS OWN fragment, not a copied full sequence.
     page_fragments: dict[int, list[str]] = {}
@@ -585,7 +591,7 @@ def parse_st25_blocks_with_scan(
             continue
         page_number = int(entry.get("page_number", 1))
         for line in str(text).splitlines():
-            if line.strip() and line.strip() in running:
+            if is_running_line(entry, line):
                 continue
             machine.feed_line(line, page_number=page_number)
             if machine.current is not None and machine.current.in_residues:

@@ -813,21 +813,19 @@ def _merge_ocr_page_lines(
     native blocks, so a residue row between ``<400> 7`` and ``<210> 8`` stays
     exactly there.
 
-    D02 position-aware merge — the previous whole-page fuzzy dedup deleted
-    legitimate content: an OCR line was dropped whenever it merely RESEMBLED
-    any native text on the page (ratio >= 0.6), regardless of position, so
-    different regions lost their residues and native/OCR character conflicts
-    were silently resolved. The rules now:
+    E5 rules (strict superset of D02):
 
-    - **same physical region, equal content** (normalized fingerprints
-      match) → merged: the OCR copy is dropped (the native layer already
-      carries it).
-    - **same physical region, different content** → the native text stays
-      in the feed, the OCR variant is NOT silently chosen away: a
-      ``SOURCE_CONFLICT`` record (page, y-range, both texts) is returned so
-      the caller can raise an issue and refuse completeness.
-    - **different region** → kept, whatever it resembles. Only exact
-      normalized equality merges, never a similarity threshold.
+    - Overlap is decided on BOTH axes (x AND y intervals intersect): equal
+      text at DIFFERENT positions is real repeated content — both kept
+      (the old adjacent-OCR dedup deleted the second copy).
+    - Same physical mention + equal fingerprint → merged (OCR copy dropped).
+    - Same physical mention + DIFFERENT content at comparable granularity
+      (lengths within 2x) → the native text stays in the feed and a
+      ``SOURCE_CONFLICT`` record (page, 2D box, both texts) is returned —
+      never silently resolved.
+    - Granularity mismatch (a native paragraph vs one of its OCR lines):
+      if the shorter fingerprint is contained in the longer → merged;
+      merely overlapping but incomparable → kept, NOT a conflict.
 
     Returns ``(merged_blocks, conflicts)``.
     """
@@ -836,6 +834,16 @@ def _merge_ocr_page_lines(
 
     def fingerprint(text: str) -> str:
         return _re.sub(r"[\s\d]+", "", text).upper()
+
+    def _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
+        return a0 - 2.0 <= b1 and b0 - 2.0 <= a1
+
+    def _same_mention(n_box, o_box) -> bool:
+        n_x0, n_y0, n_x1, n_y1 = n_box
+        o_x0, o_y0, o_x1, o_y1 = o_box
+        return _intervals_overlap(n_x0, n_x1, o_x0, o_x1) and _intervals_overlap(
+            n_y0, n_y1, o_y0, o_y1
+        )
 
     output: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
@@ -850,40 +858,53 @@ def _merge_ocr_page_lines(
 
     for page, lines in ocr_lines.items():
         natives = [
-            (float(b.get("bbox")[1]) if b.get("bbox") else 0.0,
-             float(b.get("bbox")[3]) if b.get("bbox") else 0.0,
-             fingerprint(str(b.get("text") or "")),
-             str(b.get("text") or ""))
+            (
+                (float(b["bbox"][0]), float(b["bbox"][1]), float(b["bbox"][2]), float(b["bbox"][3]))
+                if b.get("bbox") and len(b["bbox"]) >= 4
+                else None,
+                fingerprint(str(b.get("text") or "")),
+                str(b.get("text") or ""),
+            )
             for _y, _o, kind, b in page_items.get(page, [])
             if kind == "block"
         ]
         kept: list[tuple[float, int, str, Any]] = []
-        for order, (y_top, y_bottom, text) in enumerate(lines):
+        for order, (x0, y0, x1, y1, text) in enumerate(lines):
             fp = fingerprint(text)
             if len(fp) < 2:
                 continue
-            if kept and fingerprint(str(kept[-1][3])) == fp:
-                continue
-            # Same physical region: vertical intervals intersect (2pt slack).
             overlapping = [
                 (n_fp, n_text)
-                for n_y0, n_y1, n_fp, n_text in natives
-                if n_fp and n_y0 - 2.0 <= y_bottom and n_y1 + 2.0 >= y_top
+                for n_box, n_fp, n_text in natives
+                if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
             ]
-            if any(n_fp == fp for n_fp, _t in overlapping):
-                continue  # same region, same content -> merged
-            if overlapping:
+            merge_equal = any(n_fp == fp for n_fp, _t in overlapping)
+            contained = any(
+                n_fp and (fp in n_fp or n_fp in fp) for n_fp, _t in overlapping
+            )
+            if merge_equal or contained:
+                continue  # same physical mention, (same or finer) content
+            disagree = [
+                (n_fp, n_text)
+                for n_fp, n_text in overlapping
+                if max(len(fp), len(n_fp)) <= 2 * max(min(len(fp), len(n_fp)), 1)
+            ]
+            if disagree:
                 conflicts.append(
                     {
                         "page_number": page,
-                        "y_top": float(round(y_top, 1)),
-                        "y_bottom": float(round(y_bottom, 1)),
-                        "native_text": overlapping[0][1],
+                        "x0": float(round(x0, 1)),
+                        "y_top": float(round(y0, 1)),
+                        "x1": float(round(x1, 1)),
+                        "y_bottom": float(round(y1, 1)),
+                        "native_text": disagree[0][1],
                         "ocr_text": text,
                     }
                 )
                 continue  # native stays in the feed; conflict is recorded
-            kept.append((y_top, order, "ocr", text))
+            # Different position OR incomparable granularity: keep the OCR
+            # line — content is never dropped for resembling something else.
+            kept.append((y0, order, "ocr", (x0, y0, x1, y1, text)))
         page_items.setdefault(page, []).extend(kept)
 
     for page in sorted(page_items):
@@ -894,13 +915,16 @@ def _merge_ocr_page_lines(
             if kind == "block":
                 output.append(payload)
             else:
+                x0, y_top, x1, y_bottom, text = payload
                 output.append(
                     {
-                        "text": payload,
+                        "text": text,
                         "kind": "text",
                         "semantic_role": "unknown",
                         "page_number": page,
-                        "bbox": None,
+                        # E5: keep the real 2D box so later passes can tell
+                        # columns and paragraphs apart.
+                        "bbox": [x0, y_top, x1, y_bottom],
                         "block_id": f"ocr-region:{page}:{int(_y)}:{_order}",
                         "source_refs": [],
                         "source_aliases": [],
