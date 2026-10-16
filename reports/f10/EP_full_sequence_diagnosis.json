@@ -1,0 +1,4837 @@
+{
+  "baseline_id": "bbdc021c8f9d0192",
+  "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+  "entries": [
+    {
+      "declared": {
+        "declaration_page": 30,
+        "declared_length": 5,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 1 on page 30 (length 5)",
+        "residue region pages: [30]",
+        "region OCR ran on [30] → 41 OCR line(s), 1 kept by the fusion",
+        "2 native/OCR content conflict(s) on these pages",
+        "completeness unverified: a source conflict covers these pages",
+        "reported reasons: native/OCR content conflict on this page's residue region; completeness unverified"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "Keffer, J., et al. 1991. EMBO J. 10:4025.",
+            "Kehlen A et al., Clin Exp Immunol 2002."
+          ],
+          "line_count": 56
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Ser Tyr Gly Val His"
+          ],
+          "line_count": 1
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Ser Tyr Gly Val His"
+        ],
+        "merge_records": [
+          {
+            "kind": "content_conflict",
+            "native_text": "McInness I.B., and Schett G. NEJM 2011; 365: 2205-2219.",
+            "ocr_text": "Mclnness I.B., and Schett G. NEJM 2011; 365: 2205-2219.",
+            "page_number": 30,
+            "x0": 86.7,
+            "x1": 322.7,
+            "y_bottom": 149.8,
+            "y_top": 140.1
+          },
+          {
+            "kind": "content_conflict",
+            "native_text": "Nesbitt A, et al,. Inflamm Bowel Dis 2007; 13(11): 1323-1332.",
+            "ocr_text": "Osol ed,. Remington's Pharmaceutical Sciences, Mack Publishing., 1980.",
+            "page_number": 30,
+            "x0": 86.7,
+            "x1": 381.0,
+            "y_bottom": 186.3,
+            "y_top": 175.3
+          }
+        ]
+      },
+      "parse_outcome": {
+        "observed_length": 5,
+        "parsed_residues": "SYGVH",
+        "reasons": [
+          "native/OCR content conflict on this page's residue region; completeness unverified"
+        ],
+        "status": "conflict"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:1",
+      "region_ocr": {
+        "content_conflicts": [
+          {
+            "kind": "content_conflict",
+            "native_text": "McInness I.B., and Schett G. NEJM 2011; 365: 2205-2219.",
+            "ocr_text": "Mclnness I.B., and Schett G. NEJM 2011; 365: 2205-2219.",
+            "page_number": 30,
+            "x0": 86.7,
+            "x1": 322.7,
+            "y_bottom": 149.8,
+            "y_top": 140.1
+          },
+          {
+            "kind": "content_conflict",
+            "native_text": "Nesbitt A, et al,. Inflamm Bowel Dis 2007; 13(11): 1323-1332.",
+            "ocr_text": "Osol ed,. Remington's Pharmaceutical Sciences, Mack Publishing., 1980.",
+            "page_number": 30,
+            "x0": 86.7,
+            "x1": 381.0,
+            "y_bottom": 186.3,
+            "y_top": 175.3
+          }
+        ],
+        "entered": true,
+        "line_count": 41,
+        "native_superseded": [],
+        "pages": [
+          30
+        ],
+        "text": "EP 3 027 649 B1\nKeffer, J., et al. 1991. EMBO J. 10:4025.\nKehlen A et al., Clin Exp Immunol 2002.\nKoenders MI., et al. Arthritis & Rheumatism 2011; 63(8): 2329-2339.\nKotake S. et al., Clin Invest 1999; 103(9):1345-52.\n5\nLi X et al., Biochem Biophys Res Comm 2010\nMakrides, S.C., Protein Expr. Purif. 17 (1999) 183-202.\nMclnness I.B., and Schett G. NEJM 2011; 365: 2205-2219.\nMitoma H, et al., Gastroenterology 2005: 128(2): 376-392.\nNesbitt A, et al,. Inflamm Bowel Dis 2007; 13(11): 1323-1332.\n10\nOsol ed,. Remington's Pharmaceutical Sciences, Mack Publishing., 1980.\nPieringer H, et al,. Current Pharmaceutical Design 2013.\nQi J, et al., Int Immunopharmacol. 2012;14(4):770-8.\nRobinson ed., Sustained and Controlled Release Drug Delivery Systems, Marcel Dekker, Inc., New York, 1978\nSadik CD et al., PLoS One 2011\n15\nSchaefer W, et al., PNAS 2011;108(27): 11187-11192.\nShen C, et al., J. Aliment Pharmacol Ther. 2005; 21(3): 251-258.\nten Hove T, et al., Gut 2002; 50: 206-211.\nvan den Berg WB, et al,. Nat. Rev. Rheumatol. 2009;5: 549-553.\nWeinblatt et al., Ann.Rheum.Dis. 2007\n20\nWerner, R.G., Arzneimittelforschung (Drug Res.) 48 (1998) 870-880\nWoodrick R et al., Bull NYU Hosp Jt Dis. 2010; 68(3): 211-7.\nZhang Y, et al., Int Immunopharmacol. 2013;15(2):199-205.\nZiolkowska M, et al., Journal of Immunology, 2000;164(5):2832-2838.\n25\nSEQUENCE LISTING\n[0242]\n30\n35\n40\n45\n50\nSer Tyr Gly Val His\n1\n5\n55\n30"
+      },
+      "residue_region": {
+        "pages": [
+          30
+        ]
+      },
+      "seq_id_no": "1"
+    },
+    {
+      "declared": {
+        "declaration_page": 30,
+        "declared_length": 16,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 2 on page 30 (length 16)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 16/16",
+        "reported reasons: unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence"
+          ],
+          "line_count": 44
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "Arr rr r r r r r r r r r r r r r s",
+          "Lys Val Ser Asn Arg Phe Ser"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 16,
+        "parsed_residues": "????????????????",
+        "reasons": [
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:2",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": [
+          31
+        ]
+      },
+      "seq_id_no": "2"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 13,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 3 on page 31 (length 13)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 6 kept by the fusion",
+        "completeness unverified: a source conflict covers these pages",
+        "reported reasons: observed 15 exceeds declared 13"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence"
+          ],
+          "line_count": 44
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "Arr rr r r r r r r r r r r r r r s",
+          "Lys Val Ser Asn Arg Phe Ser"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 15,
+        "parsed_residues": "ARRRRRRRRRRRRYR",
+        "reasons": [
+          "observed 15 exceeds declared 13"
+        ],
+        "status": "conflict"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:3",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": [
+          31
+        ]
+      },
+      "seq_id_no": "3"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 16,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 4 on page 31 (length 16)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 16/16",
+        "reported reasons: unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence"
+          ],
+          "line_count": 44
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "Arr rr r r r r r r r r r r r r r s",
+          "Lys Val Ser Asn Arg Phe Ser"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 16,
+        "parsed_residues": "????????????????",
+        "reasons": [
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:4",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": [
+          31
+        ]
+      },
+      "seq_id_no": "4"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 7,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 5 on page 31 (length 7)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 6 kept by the fusion",
+        "residues parsed: observed length 7"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence"
+          ],
+          "line_count": 44
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "Arr rr r r r r r r r r r r r r r s",
+          "Lys Val Ser Asn Arg Phe Ser"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 7,
+        "parsed_residues": "KVSNRFS",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:5",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": [
+          31
+        ]
+      },
+      "seq_id_no": "5"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 9,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 6 on page 31 (length 9)",
+        "residue region pages: [31, 32]",
+        "region OCR ran on [31, 32] → 62 OCR line(s), 13 kept by the fusion",
+        "residues parsed: observed length 9"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence"
+          ],
+          "line_count": 71
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 13
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "Arr rr r r r r r r r r r r r r r s",
+          "Lys Val Ser Asn Arg Phe Ser"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 9,
+        "parsed_residues": "SQTTHAPFT",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:6",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 62,
+        "native_superseded": [],
+        "pages": [
+          31,
+          32
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31\nEP 3 027 649 B1\nSer Gln Thr Thr His Ala Pro Phe Thr\n1\n5\n5\n10\n60\nC\n15\n120\nc     c\n180\nccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac\n20\n240\nacg c g c  ct\n300\na a    caa\n360\nag g a ag agg cc\n25\n364\ntcag\n30\n35\n40\n45\n50\n55\n32"
+      },
+      "residue_region": {
+        "pages": [
+          31,
+          32
+        ]
+      },
+      "seq_id_no": "6"
+    },
+    {
+      "declared": {
+        "declaration_page": 32,
+        "declared_length": 364,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 7 on page 32 (length 364)",
+        "residue region pages: [32]",
+        "region OCR ran on [32] → 30 OCR line(s), 7 kept by the fusion",
+        "partial residues parsed: 90/364",
+        "reported reasons: recovered 90 of declared 364"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 7",
+            "<211> 364"
+          ],
+          "line_count": 27
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Ser Gln Thr Thr His Ala Pro Phe Thr",
+            "c     c",
+            "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac"
+          ],
+          "line_count": 7
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Ser Gln Thr Thr His Ala Pro Phe Thr",
+          "c     c",
+          "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac",
+          "acg c g c  ct",
+          "a a    caa"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 90,
+        "parsed_residues": "CCCCAGGCAAGGGCCTGGAATGGGTGTCCGTGATCTGGTCCGACGGCACCACCACCTACAACACGCGCCTAACAAAGGAAGAGGCCTCAG",
+        "reasons": [
+          "recovered 90 of declared 364"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:7",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 30,
+        "native_superseded": [],
+        "pages": [
+          32
+        ],
+        "text": "EP 3 027 649 B1\nSer Gln Thr Thr His Ala Pro Phe Thr\n1\n5\n5\n10\n60\nC\n15\n120\nc     c\n180\nccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac\n20\n240\nacg c g c  ct\n300\na a    caa\n360\nag g a ag agg cc\n25\n364\ntcag\n30\n35\n40\n45\n50\n55\n32"
+      },
+      "residue_region": {
+        "pages": [
+          32
+        ]
+      },
+      "seq_id_no": "7"
+    },
+    {
+      "declared": {
+        "declaration_page": 32,
+        "declared_length": 121,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 8 on page 32 (length 121)",
+        "residue region pages: [32, 33]",
+        "region OCR ran on [32, 33] → 89 OCR line(s), 22 kept by the fusion",
+        "partial residues parsed: 97/121",
+        "reported reasons: recovered 97 of declared 121; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 7",
+            "<211> 364"
+          ],
+          "line_count": 52
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Ser Gln Thr Thr His Ala Pro Phe Thr",
+            "c     c",
+            "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac"
+          ],
+          "line_count": 22
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Ser Gln Thr Thr His Ala Pro Phe Thr",
+          "c     c",
+          "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac",
+          "acg c g c  ct",
+          "a a    caa"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 97,
+        "parsed_residues": "EVQLVESGGGLVQPGG?????????????????SVIWSDGTTTYNSALK???????????????????????????????????????QGTTVTVSS",
+        "reasons": [
+          "recovered 97 of declared 121",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:8",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 89,
+        "native_superseded": [],
+        "pages": [
+          32,
+          33
+        ],
+        "text": "EP 3 027 649 B1\nSer Gln Thr Thr His Ala Pro Phe Thr\n1\n5\n5\n10\n60\nC\n15\n120\nc     c\n180\nccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac\n20\n240\nacg c g c  ct\n300\na a    caa\n360\nag g a ag agg cc\n25\n364\ntcag\n30\n35\n40\n45\n50\n55\n32\nEP 3 027 649 B1\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n5\n15\n1\n10\n5\nSr r r r r r r r  r Sr r rr Sr rr yr\n20\n25\n30\nG               a\n10\n35\n40\n45\nSer Val Ile Trp Ser Asp Gly Thr Thr Thr Tyr Asn Ser Ala Leu Lys\n50\n60\n55\n15\nSrr Tr r r  r Tr r r r r rr r rr r e\n65\n75\n70\n80\n20\nGr r  r T  r r   r r r  nr n\n85\n95\n90\nAr r r r r  r r r r  r r r  y\n105\n110\n25\n100\nGln Gly Thr Thr Val Thr Val Ser Ser\n115\n120\n30\n35\nyns  i    c <ncc\n40\n60\nag Ccag Cag Ccg Cagg Cag\n120\na cg g  ag cgg\n45\n180\ncaaa cg g a a act\n240\nCg Cg  Ccg g t\n300\ng   g\n50\n337\nttcaccttcg gccagggcac caagctggag atcaaac\n55\n33"
+      },
+      "residue_region": {
+        "pages": [
+          32,
+          33
+        ]
+      },
+      "seq_id_no": "8"
+    },
+    {
+      "declared": {
+        "declaration_page": 33,
+        "declared_length": 337,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 9 on page 33 (length 337)",
+        "residue region pages: [33]",
+        "region OCR ran on [33] → 59 OCR line(s), 15 kept by the fusion",
+        "partial residues parsed: 88/337",
+        "reported reasons: recovered 88 of declared 337"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 25
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly",
+            "Sr r r r r r r r  r Sr r rr Sr rr yr",
+            "G               a"
+          ],
+          "line_count": 15
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly",
+          "Sr r r r r r r r  r Sr r rr Sr rr yr",
+          "G               a",
+          "Ser Val Ile Trp Ser Asp Gly Thr Thr Thr Tyr Asn Ser Ala Leu Lys",
+          "Srr Tr r r  r Tr r r r r rr r rr r e"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 88,
+        "parsed_residues": "AGCCAGCAGCCGCAGGCAGACGGAGCGGCAAACGGAAACTCGCGCCGGTGGTTCACCTTCGGCCAGGGCACCAAGCTGGAGATCAAAC",
+        "reasons": [
+          "recovered 88 of declared 337"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:9",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 59,
+        "native_superseded": [],
+        "pages": [
+          33
+        ],
+        "text": "EP 3 027 649 B1\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n5\n15\n1\n10\n5\nSr r r r r r r r  r Sr r rr Sr rr yr\n20\n25\n30\nG               a\n10\n35\n40\n45\nSer Val Ile Trp Ser Asp Gly Thr Thr Thr Tyr Asn Ser Ala Leu Lys\n50\n60\n55\n15\nSrr Tr r r  r Tr r r r r rr r rr r e\n65\n75\n70\n80\n20\nGr r  r T  r r   r r r  nr n\n85\n95\n90\nAr r r r r  r r r r  r r r  y\n105\n110\n25\n100\nGln Gly Thr Thr Val Thr Val Ser Ser\n115\n120\n30\n35\nyns  i    c <ncc\n40\n60\nag Ccag Cag Ccg Cagg Cag\n120\na cg g  ag cgg\n45\n180\ncaaa cg g a a act\n240\nCg Cg  Ccg g t\n300\ng   g\n50\n337\nttcaccttcg gccagggcac caagctggag atcaaac\n55\n33"
+      },
+      "residue_region": {
+        "pages": [
+          33
+        ]
+      },
+      "seq_id_no": "9"
+    },
+    {
+      "declared": {
+        "declaration_page": 33,
+        "declared_length": 112,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 10 on page 33 (length 112)",
+        "residue region pages: [34]",
+        "region OCR ran on [34] → 56 OCR line(s), 12 kept by the fusion",
+        "partial residues parsed: 83/112",
+        "reported reasons: recovered 83 of declared 112; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: #134 VL domain amino acid sequence",
+            "<400> 10"
+          ],
+          "line_count": 26
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "A r r  r   r r    r  r t",
+            "Gr r r r Sr r Sr Sr Sr Sr Sr r Sr r r er",
+            "A   r r   r r r r r r r r er"
+          ],
+          "line_count": 12
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "A r r  r   r r    r  r t",
+          "Gr r r r Sr r Sr Sr Sr Sr Sr r Sr r r er",
+          "A   r r   r r r r r r r r er",
+          "Drr   r r r r r  r  r r r  ro",
+          "Arr r r r r sr r r r r r r r r rr r"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 83,
+        "parsed_residues": "????????????????????????????????????????????????????????????????SRVEAEDVGVYYCSQT???",
+        "reasons": [
+          "recovered 83 of declared 112",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:10",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 56,
+        "native_superseded": [],
+        "pages": [
+          34
+        ],
+        "text": "EP 3 027 649 B1\n5\nA r r  r   r r    r  r t\n10\n1\n15\n5\nGr r r r Sr r Sr Sr Sr Sr Sr r Sr r r er\n10\n20\n25\n30\nA   r r   r r r r r r r r er\n35\n40\n45\n15\nDrr   r r r r r  r  r r r  ro\n50\n55\n60\n20\nArr r r r r sr r r r r r r r r rr r\n65\n70\n75\n80\nSer Arg Val Glu Ala Glu Asp Val Gly Val Tyr Tyr Cys Ser Gln Thr\n25\n85\n90\n95\nT r    r\n100\n105\n110\n30\n35\n40\n60\ng\n120\n45\n180\naccag cag g  cg ca\n240\nCgg gcg Cgg cgg gg cet\n300\na a    a\n50\n360\nag g a ag ag cc\n364\ntcag\n55\n34"
+      },
+      "residue_region": {
+        "pages": [
+          34
+        ]
+      },
+      "seq_id_no": "10"
+    },
+    {
+      "declared": {
+        "declaration_page": 34,
+        "declared_length": 364,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 11 on page 34 (length 364)",
+        "residue region pages: [34]",
+        "region OCR ran on [34] → 56 OCR line(s), 12 kept by the fusion",
+        "partial residues parsed: 47/364",
+        "reported reasons: recovered 47 of declared 364; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: #134 VL domain amino acid sequence",
+            "<400> 10"
+          ],
+          "line_count": 26
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "A r r  r   r r    r  r t",
+            "Gr r r r Sr r Sr Sr Sr Sr Sr r Sr r r er",
+            "A   r r   r r r r r r r r er"
+          ],
+          "line_count": 12
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "A r r  r   r r    r  r t",
+          "Gr r r r Sr r Sr Sr Sr Sr Sr r Sr r r er",
+          "A   r r   r r r r r r r r er",
+          "Drr   r r r r r  r  r r r  ro",
+          "Arr r r r r sr r r r r r r r r rr r"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 47,
+        "parsed_residues": "ACCAGCAGGCGCACGGGCGCGGCGGGGCETAAAAGGAAGAGCCTCAG",
+        "reasons": [
+          "recovered 47 of declared 364",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:11",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 56,
+        "native_superseded": [],
+        "pages": [
+          34
+        ],
+        "text": "EP 3 027 649 B1\n5\nA r r  r   r r    r  r t\n10\n1\n15\n5\nGr r r r Sr r Sr Sr Sr Sr Sr r Sr r r er\n10\n20\n25\n30\nA   r r   r r r r r r r r er\n35\n40\n45\n15\nDrr   r r r r r  r  r r r  ro\n50\n55\n60\n20\nArr r r r r sr r r r r r r r r rr r\n65\n70\n75\n80\nSer Arg Val Glu Ala Glu Asp Val Gly Val Tyr Tyr Cys Ser Gln Thr\n25\n85\n90\n95\nT r    r\n100\n105\n110\n30\n35\n40\n60\ng\n120\n45\n180\naccag cag g  cg ca\n240\nCgg gcg Cgg cgg gg cet\n300\na a    a\n50\n360\nag g a ag ag cc\n364\ntcag\n55\n34"
+      },
+      "residue_region": {
+        "pages": [
+          34
+        ]
+      },
+      "seq_id_no": "11"
+    },
+    {
+      "declared": {
+        "declaration_page": 34,
+        "declared_length": 121,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 12 on page 34 (length 121)",
+        "residue region pages: [35]",
+        "region OCR ran on [35] → 59 OCR line(s), 15 kept by the fusion",
+        "partial residues parsed: 100/121",
+        "reported reasons: recovered 100 of declared 121; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #136 VH domain amino acid sequence"
+          ],
+          "line_count": 24
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "nns  ie    s n <cee",
+            "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly",
+            "Sr r r r r r r r r r r r r r r r"
+          ],
+          "line_count": 15
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "nns  ie    s n <cee",
+          "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly",
+          "Sr r r r r r r r r r r r r r r r",
+          "GT               al",
+          "Ser Val Ile Trp Ser Asp Gly Thr Thr Thr Tyr Asn Ser Ala Leu Lys"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 100,
+        "parsed_residues": "EVQLVESGGGLVQPGG??????????????????SVIWSDGTTTYNSALK?????????????????????????????????????????QGTTVTVSS",
+        "reasons": [
+          "recovered 100 of declared 121",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:12",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 59,
+        "native_superseded": [],
+        "pages": [
+          35
+        ],
+        "text": "EP 3 027 649 B1\nnns  ie    s n <cee\n5\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n1\n10\n15\n5\n10\nSr r r r r r r r r r r r r r r r\n20\n25\n30\nGT               al\n15\n35\n40\n45\nSer Val Ile Trp Ser Asp Gly Thr Thr Thr Tyr Asn Ser Ala Leu Lys\n55\n50\n60\n20\nSrr r r r r r r  r  r rr r r r en\n75\n65\n70\n80\n25\nGr r r r T  r r AA  r r r  r\n85\n90\n95\nAr r r r r  r r r r r r r r r y\n105\n110\n30\n100\nGln Gly Thr Thr Val Thr Val Ser Ser\n115\n120\n35\n40\n45\n60\nCa Cg Cg cg C Cg\n120\natcagctgca ggtccagcca gagcctggtg cacagcaacg gcgacaccta cttccactgg\n50\n180\nGag gg cgg accg accgg acct\n240\nCgg Cg g g g gt\n300\nagg  gg g  c\n55\n337\nttcaccttcg gccagggcac caagctggag atcaaac\n35"
+      },
+      "residue_region": {
+        "pages": [
+          35
+        ]
+      },
+      "seq_id_no": "12"
+    },
+    {
+      "declared": {
+        "declaration_page": 35,
+        "declared_length": 337,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 13 on page 35 (length 337)",
+        "residue region pages: [35]",
+        "region OCR ran on [35] → 59 OCR line(s), 15 kept by the fusion",
+        "partial residues parsed: 146/337",
+        "reported reasons: recovered 146 of declared 337"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #136 VH domain amino acid sequence"
+          ],
+          "line_count": 24
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "nns  ie    s n <cee",
+            "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly",
+            "Sr r r r r r r r r r r r r r r r"
+          ],
+          "line_count": 15
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "nns  ie    s n <cee",
+          "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly",
+          "Sr r r r r r r r r r r r r r r r",
+          "GT               al",
+          "Ser Val Ile Trp Ser Asp Gly Thr Thr Thr Tyr Asn Ser Ala Leu Lys"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 146,
+        "parsed_residues": "CACGCGCGCCGATCAGCTGCAGGTCCAGCCAGAGCCTGGTGCACAGCAACGGCGACACCTACTTCCACTGGGAGGGCGGACCGACCGGACCTCGGCGGGGGTAGGGGGCTTCACCTTCGGCCAGGGCACCAAGCTGGAGATCAAAC",
+        "reasons": [
+          "recovered 146 of declared 337"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:13",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 59,
+        "native_superseded": [],
+        "pages": [
+          35
+        ],
+        "text": "EP 3 027 649 B1\nnns  ie    s n <cee\n5\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n1\n10\n15\n5\n10\nSr r r r r r r r r r r r r r r r\n20\n25\n30\nGT               al\n15\n35\n40\n45\nSer Val Ile Trp Ser Asp Gly Thr Thr Thr Tyr Asn Ser Ala Leu Lys\n55\n50\n60\n20\nSrr r r r r r r  r  r rr r r r en\n75\n65\n70\n80\n25\nGr r r r T  r r AA  r r r  r\n85\n90\n95\nAr r r r r  r r r r r r r r r y\n105\n110\n30\n100\nGln Gly Thr Thr Val Thr Val Ser Ser\n115\n120\n35\n40\n45\n60\nCa Cg Cg cg C Cg\n120\natcagctgca ggtccagcca gagcctggtg cacagcaacg gcgacaccta cttccactgg\n50\n180\nGag gg cgg accg accgg acct\n240\nCgg Cg g g g gt\n300\nagg  gg g  c\n55\n337\nttcaccttcg gccagggcac caagctggag atcaaac\n35"
+      },
+      "residue_region": {
+        "pages": [
+          35
+        ]
+      },
+      "seq_id_no": "13"
+    },
+    {
+      "declared": {
+        "declaration_page": 35,
+        "declared_length": 112,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 14 on page 35 (length 112)",
+        "residue region pages: [36]",
+        "region OCR ran on [36] → 52 OCR line(s), 9 kept by the fusion",
+        "partial residues parsed: 101/112",
+        "reported reasons: recovered 101 of declared 112; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<211> 112",
+            "<212> PRT"
+          ],
+          "line_count": 31
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "A r r  r r r r r    r  r ty",
+            "Gr Sr S r r r Sr r Sr Sr r r r r rr er",
+            "A   r r  r r r r r r r r r er"
+          ],
+          "line_count": 9
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "A r r  r r r r r    r  r ty",
+          "Gr Sr S r r r Sr r Sr Sr r r r r rr er",
+          "A   r r  r r r r r r r r r er",
+          "nr n r r r r  r  r r r r r  ro",
+          "r r r r r r r r r r r r r r r r"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 101,
+        "parsed_residues": "?????????????????????????????????????????????????????????????????????SRVEAEDVGVYYCSQTTHAPFTFGQGTKLEIK",
+        "reasons": [
+          "recovered 101 of declared 112",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:14",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 52,
+        "native_superseded": [],
+        "pages": [
+          36
+        ],
+        "text": "EP 3 027 649 B1\n5\n10\nA r r  r r r r r    r  r ty\n1\n10\n15\n5\nGr Sr S r r r Sr r Sr Sr r r r r rr er\n15\n30\n20\n25\nA   r r  r r r r r r r r r er\n35\n40\n45\n20\nnr n r r r r  r  r r r r r  ro\n55\n60\n50\n25\nr r r r r r r r r r r r r r r r\n65\n70\n75\n80\nSer Arg Val Glu Ala Glu Asp Val Gly Val Tyr Tyr Cys Ser Gln Thr\n30\n06\n95\n85\nThr His Ala Pro Phe Thr Phe Gly Gln Gly Thr Lys Leu Glu Ile Lys\n100\n105\n110\n35\n40\n45\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n10\n15\n1\n5\n50\nSer r r r r r   r r r r r sp\n20\n25\n30\n55\n36"
+      },
+      "residue_region": {
+        "pages": [
+          36
+        ]
+      },
+      "seq_id_no": "14"
+    },
+    {
+      "declared": {
+        "declaration_page": 36,
+        "declared_length": 30,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 15 on page 36 (length 30)",
+        "residue region pages: [36]",
+        "region OCR ran on [36] → 52 OCR line(s), 9 kept by the fusion",
+        "partial residues parsed: 28/30",
+        "reported reasons: recovered 28 of declared 30; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<211> 112",
+            "<212> PRT"
+          ],
+          "line_count": 31
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "A r r  r r r r r    r  r ty",
+            "Gr Sr S r r r Sr r Sr Sr r r r r rr er",
+            "A   r r  r r r r r r r r r er"
+          ],
+          "line_count": 9
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "A r r  r r r r r    r  r ty",
+          "Gr Sr S r r r Sr r Sr Sr r r r r rr er",
+          "A   r r  r r r r r r r r r er",
+          "nr n r r r r  r  r r r r r  ro",
+          "r r r r r r r r r r r r r r r r"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 28,
+        "parsed_residues": "EVQLVESGGGLVQPGGS???????????",
+        "reasons": [
+          "recovered 28 of declared 30",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:15",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 52,
+        "native_superseded": [],
+        "pages": [
+          36
+        ],
+        "text": "EP 3 027 649 B1\n5\n10\nA r r  r r r r r    r  r ty\n1\n10\n15\n5\nGr Sr S r r r Sr r Sr Sr r r r r rr er\n15\n30\n20\n25\nA   r r  r r r r r r r r r er\n35\n40\n45\n20\nnr n r r r r  r  r r r r r  ro\n55\n60\n50\n25\nr r r r r r r r r r r r r r r r\n65\n70\n75\n80\nSer Arg Val Glu Ala Glu Asp Val Gly Val Tyr Tyr Cys Ser Gln Thr\n30\n06\n95\n85\nThr His Ala Pro Phe Thr Phe Gly Gln Gly Thr Lys Leu Glu Ile Lys\n100\n105\n110\n35\n40\n45\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n10\n15\n1\n5\n50\nSer r r r r r   r r r r r sp\n20\n25\n30\n55\n36"
+      },
+      "residue_region": {
+        "pages": [
+          36
+        ]
+      },
+      "seq_id_no": "15"
+    },
+    {
+      "declared": {
+        "declaration_page": 36,
+        "declared_length": 14,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 16 on page 36 (length 14)",
+        "residue region pages: [37]",
+        "region OCR ran on [37] → 37 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 4/14",
+        "reported reasons: recovered 4 of declared 14"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: #134 VH FR2 amino acid sequence",
+            "<400> 16"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T     A        er",
+            "Arr rr r rr r r r r  r r Tr rr r r n",
+            "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T     A        er",
+          "Arr rr r rr r r r r  r r Tr rr r r n",
+          "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "Trp Gly Gln Gly Thr Thr Val Thr Val Ser Ser",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 4,
+        "parsed_residues": "TAER",
+        "reasons": [
+          "recovered 4 of declared 14"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:16",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          37
+        ],
+        "text": "EP 3 027 649 B1\n5\nT     A        er\n10\n1\n5\n10\n15\nArr rr r rr r r r r  r r Tr rr r r n\n10\n15\n5\n1\n20\nMet Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n30\n25\n25\n30\n35\nTrp Gly Gln Gly Thr Thr Val Thr Val Ser Ser\n1\n10\n5\n40\n45\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n50\nGlu Pro Ala Ser Ile Ser Cys\n20\n55\n37"
+      },
+      "residue_region": {
+        "pages": [
+          37
+        ]
+      },
+      "seq_id_no": "16"
+    },
+    {
+      "declared": {
+        "declaration_page": 37,
+        "declared_length": 32,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 17 on page 37 (length 32)",
+        "residue region pages: [37]",
+        "region OCR ran on [37] → 37 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 31/32",
+        "reported reasons: recovered 31 of declared 32; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: #134 VH FR2 amino acid sequence",
+            "<400> 16"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T     A        er",
+            "Arr rr r rr r r r r  r r Tr rr r r n",
+            "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T     A        er",
+          "Arr rr r rr r r r r  r r Tr rr r r n",
+          "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "Trp Gly Gln Gly Thr Thr Val Thr Val Ser Ser",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 31,
+        "parsed_residues": "???????????????MNSLRAEDTAVYYCAR",
+        "reasons": [
+          "recovered 31 of declared 32",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:17",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          37
+        ],
+        "text": "EP 3 027 649 B1\n5\nT     A        er\n10\n1\n5\n10\n15\nArr rr r rr r r r r  r r Tr rr r r n\n10\n15\n5\n1\n20\nMet Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n30\n25\n25\n30\n35\nTrp Gly Gln Gly Thr Thr Val Thr Val Ser Ser\n1\n10\n5\n40\n45\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n50\nGlu Pro Ala Ser Ile Ser Cys\n20\n55\n37"
+      },
+      "residue_region": {
+        "pages": [
+          37
+        ]
+      },
+      "seq_id_no": "17"
+    },
+    {
+      "declared": {
+        "declaration_page": 37,
+        "declared_length": 11,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 18 on page 37 (length 11)",
+        "residue region pages: [37]",
+        "region OCR ran on [37] → 37 OCR line(s), 6 kept by the fusion",
+        "residues parsed: observed length 11"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: #134 VH FR2 amino acid sequence",
+            "<400> 16"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T     A        er",
+            "Arr rr r rr r r r r  r r Tr rr r r n",
+            "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T     A        er",
+          "Arr rr r rr r r r r  r r Tr rr r r n",
+          "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "Trp Gly Gln Gly Thr Thr Val Thr Val Ser Ser",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 11,
+        "parsed_residues": "WGQGTTVTVSS",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:18",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          37
+        ],
+        "text": "EP 3 027 649 B1\n5\nT     A        er\n10\n1\n5\n10\n15\nArr rr r rr r r r r  r r Tr rr r r n\n10\n15\n5\n1\n20\nMet Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n30\n25\n25\n30\n35\nTrp Gly Gln Gly Thr Thr Val Thr Val Ser Ser\n1\n10\n5\n40\n45\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n50\nGlu Pro Ala Ser Ile Ser Cys\n20\n55\n37"
+      },
+      "residue_region": {
+        "pages": [
+          37
+        ]
+      },
+      "seq_id_no": "18"
+    },
+    {
+      "declared": {
+        "declaration_page": 37,
+        "declared_length": 23,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 19 on page 37 (length 23)",
+        "residue region pages: [37]",
+        "region OCR ran on [37] → 37 OCR line(s), 6 kept by the fusion",
+        "residues parsed: observed length 23"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: #134 VH FR2 amino acid sequence",
+            "<400> 16"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T     A        er",
+            "Arr rr r rr r r r r  r r Tr rr r r n",
+            "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T     A        er",
+          "Arr rr r rr r r r r  r r Tr rr r r n",
+          "Met Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "Trp Gly Gln Gly Thr Thr Val Thr Val Ser Ser",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 23,
+        "parsed_residues": "DIVMTQSPLSLPVTPGEPASISC",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:19",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          37
+        ],
+        "text": "EP 3 027 649 B1\n5\nT     A        er\n10\n1\n5\n10\n15\nArr rr r rr r r r r  r r Tr rr r r n\n10\n15\n5\n1\n20\nMet Asn Ser Leu Arg Ala Glu Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n30\n25\n25\n30\n35\nTrp Gly Gln Gly Thr Thr Val Thr Val Ser Ser\n1\n10\n5\n40\n45\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n50\nGlu Pro Ala Ser Ile Ser Cys\n20\n55\n37"
+      },
+      "residue_region": {
+        "pages": [
+          37
+        ]
+      },
+      "seq_id_no": "19"
+    },
+    {
+      "declared": {
+        "declaration_page": 37,
+        "declared_length": 15,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 20 on page 37 (length 15)",
+        "residue region pages: [38]",
+        "region OCR ran on [38] → 40 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 8/15",
+        "reported reasons: recovered 8 of declared 15"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 VL FR2 amino acid sequence"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T r r r  r    r   r  r",
+            "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+            "I r r  Ar  r   r  r  r r yr"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T r r r  r    r   r  r",
+          "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+          "I r r  Ar  r   r  r  r r yr",
+          "Phe Gly Gln Gly Thr Lys Leu Glu Ile Lys",
+          "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 8,
+        "parsed_residues": "TRRRRRRR",
+        "reasons": [
+          "recovered 8 of declared 15"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:20",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 40,
+        "native_superseded": [],
+        "pages": [
+          38
+        ],
+        "text": "EP 3 027 649 B1\n5\nT r r r  r    r   r  r\n10\n15\n1\n5\n10\n15\nGly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr\n20\n10\n15\n1\n5\nI r r  Ar  r   r  r  r r yr\n20\n25\n30\n25\n30\n35\nPhe Gly Gln Gly Thr Lys Leu Glu Ile Lys\n10\n1\n5\n40\n45\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n50\n10\n15\n1\n5\nSer Leu Arg Leu Ser Cys Ala Ala Ser Gly Phe Ser Leu Asp\n20\n25\n30\n55\n38"
+      },
+      "residue_region": {
+        "pages": [
+          38
+        ]
+      },
+      "seq_id_no": "20"
+    },
+    {
+      "declared": {
+        "declaration_page": 38,
+        "declared_length": 32,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 21 on page 38 (length 32)",
+        "residue region pages: [38]",
+        "region OCR ran on [38] → 40 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 26/32",
+        "reported reasons: recovered 26 of declared 32; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 VL FR2 amino acid sequence"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T r r r  r    r   r  r",
+            "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+            "I r r  Ar  r   r  r  r r yr"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T r r r  r    r   r  r",
+          "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+          "I r r  Ar  r   r  r  r r yr",
+          "Phe Gly Gln Gly Thr Lys Leu Glu Ile Lys",
+          "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 26,
+        "parsed_residues": "GVPDRFSGSGSGTDFT??????????",
+        "reasons": [
+          "recovered 26 of declared 32",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:21",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 40,
+        "native_superseded": [],
+        "pages": [
+          38
+        ],
+        "text": "EP 3 027 649 B1\n5\nT r r r  r    r   r  r\n10\n15\n1\n5\n10\n15\nGly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr\n20\n10\n15\n1\n5\nI r r  Ar  r   r  r  r r yr\n20\n25\n30\n25\n30\n35\nPhe Gly Gln Gly Thr Lys Leu Glu Ile Lys\n10\n1\n5\n40\n45\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n50\n10\n15\n1\n5\nSer Leu Arg Leu Ser Cys Ala Ala Ser Gly Phe Ser Leu Asp\n20\n25\n30\n55\n38"
+      },
+      "residue_region": {
+        "pages": [
+          38
+        ]
+      },
+      "seq_id_no": "21"
+    },
+    {
+      "declared": {
+        "declaration_page": 38,
+        "declared_length": 10,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 22 on page 38 (length 10)",
+        "residue region pages: [38]",
+        "region OCR ran on [38] → 40 OCR line(s), 6 kept by the fusion",
+        "residues parsed: observed length 10"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 VL FR2 amino acid sequence"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T r r r  r    r   r  r",
+            "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+            "I r r  Ar  r   r  r  r r yr"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T r r r  r    r   r  r",
+          "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+          "I r r  Ar  r   r  r  r r yr",
+          "Phe Gly Gln Gly Thr Lys Leu Glu Ile Lys",
+          "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 10,
+        "parsed_residues": "FGQGTKLEIK",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:22",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 40,
+        "native_superseded": [],
+        "pages": [
+          38
+        ],
+        "text": "EP 3 027 649 B1\n5\nT r r r  r    r   r  r\n10\n15\n1\n5\n10\n15\nGly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr\n20\n10\n15\n1\n5\nI r r  Ar  r   r  r  r r yr\n20\n25\n30\n25\n30\n35\nPhe Gly Gln Gly Thr Lys Leu Glu Ile Lys\n10\n1\n5\n40\n45\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n50\n10\n15\n1\n5\nSer Leu Arg Leu Ser Cys Ala Ala Ser Gly Phe Ser Leu Asp\n20\n25\n30\n55\n38"
+      },
+      "residue_region": {
+        "pages": [
+          38
+        ]
+      },
+      "seq_id_no": "22"
+    },
+    {
+      "declared": {
+        "declaration_page": 38,
+        "declared_length": 30,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 23 on page 38 (length 30)",
+        "residue region pages: [38]",
+        "region OCR ran on [38] → 40 OCR line(s), 6 kept by the fusion",
+        "residues parsed: observed length 30"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 VL FR2 amino acid sequence"
+          ],
+          "line_count": 40
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T r r r  r    r   r  r",
+            "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+            "I r r  Ar  r   r  r  r r yr"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T r r r  r    r   r  r",
+          "Gly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr",
+          "I r r  Ar  r   r  r  r r yr",
+          "Phe Gly Gln Gly Thr Lys Leu Glu Ile Lys",
+          "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 30,
+        "parsed_residues": "EVQLVESGGGLVQPGGSLRLSCAASGFSLD",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:23",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 40,
+        "native_superseded": [],
+        "pages": [
+          38
+        ],
+        "text": "EP 3 027 649 B1\n5\nT r r r  r    r   r  r\n10\n15\n1\n5\n10\n15\nGly Val Pro Asp Arg Phe Ser Gly Ser Gly Ser Gly Thr Asp Phe Thr\n20\n10\n15\n1\n5\nI r r  Ar  r   r  r  r r yr\n20\n25\n30\n25\n30\n35\nPhe Gly Gln Gly Thr Lys Leu Glu Ile Lys\n10\n1\n5\n40\n45\nGlu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly\n50\n10\n15\n1\n5\nSer Leu Arg Leu Ser Cys Ala Ala Ser Gly Phe Ser Leu Asp\n20\n25\n30\n55\n38"
+      },
+      "residue_region": {
+        "pages": [
+          38
+        ]
+      },
+      "seq_id_no": "23"
+    },
+    {
+      "declared": {
+        "declaration_page": 38,
+        "declared_length": 14,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 24 on page 38 (length 14)",
+        "residue region pages: [39]",
+        "region OCR ran on [39] → 37 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 3/14",
+        "reported reasons: recovered 3 of declared 14"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 39
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T             er",
+            "Arr rr r rr r r r   r r r rr r r n",
+            "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T             er",
+          "Arr rr r rr r r r   r r r rr r r n",
+          "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "err",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 3,
+        "parsed_residues": "TER",
+        "reasons": [
+          "recovered 3 of declared 14"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:24",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          39
+        ],
+        "text": "EP 3 027 649 B1\n5\nT             er\n1\n10\n5\n10\n15\n20\nArr rr r rr r r r   r r r rr r r n\n1\n10\n15\n5\n25\nMet Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n25\n30\n30\n35\nerr\n1\n10\n5\n40\n45\n50\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n55\nGlu Pro Ala Ser Ile Ser Cys\n20\n39"
+      },
+      "residue_region": {
+        "pages": [
+          39
+        ]
+      },
+      "seq_id_no": "24"
+    },
+    {
+      "declared": {
+        "declaration_page": 39,
+        "declared_length": 32,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 25 on page 39 (length 32)",
+        "residue region pages: [39]",
+        "region OCR ran on [39] → 37 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 30/32",
+        "reported reasons: recovered 30 of declared 32; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 39
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T             er",
+            "Arr rr r rr r r r   r r r rr r r n",
+            "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T             er",
+          "Arr rr r rr r r r   r r r rr r r n",
+          "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "err",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 30,
+        "parsed_residues": "??????????????MNSLRAGDTAVYYCAR",
+        "reasons": [
+          "recovered 30 of declared 32",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:25",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          39
+        ],
+        "text": "EP 3 027 649 B1\n5\nT             er\n1\n10\n5\n10\n15\n20\nArr rr r rr r r r   r r r rr r r n\n1\n10\n15\n5\n25\nMet Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n25\n30\n30\n35\nerr\n1\n10\n5\n40\n45\n50\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n55\nGlu Pro Ala Ser Ile Ser Cys\n20\n39"
+      },
+      "residue_region": {
+        "pages": [
+          39
+        ]
+      },
+      "seq_id_no": "25"
+    },
+    {
+      "declared": {
+        "declaration_page": 39,
+        "declared_length": 11,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 26 on page 39 (length 11)",
+        "residue region pages: [39]",
+        "region OCR ran on [39] → 37 OCR line(s), 6 kept by the fusion",
+        "partial residues parsed: 1/11",
+        "reported reasons: recovered 1 of declared 11; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 39
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T             er",
+            "Arr rr r rr r r r   r r r rr r r n",
+            "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T             er",
+          "Arr rr r rr r r r   r r r rr r r n",
+          "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "err",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 1,
+        "parsed_residues": "?",
+        "reasons": [
+          "recovered 1 of declared 11",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:26",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          39
+        ],
+        "text": "EP 3 027 649 B1\n5\nT             er\n1\n10\n5\n10\n15\n20\nArr rr r rr r r r   r r r rr r r n\n1\n10\n15\n5\n25\nMet Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n25\n30\n30\n35\nerr\n1\n10\n5\n40\n45\n50\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n55\nGlu Pro Ala Ser Ile Ser Cys\n20\n39"
+      },
+      "residue_region": {
+        "pages": [
+          39
+        ]
+      },
+      "seq_id_no": "26"
+    },
+    {
+      "declared": {
+        "declaration_page": 39,
+        "declared_length": 23,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 27 on page 39 (length 23)",
+        "residue region pages: [39]",
+        "region OCR ran on [39] → 37 OCR line(s), 6 kept by the fusion",
+        "residues parsed: observed length 23"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 39
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T             er",
+            "Arr rr r rr r r r   r r r rr r r n",
+            "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T             er",
+          "Arr rr r rr r r r   r r r rr r r n",
+          "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "err",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 23,
+        "parsed_residues": "DIVMTQSPLSLPVTPGEPASISC",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:27",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          39
+        ],
+        "text": "EP 3 027 649 B1\n5\nT             er\n1\n10\n5\n10\n15\n20\nArr rr r rr r r r   r r r rr r r n\n1\n10\n15\n5\n25\nMet Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n25\n30\n30\n35\nerr\n1\n10\n5\n40\n45\n50\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n55\nGlu Pro Ala Ser Ile Ser Cys\n20\n39"
+      },
+      "residue_region": {
+        "pages": [
+          39
+        ]
+      },
+      "seq_id_no": "27"
+    },
+    {
+      "declared": {
+        "declaration_page": 39,
+        "declared_length": 15,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 28 on page 39 (length 15)",
+        "residue region pages: [39]",
+        "region OCR ran on [39] → 37 OCR line(s), 6 kept by the fusion",
+        "OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 39
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "T             er",
+            "Arr rr r rr r r r   r r r rr r r n",
+            "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg"
+          ],
+          "line_count": 6
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "T             er",
+          "Arr rr r rr r r r   r r r rr r r n",
+          "Met Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg",
+          "err",
+          "Asp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 37,
+        "native_superseded": [],
+        "pages": [
+          39
+        ],
+        "text": "EP 3 027 649 B1\n5\nT             er\n1\n10\n5\n10\n15\n20\nArr rr r rr r r r   r r r rr r r n\n1\n10\n15\n5\n25\nMet Asn Ser Leu Arg Ala Gly Asp Thr Ala Val Tyr Tyr Cys Ala Arg\n20\n25\n30\n30\n35\nerr\n1\n10\n5\n40\n45\n50\nAsp Ile Val Met Thr Gln Ser Pro Leu Ser Leu Pro Val Thr Pro Gly\n1\n10\n15\n5\n55\nGlu Pro Ala Ser Ile Ser Cys\n20\n39"
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "28"
+    },
+    {
+      "declared": {
+        "declaration_page": 40,
+        "declared_length": 32,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 29 on page 40 (length 32)",
+        "residue region pages: [40]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<211> 15",
+            "<212> PRT"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "29"
+    },
+    {
+      "declared": {
+        "declaration_page": 40,
+        "declared_length": 10,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 30 on page 40 (length 10)",
+        "residue region pages: [40]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<211> 15",
+            "<212> PRT"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "30"
+    },
+    {
+      "declared": {
+        "declaration_page": 40,
+        "declared_length": 10,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 31 on page 40 (length 10)",
+        "residue region pages: [40]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<211> 15",
+            "<212> PRT"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "31"
+    },
+    {
+      "declared": {
+        "declaration_page": 40,
+        "declared_length": 17,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 32 on page 40 (length 17)",
+        "residue region pages: [40]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<211> 15",
+            "<212> PRT"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "32"
+    },
+    {
+      "declared": {
+        "declaration_page": 41,
+        "declared_length": 12,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 33 on page 41 (length 12)",
+        "residue region pages: [41]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "33"
+    },
+    {
+      "declared": {
+        "declaration_page": 41,
+        "declared_length": 11,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 34 on page 41 (length 11)",
+        "residue region pages: [41]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "34"
+    },
+    {
+      "declared": {
+        "declaration_page": 41,
+        "declared_length": 7,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 35 on page 41 (length 7)",
+        "residue region pages: [41]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "35"
+    },
+    {
+      "declared": {
+        "declaration_page": 41,
+        "declared_length": 9,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 36 on page 41 (length 9)",
+        "residue region pages: [41]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<213> Artificial sequence",
+            "<220>"
+          ],
+          "line_count": 43
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "36"
+    },
+    {
+      "declared": {
+        "declaration_page": 42,
+        "declared_length": 364,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 37 on page 42 (length 364)",
+        "residue region pages: [42]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: VL CDR 3 amino acid sequence",
+            "<400> 36"
+          ],
+          "line_count": 29
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "37"
+    },
+    {
+      "declared": {
+        "declaration_page": 42,
+        "declared_length": 121,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 38 on page 42 (length 121)",
+        "residue region pages: [42]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: VL CDR 3 amino acid sequence",
+            "<400> 36"
+          ],
+          "line_count": 29
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "38"
+    },
+    {
+      "declared": {
+        "declaration_page": 43,
+        "declared_length": 322,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 39 on page 43 (length 322)",
+        "residue region pages: [43]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 26
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "39"
+    },
+    {
+      "declared": {
+        "declaration_page": 43,
+        "declared_length": 107,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 40 on page 43 (length 107)",
+        "residue region pages: [43]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 26
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "40"
+    },
+    {
+      "declared": {
+        "declaration_page": 44,
+        "declared_length": 451,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 41 on page 44 (length 451)",
+        "residue region pages: [44]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<400> 40",
+            "5"
+          ],
+          "line_count": 21
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "41"
+    },
+    {
+      "declared": {
+        "declaration_page": 47,
+        "declared_length": 219,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 42 on page 47 (length 219)",
+        "residue region pages: [47]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 42",
+            "5"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "42"
+    },
+    {
+      "declared": {
+        "declaration_page": 48,
+        "declared_length": 451,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 43 on page 48 (length 451)",
+        "residue region pages: [48]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 19
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "43"
+    },
+    {
+      "declared": {
+        "declaration_page": 51,
+        "declared_length": 219,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 44 on page 51 (length 219)",
+        "residue region pages: [51]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 44",
+            "<211> 219"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "44"
+    },
+    {
+      "declared": {
+        "declaration_page": 52,
+        "declared_length": 451,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 45 on page 52 (length 451)",
+        "residue region pages: [52]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "<210> 45"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "45"
+    },
+    {
+      "declared": {
+        "declaration_page": 54,
+        "declared_length": 214,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 46 on page 54 (length 214)",
+        "residue region pages: [54]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "<210> 46"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "46"
+    },
+    {
+      "declared": {
+        "declaration_page": 55,
+        "declared_length": 699,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 47 on page 55 (length 699)",
+        "residue region pages: [55]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "47"
+    },
+    {
+      "declared": {
+        "declaration_page": 59,
+        "declared_length": 699,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 48 on page 59 (length 699)",
+        "residue region pages: [59]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "<210> 48"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "48"
+    },
+    {
+      "declared": {
+        "declaration_page": 62,
+        "declared_length": 699,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 49 on page 62 (length 699)",
+        "residue region pages: [62]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 49",
+            "<211> 699"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "49"
+    },
+    {
+      "declared": {
+        "declaration_page": 65,
+        "declared_length": 699,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 50 on page 65 (length 699)",
+        "residue region pages: [65]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 50",
+            "<211> 699"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "50"
+    },
+    {
+      "declared": {
+        "declaration_page": 69,
+        "declared_length": 219,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 51 on page 69 (length 219)",
+        "residue region pages: [69]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 51",
+            "<211> 219"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "51"
+    },
+    {
+      "declared": {
+        "declaration_page": 70,
+        "declared_length": 219,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 52 on page 70 (length 219)",
+        "residue region pages: [70]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 17
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "52"
+    },
+    {
+      "declared": {
+        "declaration_page": 71,
+        "declared_length": 212,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 53 on page 71 (length 212)",
+        "residue region pages: [71]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #29 first soluble chain"
+          ],
+          "line_count": 18
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "53"
+    },
+    {
+      "declared": {
+        "declaration_page": 73,
+        "declared_length": 214,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 54 on page 73 (length 214)",
+        "residue region pages: [73]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 54",
+            "<211> 214"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "54"
+    },
+    {
+      "declared": {
+        "declaration_page": 74,
+        "declared_length": 217,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 55 on page 74 (length 217)",
+        "residue region pages: [74]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "55"
+    },
+    {
+      "declared": {
+        "declaration_page": 75,
+        "declared_length": 217,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 56 on page 75 (length 217)",
+        "residue region pages: [75]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 17
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "56"
+    },
+    {
+      "declared": {
+        "declaration_page": 76,
+        "declared_length": 938,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 57 on page 76 (length 938)",
+        "residue region pages: [76]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #28 second soluble chain"
+          ],
+          "line_count": 17
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "57"
+    },
+    {
+      "declared": {
+        "declaration_page": 81,
+        "declared_length": 938,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 58 on page 81 (length 938)",
+        "residue region pages: [81]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "58"
+    },
+    {
+      "declared": {
+        "declaration_page": 86,
+        "declared_length": 938,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 59 on page 86 (length 938)",
+        "residue region pages: [86]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 59",
+            "<211> 938"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "59"
+    },
+    {
+      "declared": {
+        "declaration_page": 90,
+        "declared_length": 933,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 60 on page 90 (length 933)",
+        "residue region pages: [90]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 60",
+            "<211> 933"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "60"
+    },
+    {
+      "declared": {
+        "declaration_page": 94,
+        "declared_length": 214,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 61 on page 94 (length 214)",
+        "residue region pages: [94]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 18
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "61"
+    },
+    {
+      "declared": {
+        "declaration_page": 95,
+        "declared_length": 219,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 62 on page 95 (length 219)",
+        "residue region pages: [95]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<223> Synthetic sequence: #13, #26 and #27 light chain",
+            "<400> 61"
+          ],
+          "line_count": 17
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "62"
+    },
+    {
+      "declared": {
+        "declaration_page": 97,
+        "declared_length": 451,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 63 on page 97 (length 451)",
+        "residue region pages: [97]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 18
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "63"
+    },
+    {
+      "declared": {
+        "declaration_page": 100,
+        "declared_length": 455,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 64 on page 100 (length 455)",
+        "residue region pages: [100]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 64",
+            "<211> 455"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "64"
+    },
+    {
+      "declared": {
+        "declaration_page": 103,
+        "declared_length": 219,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 65 on page 103 (length 219)",
+        "residue region pages: [103]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 65",
+            "<211> 219"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "65"
+    },
+    {
+      "declared": {
+        "declaration_page": 104,
+        "declared_length": 212,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 66 on page 104 (length 212)",
+        "residue region pages: [104]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 17
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "66"
+    },
+    {
+      "declared": {
+        "declaration_page": 105,
+        "declared_length": 697,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 67 on page 105 (length 697)",
+        "residue region pages: [105]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #10 ’light’ chain (’crossed’)"
+          ],
+          "line_count": 18
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "67"
+    },
+    {
+      "declared": {
+        "declaration_page": 109,
+        "declared_length": 451,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 68 on page 109 (length 451)",
+        "residue region pages: [109]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 68",
+            "<211> 451"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "68"
+    },
+    {
+      "declared": {
+        "declaration_page": 112,
+        "declared_length": 455,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 69 on page 112 (length 455)",
+        "residue region pages: [112]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 69",
+            "5"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "69"
+    },
+    {
+      "declared": {
+        "declaration_page": 115,
+        "declared_length": 214,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 70 on page 115 (length 214)",
+        "residue region pages: [115]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 70",
+            "<211> 214"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "70"
+    },
+    {
+      "declared": {
+        "declaration_page": 116,
+        "declared_length": 217,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 71 on page 116 (length 217)",
+        "residue region pages: [116]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 19
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "71"
+    },
+    {
+      "declared": {
+        "declaration_page": 117,
+        "declared_length": 155,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 72 on page 117 (length 155)",
+        "residue region pages: [117]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<400> 71",
+            "5"
+          ],
+          "line_count": 18
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "72"
+    },
+    {
+      "declared": {
+        "declaration_page": 118,
+        "declared_length": 155,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 73 on page 118 (length 155)",
+        "residue region pages: [118]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<400> 72",
+            "5"
+          ],
+          "line_count": 19
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "73"
+    },
+    {
+      "declared": {
+        "declaration_page": 119,
+        "declared_length": 233,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 74 on page 119 (length 233)",
+        "residue region pages: [119]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 18
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "74"
+    },
+    {
+      "declared": {
+        "declaration_page": 120,
+        "declared_length": 937,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 75 on page 120 (length 937)",
+        "residue region pages: [120]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "75"
+    },
+    {
+      "declared": {
+        "declaration_page": 125,
+        "declared_length": 937,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 76 on page 125 (length 937)",
+        "residue region pages: [125]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "76"
+    },
+    {
+      "declared": {
+        "declaration_page": 129,
+        "declared_length": 937,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 77 on page 129 (length 937)",
+        "residue region pages: [129]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "77"
+    },
+    {
+      "declared": {
+        "declaration_page": 134,
+        "declared_length": 932,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 78 on page 134 (length 932)",
+        "residue region pages: [134]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "78"
+    },
+    {
+      "declared": {
+        "declaration_page": 138,
+        "declared_length": 936,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 79 on page 138 (length 936)",
+        "residue region pages: [138]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "79"
+    },
+    {
+      "declared": {
+        "declaration_page": 143,
+        "declared_length": 936,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 80 on page 143 (length 936)",
+        "residue region pages: [143]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "10"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "80"
+    },
+    {
+      "declared": {
+        "declaration_page": 147,
+        "declared_length": 936,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 81 on page 147 (length 936)",
+        "residue region pages: [147]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "5",
+            "<210> 81"
+          ],
+          "line_count": 20
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "81"
+    },
+    {
+      "declared": {
+        "declaration_page": 152,
+        "declared_length": 931,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 82 on page 152 (length 931)",
+        "residue region pages: [152, 153, 154, 155]",
+        "region OCR did NOT run on the residue pages",
+        "partial residues parsed: 6/931",
+        "reported reasons: recovered 6 of declared 931"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 82",
+            "<211> 931"
+          ],
+          "line_count": 64
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 6,
+        "parsed_residues": "CLAIMS",
+        "reasons": [
+          "recovered 6 of declared 931"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:82",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": [
+          152,
+          153,
+          154,
+          155
+        ]
+      },
+      "seq_id_no": "82"
+    }
+  ],
+  "inventory_summary": {
+    "complete": 7,
+    "conflict": 2,
+    "declared_only": 0,
+    "declared_total": 82,
+    "declared_total_unseen": 0,
+    "located": 28,
+    "missing": 54,
+    "observed_declarations": 82,
+    "outside_scope": 0,
+    "partial": 19,
+    "scope": {
+      "covers_full_document": true,
+      "document_page_count": 195,
+      "observed_pages": [
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        47,
+        48,
+        51,
+        52,
+        54,
+        55,
+        59,
+        62,
+        65,
+        69,
+        70,
+        71,
+        73,
+        74,
+        75,
+        76,
+        81,
+        86,
+        90,
+        94,
+        95,
+        97,
+        100,
+        103,
+        104,
+        105,
+        109,
+        112,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        125,
+        129,
+        134,
+        138,
+        143,
+        147,
+        152,
+        153,
+        154,
+        155
+      ],
+      "requested_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195
+      ]
+    }
+  },
+  "job_id": "job-0fde96e378e8",
+  "note": "system states, not verification: a 'complete' status has no character-level gold behind it until a human verifies the annotation queue"
+}

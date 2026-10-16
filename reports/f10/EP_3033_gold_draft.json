@@ -1,0 +1,141 @@
+{
+  "annotations": [
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-1",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:1; declared length 5; system status complete; recovered length 5; declared SEQ 1 on page 30 (length 5); residue region pages: [30]; region OCR ran on [30] → 41 OCR line(s), 1 kept by the fusion; residues parsed: observed length 5",
+      "page_number": 30,
+      "seq_id_no": "1",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-2",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record st25:2; declared length 16; system status missing; recovered length None; declared SEQ 2 on page 30 (length 16); residue region pages: [30]; region OCR ran on [30] → 41 OCR line(s), 1 kept by the fusion; OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue; reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)",
+      "page_number": 30,
+      "seq_id_no": "2",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-3",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record st25:3; declared length 13; system status missing; recovered length None; declared SEQ 3 on page 31 (length 13); residue region pages: [31]; region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion; OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue; reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)",
+      "page_number": 31,
+      "seq_id_no": "3",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-4",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record st25:4; declared length 16; system status missing; recovered length None; declared SEQ 4 on page 31 (length 16); residue region pages: [31]; region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion; OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue; reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)",
+      "page_number": 31,
+      "seq_id_no": "4",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-5",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record st25:5; declared length 7; system status missing; recovered length None; declared SEQ 5 on page 31 (length 7); residue region pages: [31]; region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion; OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue; reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)",
+      "page_number": 31,
+      "seq_id_no": "5",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-6",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:6; declared length 9; system status conflict; recovered length 29; declared SEQ 6 on page 31 (length 9); residue region pages: [31]; region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion; completeness unverified: a source conflict covers these pages; reported reasons: observed 29 exceeds declared 9",
+      "page_number": 31,
+      "seq_id_no": "6",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-7",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "DNA",
+      "note": "record sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:7; declared length 364; system status partial; recovered length 90; declared SEQ 7 on page 32 (length 364); residue region pages: [32]; region OCR ran on [32] → 30 OCR line(s), 7 kept by the fusion; partial residues parsed: 90/364; reported reasons: recovered 90 of declared 364",
+      "page_number": 32,
+      "seq_id_no": "7",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-8",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:8; declared length 121; system status partial; recovered length 100; declared SEQ 8 on page 32 (length 121); residue region pages: [32, 33]; region OCR ran on [32] → 30 OCR line(s), 7 kept by the fusion; partial residues parsed: 100/121; reported reasons: recovered 100 of declared 121; unresolved residue tokens present",
+      "page_number": 32,
+      "seq_id_no": "8",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-9",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "DNA",
+      "note": "record sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:9; declared length 337; system status partial; recovered length 111; declared SEQ 9 on page 33 (length 337); residue region pages: [33]; region OCR did NOT run on the residue pages; partial residues parsed: 111/337; reported reasons: recovered 111 of declared 337",
+      "page_number": 33,
+      "seq_id_no": "9",
+      "sequence": null,
+      "status": "draft"
+    },
+    {
+      "annotation_id": "gold-seq-sha256-ffb2e5bb7a63a87dd-10",
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "human_verified": false,
+      "kind": "sequence",
+      "molecule_type": "protein",
+      "note": "record st25:10; declared length 112; system status declared; recovered length None; declared SEQ 10 on page 33 (length 112); residue region pages: [33]; region OCR did NOT run on the residue pages; page never entered region OCR (selection/budget) — no OCR text to judge; reported reasons: residue region not reached in this run",
+      "page_number": 33,
+      "seq_id_no": "10",
+      "sequence": null,
+      "status": "draft"
+    }
+  ],
+  "draft": true,
+  "instructions": "Fill each 'sequence' with the residues read CHARACTER BY CHARACTER from the PDF, set status='verified' + human_verified=true, set the scope's scope_verified=true and pages to the annotated range, then run 'bio-pdf evaluate --gold <this file> --records <published extract.json>'.",
+  "job_id": "job-a1e99f6fff97",
+  "schema_version": "v2",
+  "scopes": [
+    {
+      "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+      "pages": [
+        30,
+        31,
+        32,
+        33
+      ],
+      "scope_verified": false,
+      "source_sha256": null
+    }
+  ]
+}

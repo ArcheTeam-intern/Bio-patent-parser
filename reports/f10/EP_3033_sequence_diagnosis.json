@@ -1,0 +1,647 @@
+{
+  "baseline_id": "5f49ee9a2a4e11bb",
+  "document_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295",
+  "entries": [
+    {
+      "declared": {
+        "declaration_page": 30,
+        "declared_length": 5,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 1 on page 30 (length 5)",
+        "residue region pages: [30]",
+        "region OCR ran on [30] → 41 OCR line(s), 1 kept by the fusion",
+        "residues parsed: observed length 5"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "Keffer, J., et al. 1991. EMBO J. 10:4025. Kehlen A et al., Clin Exp Immunol 2002. Koenders MI., et al. Arthritis & Rheumatism 2011; 63(8): 2329-2339. Kotake S. et al., Clin Invest 1999; 103(9):1345-52. Li X et al., Biochem Biophys Res Comm 2010 Makrides, S.C., Protein Expr. Purif. 17 (1999) 183-202. Mclnness I.B., and Schett G. NEJM 2011; 365: 2205-2219. Mitoma H, et al., Gastroenterology 2005: 128(2): 376-392. Nesbitt A, et al,. Inflamm Bowel Dis 2007; 13(11): 1323-1332. Osol ed,. Remington's Pharmaceutical Sciences, Mack Publishing., 1980. Pieringer H, et al,. Current Pharmaceutical Design 2013. Qi J, et al., Int Immunopharmacol. 2012;14(4):770-8. Robinson ed., Sustained and Controlled Release Drug Delivery Systems, Marcel Dekker, Inc., New York, 1978 Sadik CD et al., PLoS One 2011 Schaefer W, et al., PNAS 2011;108(27): 11187-11192. Shen C, et al., J. Aliment Pharmacol Ther. 2005; 21(3): 251-258. ten Hove T, et al., Gut 2002; 50: 206-211. van den Berg WB, et al,. Nat. Rev. Rheumatol. 2009;5: 549-553. Weinblatt et al., Ann.Rheum.Dis. 2007 Werner, R.G., Arzneimittelforschung (Drug Res.) 48 (1998) 870-880 Woodrick R et al., Bull NYU Hosp Jt Dis. 2010; 68(3): 211-7. Zhang Y, et al., Int Immunopharmacol. 2013;15(2):199-205. Ziolkowska M, et al., Journal of Immunology, 2000;164(5):2832-2838.",
+            "5"
+          ],
+          "line_count": 31
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Ser Tyr Gly Val His"
+          ],
+          "line_count": 1
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Ser Tyr Gly Val His"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 5,
+        "parsed_residues": "SYGVH",
+        "reasons": [],
+        "status": "complete"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:1",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 41,
+        "native_superseded": [],
+        "pages": [
+          30
+        ],
+        "text": "EP 3 027 649 B1\nKeffer, J., et al. 1991. EMBO J. 10:4025.\nKehlen A et al., Clin Exp Immunol 2002.\nKoenders MI., et al. Arthritis & Rheumatism 2011; 63(8): 2329-2339.\nKotake S. et al., Clin Invest 1999; 103(9):1345-52.\n5\nLi X et al., Biochem Biophys Res Comm 2010\nMakrides, S.C., Protein Expr. Purif. 17 (1999) 183-202.\nMclnness I.B., and Schett G. NEJM 2011; 365: 2205-2219.\nMitoma H, et al., Gastroenterology 2005: 128(2): 376-392.\nNesbitt A, et al,. Inflamm Bowel Dis 2007; 13(11): 1323-1332.\n10\nOsol ed,. Remington's Pharmaceutical Sciences, Mack Publishing., 1980.\nPieringer H, et al,. Current Pharmaceutical Design 2013.\nQi J, et al., Int Immunopharmacol. 2012;14(4):770-8.\nRobinson ed., Sustained and Controlled Release Drug Delivery Systems, Marcel Dekker, Inc., New York, 1978\nSadik CD et al., PLoS One 2011\n15\nSchaefer W, et al., PNAS 2011;108(27): 11187-11192.\nShen C, et al., J. Aliment Pharmacol Ther. 2005; 21(3): 251-258.\nten Hove T, et al., Gut 2002; 50: 206-211.\nvan den Berg WB, et al,. Nat. Rev. Rheumatol. 2009;5: 549-553.\nWeinblatt et al., Ann.Rheum.Dis. 2007\n20\nWerner, R.G., Arzneimittelforschung (Drug Res.) 48 (1998) 870-880\nWoodrick R et al., Bull NYU Hosp Jt Dis. 2010; 68(3): 211-7.\nZhang Y, et al., Int Immunopharmacol. 2013;15(2):199-205.\nZiolkowska M, et al., Journal of Immunology, 2000;164(5):2832-2838.\n25\nSEQUENCE LISTING\n[0242]\n30\n35\n40\n45\n50\nSer Tyr Gly Val His\n1\n5\n55\n30"
+      },
+      "residue_region": {
+        "pages": [
+          30
+        ]
+      },
+      "seq_id_no": "1"
+    },
+    {
+      "declared": {
+        "declaration_page": 30,
+        "declared_length": 16,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 2 on page 30 (length 16)",
+        "residue region pages: [30]",
+        "region OCR ran on [30] → 41 OCR line(s), 1 kept by the fusion",
+        "OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "Keffer, J., et al. 1991. EMBO J. 10:4025. Kehlen A et al., Clin Exp Immunol 2002. Koenders MI., et al. Arthritis & Rheumatism 2011; 63(8): 2329-2339. Kotake S. et al., Clin Invest 1999; 103(9):1345-52. Li X et al., Biochem Biophys Res Comm 2010 Makrides, S.C., Protein Expr. Purif. 17 (1999) 183-202. Mclnness I.B., and Schett G. NEJM 2011; 365: 2205-2219. Mitoma H, et al., Gastroenterology 2005: 128(2): 376-392. Nesbitt A, et al,. Inflamm Bowel Dis 2007; 13(11): 1323-1332. Osol ed,. Remington's Pharmaceutical Sciences, Mack Publishing., 1980. Pieringer H, et al,. Current Pharmaceutical Design 2013. Qi J, et al., Int Immunopharmacol. 2012;14(4):770-8. Robinson ed., Sustained and Controlled Release Drug Delivery Systems, Marcel Dekker, Inc., New York, 1978 Sadik CD et al., PLoS One 2011 Schaefer W, et al., PNAS 2011;108(27): 11187-11192. Shen C, et al., J. Aliment Pharmacol Ther. 2005; 21(3): 251-258. ten Hove T, et al., Gut 2002; 50: 206-211. van den Berg WB, et al,. Nat. Rev. Rheumatol. 2009;5: 549-553. Weinblatt et al., Ann.Rheum.Dis. 2007 Werner, R.G., Arzneimittelforschung (Drug Res.) 48 (1998) 870-880 Woodrick R et al., Bull NYU Hosp Jt Dis. 2010; 68(3): 211-7. Zhang Y, et al., Int Immunopharmacol. 2013;15(2):199-205. Ziolkowska M, et al., Journal of Immunology, 2000;164(5):2832-2838.",
+            "5"
+          ],
+          "line_count": 31
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Ser Tyr Gly Val His"
+          ],
+          "line_count": 1
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Ser Tyr Gly Val His"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 41,
+        "native_superseded": [],
+        "pages": [
+          30
+        ],
+        "text": "EP 3 027 649 B1\nKeffer, J., et al. 1991. EMBO J. 10:4025.\nKehlen A et al., Clin Exp Immunol 2002.\nKoenders MI., et al. Arthritis & Rheumatism 2011; 63(8): 2329-2339.\nKotake S. et al., Clin Invest 1999; 103(9):1345-52.\n5\nLi X et al., Biochem Biophys Res Comm 2010\nMakrides, S.C., Protein Expr. Purif. 17 (1999) 183-202.\nMclnness I.B., and Schett G. NEJM 2011; 365: 2205-2219.\nMitoma H, et al., Gastroenterology 2005: 128(2): 376-392.\nNesbitt A, et al,. Inflamm Bowel Dis 2007; 13(11): 1323-1332.\n10\nOsol ed,. Remington's Pharmaceutical Sciences, Mack Publishing., 1980.\nPieringer H, et al,. Current Pharmaceutical Design 2013.\nQi J, et al., Int Immunopharmacol. 2012;14(4):770-8.\nRobinson ed., Sustained and Controlled Release Drug Delivery Systems, Marcel Dekker, Inc., New York, 1978\nSadik CD et al., PLoS One 2011\n15\nSchaefer W, et al., PNAS 2011;108(27): 11187-11192.\nShen C, et al., J. Aliment Pharmacol Ther. 2005; 21(3): 251-258.\nten Hove T, et al., Gut 2002; 50: 206-211.\nvan den Berg WB, et al,. Nat. Rev. Rheumatol. 2009;5: 549-553.\nWeinblatt et al., Ann.Rheum.Dis. 2007\n20\nWerner, R.G., Arzneimittelforschung (Drug Res.) 48 (1998) 870-880\nWoodrick R et al., Bull NYU Hosp Jt Dis. 2010; 68(3): 211-7.\nZhang Y, et al., Int Immunopharmacol. 2013;15(2):199-205.\nZiolkowska M, et al., Journal of Immunology, 2000;164(5):2832-2838.\n25\nSEQUENCE LISTING\n[0242]\n30\n35\n40\n45\n50\nSer Tyr Gly Val His\n1\n5\n55\n30"
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "2"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 13,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 3 on page 31 (length 13)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion",
+        "OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence <400> 2 Vr r r  r r r r r r r r r r r er 1 5 10 15 <210> 3 <211> 13 <212> PRT <213> Artificial sequence <220> yn         s nc ce <400> 3 Ar r  r r  r r r r r r yr 1 5 10 <210> 4 <211> 16 <212> PRT <213> Artificial sequence <220> <223> Synthetic sequence: #134 and 136 VL CDR 1 amino acid sequence <400> 4 Arr rr r r r r r r r r r r r r r s 1 5 10 15 <210> 5 <211>7 <212> PRT <213> Artificial sequence <220> yn         s n cc <400> 5 Lys Val Ser Asn Arg Phe Ser 1 5 <210> 6 <211> 9 <212> PRT <213> Artificial sequence <220> ns         s  ccee <400> 6"
+          ],
+          "line_count": 15
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 4
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "ns    n    : s n ccee"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "3"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 16,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 4 on page 31 (length 16)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion",
+        "OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence <400> 2 Vr r r  r r r r r r r r r r r er 1 5 10 15 <210> 3 <211> 13 <212> PRT <213> Artificial sequence <220> yn         s nc ce <400> 3 Ar r  r r  r r r r r r yr 1 5 10 <210> 4 <211> 16 <212> PRT <213> Artificial sequence <220> <223> Synthetic sequence: #134 and 136 VL CDR 1 amino acid sequence <400> 4 Arr rr r r r r r r r r r r r r r s 1 5 10 15 <210> 5 <211>7 <212> PRT <213> Artificial sequence <220> yn         s n cc <400> 5 Lys Val Ser Asn Arg Phe Ser 1 5 <210> 6 <211> 9 <212> PRT <213> Artificial sequence <220> ns         s  ccee <400> 6"
+          ],
+          "line_count": 15
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 4
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "ns    n    : s n ccee"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "4"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 7,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 5 on page 31 (length 7)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion",
+        "OCR text EXISTS and ENTERED the parse feed, yet no residues were parsed — inspect the residue parser on the kept lines, this is NOT a budget issue",
+        "reported reasons: residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence <400> 2 Vr r r  r r r r r r r r r r r er 1 5 10 15 <210> 3 <211> 13 <212> PRT <213> Artificial sequence <220> yn         s nc ce <400> 3 Ar r  r r  r r r r r r yr 1 5 10 <210> 4 <211> 16 <212> PRT <213> Artificial sequence <220> <223> Synthetic sequence: #134 and 136 VL CDR 1 amino acid sequence <400> 4 Arr rr r r r r r r r r r r r r r s 1 5 10 15 <210> 5 <211>7 <212> PRT <213> Artificial sequence <220> yn         s n cc <400> 5 Lys Val Ser Asn Arg Phe Ser 1 5 <210> 6 <211> 9 <212> PRT <213> Artificial sequence <220> ns         s  ccee <400> 6"
+          ],
+          "line_count": 15
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 4
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "ns    n    : s n ccee"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region reached but no recoverable residues (text layer absent — OCR candidate)"
+        ],
+        "status": "missing"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "5"
+    },
+    {
+      "declared": {
+        "declaration_page": 31,
+        "declared_length": 9,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 6 on page 31 (length 9)",
+        "residue region pages: [31]",
+        "region OCR ran on [31] → 32 OCR line(s), 4 kept by the fusion",
+        "completeness unverified: a source conflict covers these pages",
+        "reported reasons: observed 29 exceeds declared 9"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<220>",
+            "<223> Synthetic sequence: #134 and 136 VH CDR 2 amino acid sequence <400> 2 Vr r r  r r r r r r r r r r r er 1 5 10 15 <210> 3 <211> 13 <212> PRT <213> Artificial sequence <220> yn         s nc ce <400> 3 Ar r  r r  r r r r r r yr 1 5 10 <210> 4 <211> 16 <212> PRT <213> Artificial sequence <220> <223> Synthetic sequence: #134 and 136 VL CDR 1 amino acid sequence <400> 4 Arr rr r r r r r r r r r r r r r s 1 5 10 15 <210> 5 <211>7 <212> PRT <213> Artificial sequence <220> yn         s n cc <400> 5 Lys Val Ser Asn Arg Phe Ser 1 5 <210> 6 <211> 9 <212> PRT <213> Artificial sequence <220> ns         s  ccee <400> 6"
+          ],
+          "line_count": 15
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Vr rr r r r r r r r r r r r r r Ter",
+            "Ar r r r r r r r r r r r yr",
+            "ns  n      :  n <c"
+          ],
+          "line_count": 4
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Vr rr r r r r r r r r r r r r r Ter",
+          "Ar r r r r r r r r r r r yr",
+          "ns  n      :  n <c",
+          "ns    n    : s n ccee"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 29,
+        "parsed_residues": "?????????????????????????????",
+        "reasons": [
+          "observed 29 exceeds declared 9"
+        ],
+        "status": "conflict"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:6",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 32,
+        "native_superseded": [],
+        "pages": [
+          31
+        ],
+        "text": "EP 3 027 649 B1\n5\nVr rr r r r r r r r r r r r r r Ter\n10\n15\n1\n5\n10\n15\nAr r r r r r r r r r r r yr\n20\n1\n5\n10\n25\nns  n      :  n <c\n30\nArr rr r r r r r r r r r r r r r s\n1\n10\n15\n5\n35\n40\n45\nLys Val Ser Asn Arg Phe Ser\n1\n5\n50\nns    n    : s n ccee\n55\n31"
+      },
+      "residue_region": {
+        "pages": [
+          31
+        ]
+      },
+      "seq_id_no": "6"
+    },
+    {
+      "declared": {
+        "declaration_page": 32,
+        "declared_length": 364,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 7 on page 32 (length 364)",
+        "residue region pages: [32]",
+        "region OCR ran on [32] → 30 OCR line(s), 7 kept by the fusion",
+        "partial residues parsed: 90/364",
+        "reported reasons: recovered 90 of declared 364"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 7",
+            "5"
+          ],
+          "line_count": 27
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Ser Gln Thr Thr His Ala Pro Phe Thr",
+            "c     c",
+            "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac"
+          ],
+          "line_count": 7
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Ser Gln Thr Thr His Ala Pro Phe Thr",
+          "c     c",
+          "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac",
+          "acg c g c  ct",
+          "a a    caa"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 90,
+        "parsed_residues": "CCCCAGGCAAGGGCCTGGAATGGGTGTCCGTGATCTGGTCCGACGGCACCACCACCTACAACACGCGCCTAACAAAGGAAGAGGCCTCAG",
+        "reasons": [
+          "recovered 90 of declared 364"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:7",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 30,
+        "native_superseded": [],
+        "pages": [
+          32
+        ],
+        "text": "EP 3 027 649 B1\nSer Gln Thr Thr His Ala Pro Phe Thr\n1\n5\n5\n10\n60\nC\n15\n120\nc     c\n180\nccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac\n20\n240\nacg c g c  ct\n300\na a    caa\n360\nag g a ag agg cc\n25\n364\ntcag\n30\n35\n40\n45\n50\n55\n32"
+      },
+      "residue_region": {
+        "pages": [
+          32
+        ]
+      },
+      "seq_id_no": "7"
+    },
+    {
+      "declared": {
+        "declaration_page": 32,
+        "declared_length": 121,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 8 on page 32 (length 121)",
+        "residue region pages: [32, 33]",
+        "region OCR ran on [32] → 30 OCR line(s), 7 kept by the fusion",
+        "partial residues parsed: 100/121",
+        "reported reasons: recovered 100 of declared 121; unresolved residue tokens present"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "<210> 7",
+            "5"
+          ],
+          "line_count": 54
+        },
+        "rapidocr_region": {
+          "first_lines": [
+            "Ser Gln Thr Thr His Ala Pro Phe Thr",
+            "c     c",
+            "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac"
+          ],
+          "line_count": 7
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [
+          "Ser Gln Thr Thr His Ala Pro Phe Thr",
+          "c     c",
+          "ccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac",
+          "acg c g c  ct",
+          "a a    caa"
+        ],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 100,
+        "parsed_residues": "EVQLVESGGGLVQPGG?????????????????SVIWSDGTTTYNSALK??????????????????????????????????????????QGTTVTVSS",
+        "reasons": [
+          "recovered 100 of declared 121",
+          "unresolved residue tokens present"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:8",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": true,
+        "line_count": 30,
+        "native_superseded": [],
+        "pages": [
+          32
+        ],
+        "text": "EP 3 027 649 B1\nSer Gln Thr Thr His Ala Pro Phe Thr\n1\n5\n5\n10\n60\nC\n15\n120\nc     c\n180\nccaggcaagg gcctggaatg ggtgtccgtg atctggtccg acggcaccac cacctacaac\n20\n240\nacg c g c  ct\n300\na a    caa\n360\nag g a ag agg cc\n25\n364\ntcag\n30\n35\n40\n45\n50\n55\n32"
+      },
+      "residue_region": {
+        "pages": [
+          32,
+          33
+        ]
+      },
+      "seq_id_no": "8"
+    },
+    {
+      "declared": {
+        "declaration_page": 33,
+        "declared_length": 337,
+        "molecule_type": "DNA"
+      },
+      "diagnosis": [
+        "declared SEQ 9 on page 33 (length 337)",
+        "residue region pages: [33]",
+        "region OCR did NOT run on the residue pages",
+        "partial residues parsed: 111/337",
+        "reported reasons: recovered 111 of declared 337"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly 1 5 10 15",
+            "5"
+          ],
+          "line_count": 27
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": 111,
+        "parsed_residues": "AAGAAGCGAGGAAGATCAGCTGCAGGTCCAGCCAGAGCCTGGTGCACAGCAACGGCGACACCTACTTCCACTGGCAGCGGAAGGATCGCGGGTGGGGGGCTTCGGAGAGCA",
+        "reasons": [
+          "recovered 111 of declared 337"
+        ],
+        "status": "partial"
+      },
+      "record_id": "sha256:ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295:seq:9",
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": [
+          33
+        ]
+      },
+      "seq_id_no": "9"
+    },
+    {
+      "declared": {
+        "declaration_page": 33,
+        "declared_length": 112,
+        "molecule_type": "protein"
+      },
+      "diagnosis": [
+        "declared SEQ 10 on page 33 (length 112)",
+        "residue region pages: [33]",
+        "region OCR did NOT run on the residue pages",
+        "page never entered region OCR (selection/budget) — no OCR text to judge",
+        "reported reasons: residue region not reached in this run"
+      ],
+      "fused_feed": {
+        "native": {
+          "first_lines": [
+            "EP 3 027 649 B1",
+            "Glu Val Gln Leu Val Glu Ser Gly Gly Gly Leu Val Gln Pro Gly Gly 1 5 10 15",
+            "5"
+          ],
+          "line_count": 27
+        }
+      },
+      "fusion": {
+        "kept_ocr_lines": [],
+        "merge_records": []
+      },
+      "parse_outcome": {
+        "observed_length": null,
+        "parsed_residues": null,
+        "reasons": [
+          "residue region not reached in this run"
+        ],
+        "status": "declared"
+      },
+      "record_id": null,
+      "region_ocr": {
+        "content_conflicts": [],
+        "entered": false,
+        "line_count": 0,
+        "native_superseded": [],
+        "pages": [],
+        "text": ""
+      },
+      "residue_region": {
+        "pages": []
+      },
+      "seq_id_no": "10"
+    }
+  ],
+  "inventory_summary": {
+    "complete": 1,
+    "conflict": 1,
+    "declared_only": 1,
+    "declared_total": 82,
+    "declared_total_unseen": 72,
+    "located": 5,
+    "missing": 4,
+    "observed_declarations": 10,
+    "outside_scope": 0,
+    "partial": 3,
+    "scope": {
+      "covers_full_document": false,
+      "document_page_count": 195,
+      "observed_pages": [
+        30,
+        31,
+        32,
+        33
+      ],
+      "requested_pages": [
+        30,
+        31,
+        32,
+        33
+      ]
+    }
+  },
+  "job_id": "job-a1e99f6fff97",
+  "note": "system states, not verification: a 'complete' status has no character-level gold behind it until a human verifies the annotation queue"
+}

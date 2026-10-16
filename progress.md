@@ -358,3 +358,17 @@ exit "$__zcode_status"
 ### 第三轮 E01-E10（独立复核驱动，同日）
 - 按 reports/2026-10-16_D01_D10_independent_recheck.md 逐项修复并回归锁定：E1 review_id 基线化（真实发布路径回归）；E2 对比侧持久化 lease+原子领取+fenced 发布+attempt 不可变目录+启动恢复（并发 retry/stale publish/过期恢复三测试）；E3 候选 candidate-<n>+meta(sha/参数/基线)+采用=新任务新基线；E4 issue 全部端点 job_id+issue_id 归属（跨任务 404 零写入）；E5 二维框合并（主审"同文异位置全保留/同 y 异栏不冲突/段落包含行合并"）；E6 页眉逐次出现判定（正文同文本不再被页眉连坐）；E7 pair_measurements 完整身份键+组式唯一才比+Decimal/单位规范+顺序不敏感；E8 bbox 越界警告+page_geometry.verified 如实；E9 区域 OCR 持久化 region-ocr.json 制品 + /pages/n/channels 按引擎读真实阶段文件 + 前端来源对照接入。
 - E10 固定版本重跑（单实例服务确认后）：EP 全文 job-a1f901cfc6ec（82/82、complete 7/conflict 2、EPB1=0、region-ocr 制品在）；EP30-33 job-07ddb23a9182（encodes×2/has_domain/has_cdr×2 双主体、通道 native27/layout13×2/ocr30）；论文 job-c7f420bee245（255/255 链接、原因只剩通用类）；对比 cmp-d60a9c9dd9b5 retry 一次仅重跑失败侧（attempt 2），done 侧不动。558 后端+33 vitest+build 全绿。报告 reports/2026-10-16_E01_E10_fixes.md（含 5 条仍未解决：54 missing 无 gold、云实测无 token、采用不注入原任务、layout 双视图略冗余、normalize 段落未物化）。
+
+### 第四轮 F01-F10（E01-E10 独立复核驱动，同日）
+- 按 reports/2026-10-16_E01_E10_independent_recheck.md 逐项修复并回归锁定（固定版本 1e362fe）：
+  - F01/S05 删除 comparison_service 11 个被覆盖方法（AST dups={}），diff 统一调用 pair_measurements（并补回 value_diffs 输出）；
+  - F02/S01 复解析候选身份：issue_candidates 表 BEGIN IMMEDIATE 原子预留 + xb 排他写 + 内容/meta 双哈希单事务提交，失败身份永不复用（并发屏障回归：两请求各自 candidate_id/attempt/文件/哈希一一对应）；
+  - F03/S02 重试代次：failed 不再可领，仅 retry() 原子 failed→queued 重新武装（复刻复核时序：旧快照不再执行刚失败的侧，attempt 不涨）；
+  - F04/S03+S04 心跳续租（token 条件、失租停止发布、执行预算显式失败）+ app 周期孤儿扫描（快速重启、启动时租约仍有效，不点 retry 到期自动恢复的独立进程式回归）；
+  - F05/P01 短原生不得吞完整 OCR（全覆盖才可消耗；native⊂OCR 时完整 OCR 取代短片段并留 coverage_supersede+别名；主审复现 Ala/Ala Cys → AC 字符级断言）；
+  - F06/P02 去局部 table_id 的语义表锚点+结构化条件+结构化值/操作符/单位比较（mg≠g；≤5 vs 5 报 operator）；
+  - F07/P03 page_size_verified/bounds_valid/coordinate_basis_verified 三事实分离；未声明基准保持 raw 框并禁止精确位置承诺；NaN 框丢弃告警、倒置框 bounds=False；
+  - F08/P04+P05 通道含表格单元格（表-only 页仍有通道）、读当前发布清单+验哈希（损坏=RESULT_CORRUPT）、历史 attempt 单列；region-ocr 侧车进入发布清单（真实任务 manifest 已验证）；浏览器实测来源对照三通道+表格截图；
+  - F09 采用=真消费（候选验哈希复制进新任务、进有效配置、extract 消费并入解析流、块带候选身份、侧车独立通道；区域 OCR 故意下线仍恢复残基的端到端回归）；对外 baseline_id 统一（DB==manifest，三真实任务核验）；
+  - F10 sequence-diagnosis/annotation-queue 工具 + draft v2 gold（82+10 条待人工）；固定版本重跑 EP 全文 job-0fde96e378e8（7/19/54/2，SEQ28 诊断=OCR 已进解析流仍无产出，非预算）、EP30-33 job-a1e99f6fff97、论文 job-550d519df867（255/255）；MinerU 无 token 如实未实测。
+- 验证：590 后端 + 33 vitest + build 全绿。报告 reports/2026-10-16_F01_F10_fixes.md（含仍未解决 6 项）。
