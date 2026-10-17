@@ -1,68 +1,119 @@
 {
   "target": "ep",
-  "batch_id": "25016beb-41ce-473c-8e44-b9804513e398",
+  "data_rel": "data\\acceptance-g-live-ep\\remote-result.zip",
+  "zip_path": "data\\acceptance-g-live-ep\\remote-result.zip",
   "zip_sha256": "f42bbb7a684d814ea255495a9f196197c2dee2921bb1591310f00c4fe465f930",
+  "expected_zip_sha256": "f42bbb7a684d814ea255495a9f196197c2dee2921bb1591310f00c4fe465f930",
+  "zip_sha256_matches": true,
   "zip_bytes": 146415,
-  "content_list_entries": 131,
+  "layout_page_size_field": "layout.json -> pdf_info[].page_size (idx -> submitted page)",
+  "source_pages_submitted": [
+    30,
+    31,
+    32,
+    33
+  ],
   "layout_page_size_check": {
     "30": {
-      "layout": [
-        null,
-        null
-      ],
-      "source": [
-        595.2,
+      "layout_json_page_size": [
+        595.0,
         842.0
       ],
-      "match": false
+      "layout_json_page_angle": 0.0,
+      "source_pdf_size_pt": [
+        595.22,
+        842.0
+      ],
+      "tolerance_pt": 2.0,
+      "match": true
     },
     "31": {
-      "layout": [
-        null,
-        null
-      ],
-      "source": [
-        595.2,
+      "layout_json_page_size": [
+        595.0,
         842.0
       ],
-      "match": false
+      "layout_json_page_angle": 0.0,
+      "source_pdf_size_pt": [
+        595.22,
+        842.0
+      ],
+      "tolerance_pt": 2.0,
+      "match": true
     },
     "32": {
-      "layout": [
-        null,
-        null
-      ],
-      "source": [
-        595.2,
+      "layout_json_page_size": [
+        595.0,
         842.0
       ],
-      "match": false
+      "layout_json_page_angle": 0.0,
+      "source_pdf_size_pt": [
+        595.22,
+        842.0
+      ],
+      "tolerance_pt": 2.0,
+      "match": true
     },
     "33": {
-      "layout": [
-        null,
-        null
-      ],
-      "source": [
-        595.2,
+      "layout_json_page_size": [
+        595.0,
         842.0
       ],
-      "match": false
+      "layout_json_page_angle": 0.0,
+      "source_pdf_size_pt": [
+        595.22,
+        842.0
+      ],
+      "tolerance_pt": 2.0,
+      "match": true
     }
   },
+  "all_sizes_match": true,
+  "projection_page_order": [
+    30,
+    31,
+    32,
+    33
+  ],
+  "projection_page_sizes": {
+    "30": [
+      595.0,
+      842.0,
+      0.0
+    ],
+    "31": [
+      595.0,
+      842.0,
+      0.0
+    ],
+    "32": [
+      595.0,
+      842.0,
+      0.0
+    ],
+    "33": [
+      595.0,
+      842.0,
+      0.0
+    ]
+  },
+  "pages_produced": [
+    30,
+    31,
+    32,
+    33
+  ],
+  "pages_without_live_size": [],
+  "blocks_without_verified_frame": 0,
+  "max_abs_bbox_extent": 812.53,
   "coordinate_basis": {
     "unit": "normalized_1000",
     "origin": "top_left",
     "protocol": "mineru-content-list-v1",
     "transform": "coord / 1000 * source_page_size"
   },
+  "coordinate_basis_verified": true,
+  "page_size_verified": true,
   "projection_warnings": [],
-  "pages_produced": [
-    1,
-    2,
-    3,
-    4
-  ],
   "sequence_count": 8,
   "sequences": {
     "1": "SYGVH",
@@ -75,6 +126,5 @@
     "9": "GACATCGTGATGACCCAGAGCCCCCTGAGCCTGCCCGTGACCCCAGGCGAGCCCGCTAGCATCAGCTGCAGGTCCAGCCAGAGCCTGGTGCACAGCAACGGCGACACCTACTTCCACTGGTATCTGCAGAAGCCCGGCCAGTCCCCCCAGCTGCTGATCTACAAGGTGTCCAACAGGTTCAGCGGCGTGCCCGACAGGTTCTCCGGCAGCGGCTCCGGCACCGACTTCACCCTGAAGATCAGCAGGGTGGAGGCCGAGGACGTGGGCGTGTACTACTGCAGCCAGACCACCCACGCCCCCTTCACCTTCGGCCAGGGCACCAAGCTGGAGATCAAAC"
   },
   "measurement_count": 0,
-  "measurements_sample": [],
-  "note": "remote parsed OUR submission; the local plain-HTTPS download path failed (CDN TLS EOF, same environment issue as the F-round reviewer); this zip was fetched with TLS verification ON via a temporary DoH-resolved connection and replayed through the product projection — not a constructed fixture"
+  "note": "remote parsed OUR submission; the local plain-HTTPS download path failed (CDN TLS EOF); the zip was fetched with TLS verification ON via a temporary DoH-resolved connection and replayed through the product projection"
 }

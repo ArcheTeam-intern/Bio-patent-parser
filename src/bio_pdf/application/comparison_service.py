@@ -70,7 +70,16 @@ def _table_anchor(table: Any) -> str:
     import re
 
     def norm(text: str) -> str:
-        return re.sub(r"\s+", " ", str(text)).strip().lower()
+        # Anchor text identifies the TABLE; equivalent glyphs must not split
+        # it (the caption's µM vs μM is the same table). Semantic unit case
+        # is preserved in the CONDITIONS payload, not in the anchor.
+        return (
+            re.sub(r"\s+", " ", str(text))
+            .strip()
+            .replace("µ", "u")
+            .replace("μ", "u")
+            .lower()
+        )
 
     caption = getattr(table, "caption", None)
     if caption:
@@ -115,6 +124,19 @@ def pair_measurements(ms_a: list[dict[str, Any]], ms_b: list[dict[str, Any]]) ->
 
         return re.sub(r"\s+", " ", str(value or "")).strip().lower()
 
+    def norm_condition_value(value: Any) -> str:
+        """I06/P02: CASE-PRESERVING conditions normalization.
+
+        SI case is semantic (µM ≠ µm). Only equivalent glyphs are merged —
+        the micro sign µ (U+00B5) and Greek mu μ (U+03BC) become ``u`` —
+        plus whitespace/formatting. Everything else keeps its case.
+        """
+
+        import re
+
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        return text.replace("µ", "u").replace("μ", "u")
+
     def norm_unit(u: str | None) -> str:
         """G08/P03: SI case is SEMANTIC (µM ≠ µm, M ≠ mM).
 
@@ -144,7 +166,12 @@ def pair_measurements(ms_a: list[dict[str, Any]], ms_b: list[dict[str, Any]]) ->
             if isinstance(cond, dict):
                 semantic = tuple(
                     sorted(
-                        (key, norm_text(cond.get(key)))
+                        (
+                            key,
+                            norm_condition_value(cond.get(key))
+                            if key == "value"
+                            else norm_text(cond.get(key)),
+                        )
                         for key in _CONDITION_SEMANTIC_KEYS
                         if cond.get(key) is not None
                     )

@@ -1084,3 +1084,221 @@ def test_process_exit_after_upload_skips_the_put(tmp_path: Path) -> None:
         pass
     assert posts["file_urls"] == 1, "no re-allocation"
     assert posts["puts"] == 1, "the uploaded phase skips the PUT entirely"
+
+
+# ---- I02/I03: PUT error classes drive the recovery state machine ---------
+
+
+def _batch_zip_ok() -> bytes:
+    return _a4_zip_bytes()
+
+
+def test_put_500_and_429_keep_the_same_slot(tmp_path: Path) -> None:
+    """I03/S03: a retryable PUT failure (500/429/timeout) must NOT allocate
+    a second batch — the retry re-PUTs the SAME slot."""
+
+    from bio_pdf.errors import NetworkTransientError
+    from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+    for bad_status in (500, 429):
+        # Each status gets its own identity dir — reusing one dir would make
+        # the second case inherit the first case's completed identity.
+        case_root = tmp_path / f"case-{bad_status}"
+        case_root.mkdir(parents=True, exist_ok=True)
+        posts = {"post": 0, "put": 0}
+        state = {"put_failures": 2}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if request.method == "POST" and url.endswith("/file-urls/batch"):
+                posts["post"] += 1
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "batch_id": f"b{posts['post']}",
+                            "file_urls": [f"https://oss.example/put/s{bad_status}"],
+                        }
+                    },
+                )
+            if request.method == "PUT":
+                posts["put"] += 1
+                if state["put_failures"] > 0:
+                    state["put_failures"] -= 1
+                    return httpx.Response(bad_status)
+                return httpx.Response(200)
+            if "/extract-results/batch/" in url:
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "extract_result": [
+                                {"file_name": "source.pdf", "state": "done",
+                                 "full_zip_url": "https://oss.example/zip/x"}
+                            ]
+                        }
+                    },
+                )
+            if url == "https://oss.example/zip/x":
+                return httpx.Response(200, content=_batch_zip_ok())
+            raise AssertionError(url)
+
+        adapter = MinerUAdapter(token="t", transport=httpx.MockTransport(handler), poll_interval=0.0)
+        identity_path = case_root / "jobs" / "job-x" / "mineru_remote_identity.json"
+        for attempt in ("attempt-1", "attempt-2"):
+            req = _job_request(case_root, attempt)
+            try:
+                adapter.parse(req, local_file=req.source_path)
+            except NetworkTransientError:
+                pass
+            else:
+                raise AssertionError(f"attempt {attempt} should surface the retryable PUT failure")
+        ident = json.loads(identity_path.read_text(encoding="utf-8"))
+        assert ident["phase"] == "allocated"
+        assert ident.get("last_upload_error", {}).get("code") == "UPLOAD_RETRYABLE"
+
+        req3 = _job_request(case_root, "attempt-3")
+        adapter.parse(req3, local_file=req3.source_path)
+        assert posts["post"] == 1, f"{bad_status}: a retryable failure must not reallocate"
+        assert posts["put"] == 3
+        ident = json.loads(identity_path.read_text(encoding="utf-8"))
+        assert ident["phase"] == "completed"
+        assert ident["batch_id"] == "b1"
+
+
+def test_confirmed_expiry_reallocates_only_after_the_retry(tmp_path: Path) -> None:
+    """I02/S02: PUT 403 marks slot_expired and raises; a retry whose POST
+    fails leaves the state slot_expired (never polling the old batch); the
+    NEXT retry allocates, uploads and polls the NEW batch."""
+
+    from bio_pdf.errors import NetworkTransientError, UploadSlotExpiredError
+    from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+    posts = {"post": 0, "put": 0, "get": 0}
+    # The FIRST allocation succeeds with an old slot; the re-allocation after
+    # expiry temporarily fails, then succeeds.
+    behaviour = {"post_fail": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            posts["post"] += 1
+            if behaviour["post_fail"]:
+                return httpx.Response(503)
+            if posts["post"] == 1:
+                return httpx.Response(
+                    200,
+                    json={"data": {"batch_id": "b-old", "file_urls": ["https://oss.example/put/old"]}},
+                )
+            return httpx.Response(
+                200,
+                json={"data": {"batch_id": "b-new", "file_urls": ["https://oss.example/put/new"]}},
+            )
+        if request.method == "PUT":
+            posts["put"] += 1
+            if "put/new" not in url:
+                return httpx.Response(403)  # the original slot is expired
+            return httpx.Response(200)
+        if "/extract-results/batch/" in url:
+            posts["get"] += 1
+            assert "b-new" in url, f"polled the WRONG batch: {url}"
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {"file_name": "source.pdf", "state": "done",
+                             "full_zip_url": "https://oss.example/zip/n"}
+                        ]
+                    }
+                },
+            )
+        if url == "https://oss.example/zip/n":
+            return httpx.Response(200, content=_batch_zip_ok())
+        raise AssertionError(url)
+
+    adapter = MinerUAdapter(token="t", transport=httpx.MockTransport(handler), poll_interval=0.0)
+    identity_path = tmp_path / "jobs" / "job-x" / "mineru_remote_identity.json"
+
+    req1 = _job_request(tmp_path, "attempt-1")
+    try:
+        adapter.parse(req1, local_file=req1.source_path)
+    except UploadSlotExpiredError:
+        pass
+    else:
+        raise AssertionError("PUT 403 must surface as confirmed expiry")
+    ident = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert ident["phase"] == "slot_expired"
+
+    behaviour["post_fail"] = True
+    req2 = _job_request(tmp_path, "attempt-2")
+    try:
+        adapter.parse(req2, local_file=req2.source_path)
+    except NetworkTransientError:
+        pass
+    else:
+        raise AssertionError("the POST 503 should surface as a transient failure")
+    ident = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert ident["phase"] == "slot_expired"
+    assert posts["get"] == 0, "no polling may happen while the slot is expired"
+
+    behaviour["post_fail"] = False
+    req3 = _job_request(tmp_path, "attempt-3")
+    adapter.parse(req3, local_file=req3.source_path)
+    ident = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert ident["batch_id"] == "b-new" and ident["phase"] == "completed"
+    assert posts["post"] == 3 and posts["put"] == 2
+    assert posts["get"] >= 1
+
+
+def test_unknown_phase_requires_reallocation(tmp_path: Path) -> None:
+    from bio_pdf.errors import EngineProtocolUnsupportedError
+    from bio_pdf.ingest.inspector import compute_sha256
+    from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+    adapter = MinerUAdapter(
+        token="t", transport=httpx.MockTransport(lambda r: httpx.Response(500)), poll_interval=0.0
+    )
+    identity_path = tmp_path / "jobs" / "job-x" / "mineru_remote_identity.json"
+    identity_path.parent.mkdir(parents=True, exist_ok=True)
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-1.4 fake")
+    sha = compute_sha256(source)
+    req = _job_request(tmp_path, "attempt-1")
+    params = adapter._effective_remote_params(req)
+    import hashlib as _h
+
+    fingerprint = _h.sha256(
+        json.dumps(
+            {
+                "source_sha256": sha,
+                "pages": sorted(int(p) for p in req.page_numbers),
+                "profile": req.profile,
+                "base_url": adapter.base_url,
+                "params": params,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()[:24]
+    identity_path.write_text(
+        json.dumps(
+            {
+                "batch_id": "b-old",
+                "fingerprint": fingerprint,
+                "source_sha256": sha,
+                "pages": [30, 31, 32],
+                "params": params,
+                "phase": "weird-state",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        adapter.parse(req, local_file=req.source_path)
+    except EngineProtocolUnsupportedError:
+        pass
+    else:
+        raise AssertionError("an unknown phase must not be polled blindly")
+    ident = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert ident["phase"] == "slot_expired"

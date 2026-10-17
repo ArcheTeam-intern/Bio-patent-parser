@@ -57,9 +57,12 @@ _CONDITION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "dose",
+        # I06/P02: SI case is SEMANTIC — the unit token is matched
+        # case-SENSITIVELY (µM/mM/nM/M/mg…), so µm (length) is never a
+        # concentration. Only the digit boundary lookarounds are generic.
         re.compile(
-            r"(?i)(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*"
-            r"(µg|μg|ug|mg|ng|pg|kg|mM|µM|μM|uM|nM|%)(?![A-Za-z0-9])"
+            r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*"
+            r"(µg|μg|ug|mg|ng|pg|kg|mM|µM|μM|uM|nM|M|%)(?![A-Za-z0-9])"
         ),
     ),
     (
@@ -92,13 +95,16 @@ def conditions_from_text(
 def merge_conditions(
     *groups: list[dict[str, str]] | None,
 ) -> list[dict[str, str]]:
-    """Dedupe conditions by (kind, value); first occurrence keeps its source."""
+    """Dedupe conditions by (kind, value) — I06: CASE-SENSITIVE (µM ≠ µm)."""
 
     merged: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
     for group in groups:
         for condition in group or []:
-            key = (str(condition.get("kind") or ""), str(condition.get("value") or "").lower())
+            key = (
+                str(condition.get("kind") or ""),
+                " ".join(str(condition.get("value") or "").split()),
+            )
             if key in seen:
                 continue
             seen.add(key)

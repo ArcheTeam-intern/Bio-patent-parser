@@ -1,13 +1,20 @@
 """Regenerate the cloud replay evidence JSONs from the FIXED zip archives.
 
-H09: the earlier one-off script's layout parser produced
-``layout_page_size_check = [null, null] / match=false`` while the sizes are
-actually correct — the machine-readable evidence contradicted the verified
-fact. This script reads the field path explicitly
-(``layout.json -> pdf_info[].page_size``), checks it against the source PDF
-sizes within a 2 pt tolerance, verifies each zip's SHA-256, and replays the
-content_list through the product projection + domain pass. No network, no
-credentials, no manual edits of the conclusions.
+H09 + I07: the earlier one-off script checked layout page sizes by source
+page, but built the actual projection with SUBSET indices (1/2) and fell
+back to a default A4 paper for missing sizes — the numeric check and the
+projection lived in different namespaces, and a default page could still be
+reported as verified. This version:
+
+- maps content_list ``page_idx`` through the SUBMITTED source-page order
+  (``source_pages``) for BOTH the size check and the projection;
+- passes ONLY real layout sizes to the projection — a missing size keeps
+  the page unverified (no fabricated A4 geometry);
+- verifies the zip's SHA-256 before replaying;
+- records the exact page order/sizes used by the projection so the
+  machine-readable evidence matches what actually ran.
+
+No network, no credentials.
 
 Usage: python scripts/regen_cloud_replay.py
 """
@@ -42,13 +49,22 @@ TARGETS = {
 }
 
 
-def _replay(target: str, spec: dict) -> dict:
-    zip_path = spec["data_dir"] / "remote-result.zip"
-    if not zip_path.is_file():
-        return {"target": target, "error": "zip missing", "path": str(zip_path)}
+def replay_zip(
+    zip_path: Path,
+    pdf_path: Path,
+    source_pages: list[int],
+    *,
+    expected_zip_sha256: str | None = None,
+) -> dict:
+    """Replay one fixed zip through the product projection + domain pass.
+
+    ``source_pages`` is the SUBMITTED page order: content_list ``page_idx i``
+    corresponds to ``source_pages[i]``. The same mapping is used for the
+    layout size check AND the projection — never a subset-index shortcut.
+    """
+
     zip_bytes = zip_path.read_bytes()
     zip_sha = hashlib.sha256(zip_bytes).hexdigest()
-    sha_ok = zip_sha == spec["expected_zip_sha256"]
 
     import pypdfium2 as pdfium
 
@@ -64,32 +80,33 @@ def _replay(target: str, spec: dict) -> dict:
         content_list = json.loads(zf.read(content_name).decode("utf-8"))
         layout = json.loads(zf.read("layout.json").decode("utf-8"))
 
-    # --- H09: field path made explicit -------------------------------------
-    # NOTE: pdf_info[].page_idx is the index in the SUBMITTED page set (the
-    # zip only covers those pages), NOT the document page number — the
-    # earlier script looked the sizes up by document page and always got
-    # nulls. Map idx -> submitted source page before comparing.
+    # --- I07: ONE shared subset-index -> source-page mapping ----------------
     layout_sizes: dict[int, tuple[float, float, float]] = {}
     for page in layout.get("pdf_info") or []:
-        idx = int(page.get("page_idx"))
-        if not (0 <= idx < len(spec["source_pages"])):
+        try:
+            idx = int(page.get("page_idx"))
+        except (TypeError, ValueError):
             continue
-        source_no = spec["source_pages"][idx]
+        if not (0 <= idx < len(source_pages)):
+            continue
+        source_no = source_pages[idx]
         size = page.get("page_size")
+        if not size or len(size) != 2:
+            continue
         layout_sizes[source_no] = (
             float(size[0]),
             float(size[1]),
             float(page.get("page_angle") or 0),
         )
 
-    doc = pdfium.PdfDocument(str(spec["pdf"]))
+    doc = pdfium.PdfDocument(str(pdf_path))
     try:
-        source_sizes = {p: doc[p - 1].get_size() for p in spec["source_pages"]}
+        source_sizes = {p: doc[p - 1].get_size() for p in source_pages}
     finally:
         doc.close()
 
     size_check: dict[str, dict] = {}
-    for source_no in spec["source_pages"]:
+    for source_no in source_pages:
         layout_size = layout_sizes.get(source_no)
         source = source_sizes[source_no]
         match = bool(
@@ -105,42 +122,73 @@ def _replay(target: str, spec: dict) -> dict:
             "match": match,
         }
 
-    ordered = sorted({int(i.get("page_idx") or 0) + 1 for i in content_list if isinstance(i, dict)})
-    page_sizes = {
-        p: (layout_sizes.get(p, (595.0, 842.0, 0))[0], layout_sizes.get(p, (595.0, 842.0, 0))[1],
-            int(layout_sizes.get(p, (595.0, 842.0, 0))[2]))
-        for p in ordered
+    # The projection receives the SUBMITTED order and ONLY real sizes — a
+    # page without a layout size stays unverified instead of inheriting A4.
+    page_order = list(source_pages)
+    projection_page_sizes = {
+        page_no: layout_sizes[page_no]
+        for page_no in source_pages
+        if page_no in layout_sizes
     }
     projected = _project_mineru_payload(
         {"content_list": content_list},
-        page_numbers=set(ordered),
-        page_order=ordered,
-        page_sizes=page_sizes,
+        page_numbers=set(page_order),
+        page_order=page_order,
+        page_sizes=projection_page_sizes,
     )
     warnings = projected.pop("_projection_warnings", [])
     basis = projected.pop("_coordinate_basis", None)
     document = normalize_docling_document(projected, parser_run_id="run", document_id="doc")
     descriptor = _page_geometry_descriptor(
-        document, page_sizes=page_sizes, declared_basis=basis, projection_warnings=warnings
+        document,
+        page_sizes=projection_page_sizes,
+        declared_basis=basis,
+        projection_warnings=warnings,
+    )
+    produced_pages = [page.page_number for page in document.pages]
+    pages_without_live_size = [
+        page_no for page_no in produced_pages if page_no not in projection_page_sizes
+    ]
+    blocks_without_verified_frame = sum(
+        1
+        for page in document.pages
+        for block in page.blocks
+        if getattr(block, "bbox_verified", None) is False
     )
     summary = _domain_pass_spec(
         json.loads(document.model_dump_json()), document_id="doc", engine="mineru_http"
     )
     sequences = {str(s["seq_id_no"]): s["normalized_sequence"] for s in summary["sequences"]}
-    report = {
-        "target": target,
-        "zip_path": str(zip_path.relative_to(REPO)),
+    bbox_extents = [
+        round(max(abs(v) for v in block.bbox), 2)
+        for page in document.pages
+        for block in page.blocks
+        if block.bbox
+    ]
+    sha_ok = expected_zip_sha256 is None or zip_sha == expected_zip_sha256
+    return {
+        "zip_path": str(zip_path),
         "zip_sha256": zip_sha,
-        "expected_zip_sha256": spec["expected_zip_sha256"],
+        "expected_zip_sha256": expected_zip_sha256,
         "zip_sha256_matches": sha_ok,
         "zip_bytes": len(zip_bytes),
-        "layout_page_size_field": "layout.json -> pdf_info[].page_size",
+        "layout_page_size_field": "layout.json -> pdf_info[].page_size (idx -> submitted page)",
+        "source_pages_submitted": list(source_pages),
         "layout_page_size_check": size_check,
         "all_sizes_match": all(v["match"] for v in size_check.values()),
+        "projection_page_order": page_order,
+        "projection_page_sizes": {
+            str(page_no): [size[0], size[1], size[2]]
+            for page_no, size in projection_page_sizes.items()
+        },
+        "pages_produced": produced_pages,
+        "pages_without_live_size": pages_without_live_size,
+        "blocks_without_verified_frame": blocks_without_verified_frame,
+        "max_abs_bbox_extent": max(bbox_extents, default=None),
         "coordinate_basis": basis,
         "coordinate_basis_verified": descriptor["coordinate_basis_verified"],
+        "page_size_verified": descriptor["page_size_verified"],
         "projection_warnings": warnings[:10],
-        "pages_produced": summary["pages_produced"],
         "sequence_count": len(sequences),
         "sequences": sequences,
         "measurement_count": len(summary["measurements"]),
@@ -150,23 +198,37 @@ def _replay(target: str, spec: dict) -> dict:
             "DoH-resolved connection and replayed through the product projection"
         ),
     }
-    return report
 
 
 def main() -> int:
     for target, spec in TARGETS.items():
-        report = _replay(target, spec)
+        zip_path = spec["data_dir"] / "remote-result.zip"
+        if not zip_path.is_file():
+            print(json.dumps({"target": target, "error": "zip missing"}))
+            continue
+        report = {
+            "target": target,
+            "data_rel": str(zip_path.relative_to(REPO)),
+            **replay_zip(
+                zip_path,
+                spec["pdf"],
+                spec["source_pages"],
+                expected_zip_sha256=spec["expected_zip_sha256"],
+            ),
+        }
+        report["zip_path"] = str(Path(report["zip_path"]).relative_to(REPO))
         out = REPO / "reports" / "f-round-recheck" / f"real_cloud_g_{target}_replay.json"
         out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(
             json.dumps(
                 {
                     "target": target,
-                    "zip_sha256_matches": report.get("zip_sha256_matches"),
-                    "all_sizes_match": report.get("all_sizes_match"),
-                    "sequences": report.get("sequence_count"),
-                    "measurements": report.get("measurement_count"),
-                    "out": str(out.relative_to(REPO)),
+                    "zip_sha256_matches": report["zip_sha256_matches"],
+                    "all_sizes_match": report["all_sizes_match"],
+                    "projection_page_order": report["projection_page_order"],
+                    "coordinate_basis_verified": report["coordinate_basis_verified"],
+                    "sequences": report["sequence_count"],
+                    "measurements": report["measurement_count"],
                 },
                 ensure_ascii=False,
             )

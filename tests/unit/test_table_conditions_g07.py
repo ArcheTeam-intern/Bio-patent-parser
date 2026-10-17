@@ -222,3 +222,52 @@ def test_condition_value_difference_still_unpairs() -> None:
     out = pair_measurements(a["measurements"], b["measurements"])
     assert out["paired"] == 0
     assert out["value_diffs"] == []
+
+
+# ---- I06/P02: condition units keep SI case semantics ----------------------
+
+
+def _caption_doc(caption: str, *, document_id: str) -> dict:
+    return _doc(caption=caption, document_id=document_id)
+
+
+def test_um_vs_um_length_is_not_an_identical_experiment() -> None:
+    """I06 recheck repro: captions 'MIC at 10 µM' vs 'MIC at 10 µm' — µm is
+    a LENGTH, not a concentration; the pair must NOT claim verified
+    identical conditions."""
+
+    a = _domain_pass_spec(
+        _caption_doc("MIC at 10 µM", document_id="sha256:um1"), document_id="sha256:um1", engine="docling"
+    )
+    b = _domain_pass_spec(
+        _caption_doc("MIC at 10 µm", document_id="sha256:um2"), document_id="sha256:um2", engine="mineru_http"
+    )
+    assert not any(
+        c["kind"] == "dose" for m in b["measurements"] for c in m["conditions"]
+    ), "µm (length) must never be extracted as a dose condition"
+    out = pair_measurements(a["measurements"], b["measurements"])
+    assert out["paired"] == 0
+    assert len(out["keys_only_a"]) == 1 and len(out["keys_only_b"]) == 1
+
+
+def test_micro_glyph_equivalents_still_pair() -> None:
+    a = _domain_pass_spec(
+        _caption_doc("MIC at 10 µM", document_id="sha256:g1"), document_id="sha256:g1", engine="docling"
+    )
+    b = _domain_pass_spec(
+        _caption_doc("MIC at 10 \u03bcM", document_id="sha256:g2"), document_id="sha256:g2", engine="mineru_http"
+    )
+    out = pair_measurements(a["measurements"], b["measurements"])
+    assert out["paired"] == 1
+    assert out["pairs_with_unverified_conditions"] == 0
+
+
+def test_concentration_magnitudes_stay_distinct_in_conditions() -> None:
+    a = _domain_pass_spec(
+        _caption_doc("MIC at 1 mM", document_id="sha256:m1"), document_id="sha256:m1", engine="docling"
+    )
+    b = _domain_pass_spec(
+        _caption_doc("MIC at 1 M", document_id="sha256:m2"), document_id="sha256:m2", engine="mineru_http"
+    )
+    out = pair_measurements(a["measurements"], b["measurements"])
+    assert out["paired"] == 0

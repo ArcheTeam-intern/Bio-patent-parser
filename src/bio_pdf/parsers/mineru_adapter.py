@@ -38,6 +38,7 @@ from bio_pdf.errors import (
     EngineTimeoutError,
     EngineUnavailableError,
     NetworkTransientError,
+    UploadSlotExpiredError,
 )
 from bio_pdf.parsers.base import ParseArtifacts, ParseRequest
 from bio_pdf.parsers.normalize_docling import normalize_docling_document
@@ -370,6 +371,17 @@ class MinerUAdapter:
                     "MinerU rejected the Bearer token on upload request",
                     details={"status": response.status_code, "body": response.text[:200]},
                 )
+            if response.status_code == 429 or response.status_code >= 500:
+                # I03: allocation-side temporary failure — retryable, and the
+                # caller's identity stays in its pre-allocation phase.
+                raise NetworkTransientError(
+                    f"MinerU file-urls returned HTTP {response.status_code} (retryable)",
+                    details={
+                        "status": response.status_code,
+                        "code": "UPLOAD_ALLOC_RETRYABLE",
+                        "reason": "server-temporary",
+                    },
+                )
             if response.status_code >= 400:
                 raise EngineProtocolUnsupportedError(
                     f"MinerU file-urls returned {response.status_code}: {response.text[:300]}",
@@ -418,15 +430,44 @@ class MinerUAdapter:
             with httpx.Client(timeout=self.timeout, transport=self._transport) as raw_client:
                 put_resp = raw_client.put(upload_url, content=file_path.read_bytes())
         except httpx.HTTPError as exc:
+            # I03/S03: network failures are RETRYABLE with the SAME slot —
+            # never evidence of expiry.
             raise NetworkTransientError(
-                f"failed to PUT file to MinerU: {exc}",
-                details={"upload_url": upload_url[:200]},
+                f"failed to PUT file to MinerU (retryable, same slot): {exc}",
+                details={
+                    "upload_url": upload_url[:200],
+                    "code": "UPLOAD_RETRYABLE",
+                    "reason": "network",
+                },
             ) from exc
-        if put_resp.status_code not in (200, 201, 204):
-            raise EngineUnavailableError(
-                f"MinerU file PUT returned {put_resp.status_code}",
-                details={"upload_url": upload_url[:200], "body": put_resp.text[:200]},
+        status = put_resp.status_code
+        if status in (200, 201, 204):
+            return
+        if status in (401, 403, 404):
+            # Confirmed expiry/invalid signature — the ONLY reallocation
+            # trigger.
+            raise UploadSlotExpiredError(
+                f"MinerU upload slot is no longer valid (HTTP {status})",
+                details={
+                    "upload_url": upload_url[:200],
+                    "status": status,
+                    "code": "UPLOAD_SLOT_EXPIRED",
+                },
             )
+        if status == 429 or status >= 500:
+            raise NetworkTransientError(
+                f"MinerU file PUT returned HTTP {status} (retryable, same slot)",
+                details={
+                    "upload_url": upload_url[:200],
+                    "status": status,
+                    "code": "UPLOAD_RETRYABLE",
+                    "reason": "server-temporary",
+                },
+            )
+        raise EngineProtocolUnsupportedError(
+            f"MinerU file PUT returned HTTP {status}",
+            details={"upload_url": upload_url[:200], "status": status, "body": put_resp.text[:200]},
+        )
 
     def poll_batch_entry(
         self,
@@ -555,6 +596,17 @@ class MinerUAdapter:
                 raise EngineUnavailableError(
                     "MinerU rejected the Bearer token on upload request",
                     details={"status": response.status_code, "body": response.text[:200]},
+                )
+            if response.status_code == 429 or response.status_code >= 500:
+                # I03: allocation-side temporary failure — retryable, and the
+                # caller's identity stays in its pre-allocation phase.
+                raise NetworkTransientError(
+                    f"MinerU file-urls returned HTTP {response.status_code} (retryable)",
+                    details={
+                        "status": response.status_code,
+                        "code": "UPLOAD_ALLOC_RETRYABLE",
+                        "reason": "server-temporary",
+                    },
                 )
             if response.status_code >= 400:
                 raise EngineProtocolUnsupportedError(
@@ -1149,12 +1201,12 @@ class MinerUAdapter:
             if isinstance(loaded, dict) and loaded.get("fingerprint") == fingerprint:
                 identity = loaded
 
-        if identity is None:
-            # H03/S03: ALLOCATE the slot first and persist the identity
-            # (phase="allocated") BEFORE the PUT. If the PUT response is
-            # lost while the server already received the file, the retry
-            # recovers here, re-PUTs the SAME slot and never allocates a
-            # second batch.
+        # I02/S02: explicit recovery dispatch over EVERY persisted phase.
+        # A fresh allocation happens only when there is no identity or the
+        # slot is CONFIRMED expired; the identity is persisted before any
+        # upload; only an uploaded/polling/completed batch may be polled.
+        phase = str(identity.get("phase") or "") if identity is not None else ""
+        if identity is None or phase == "slot_expired":
             batch_id, slots, file_name = self.allocate_upload_slot(
                 local_file,
                 data_id=local_sha[:16],
@@ -1179,39 +1231,54 @@ class MinerUAdapter:
                 "submitted_at": datetime.now(tz=timezone.utc).isoformat(),
             }
             _write_identity(identity_path, identity)
+            phase = "allocated"
 
-        if identity.get("phase") == "allocated":
-            # PUT the bytes (idempotent): a lost response lands here again.
-            try:
-                self.upload_to_slot(str(identity.get("upload_url") or ""), local_file)
-            except EngineUnavailableError:
-                # An expired/invalid slot cannot be reused — allocate a
-                # FRESH batch with a documented reason instead of retrying
-                # a dead URL forever.
+        if phase == "allocated":
+            upload_url = str(identity.get("upload_url") or "")
+            if not upload_url.startswith(("http://", "https://")):
+                # A persisted allocation without a usable slot cannot be
+                # uploaded — mark it expired so the NEXT attempt reallocates
+                # instead of polling a batch that never received bytes.
                 identity["phase"] = "slot_expired"
-                identity["slot_expired_reason"] = "PUT slot rejected (expired or invalid)"
+                identity["slot_expired_reason"] = "persisted identity has no usable slot URL"
                 _write_identity(identity_path, identity)
-                batch_id, slots, file_name = self.allocate_upload_slot(
-                    local_file,
-                    data_id=local_sha[:16],
-                    language=str(params["language"]),
-                    enable_table=bool(params["enable_table"]),
-                    enable_formula=bool(params["enable_formula"]),
-                    is_ocr=bool(params["is_ocr"]),
-                    page_ranges=params["page_ranges"],
+                raise UploadSlotExpiredError(
+                    "stored upload slot is unusable; reallocation required",
+                    details={"code": "UPLOAD_SLOT_EXPIRED", "batch_id": identity.get("batch_id")},
                 )
-                identity.update(
-                    {
-                        "batch_id": batch_id,
-                        "file_name": file_name,
-                        "upload_url": str(slots[0]),
-                        "phase": "allocated",
-                    }
-                )
+            try:
+                self.upload_to_slot(upload_url, local_file)
+            except UploadSlotExpiredError:
+                # Confirmed expiry: persist the state BEFORE raising; the
+                # next attempt's dispatch reallocates. If that allocation
+                # fails too, the identity STAYS slot_expired — never polling.
+                identity["phase"] = "slot_expired"
+                identity["slot_expired_reason"] = "PUT returned 401/403/404 (slot invalid)"
                 _write_identity(identity_path, identity)
-                self.upload_to_slot(str(identity["upload_url"]), local_file)
+                raise
+            except NetworkTransientError:
+                # 500/429/network: keep phase=allocated → the retry re-PUTs
+                # the SAME slot (no second batch allocation).
+                identity["last_upload_error"] = {
+                    "code": "UPLOAD_RETRYABLE",
+                    "at": datetime.now(tz=timezone.utc).isoformat(),
+                }
+                _write_identity(identity_path, identity)
+                raise
             identity["phase"] = "uploaded"
             _write_identity(identity_path, identity)
+            phase = "uploaded"
+
+        if phase not in ("uploaded", "polling", "completed"):
+            # Unknown persisted state: never fall through to polling a
+            # batch whose upload status is unknown — require reallocation.
+            identity["phase"] = "slot_expired"
+            identity["slot_expired_reason"] = f"unknown persisted phase {phase!r}"
+            _write_identity(identity_path, identity)
+            raise EngineProtocolUnsupportedError(
+                f"MinerU identity has an unknown phase {phase!r}; reallocation required",
+                details={"code": "REMOTE_IDENTITY_PHASE_UNKNOWN", "phase": phase},
+            )
 
         identity["phase"] = "polling"
         _write_identity(identity_path, identity)

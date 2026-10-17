@@ -1,47 +1,79 @@
 {
   "target": "paper",
-  "batch_id": "98b15398-88be-49f8-be16-2bf9d75465bd",
+  "data_rel": "data\\acceptance-g-live-paper\\remote-result.zip",
+  "zip_path": "data\\acceptance-g-live-paper\\remote-result.zip",
   "zip_sha256": "50703ac6669a2b1696e1f691e7e88af103259ec37b2b62e4d0dd50dfda21d1dd",
+  "expected_zip_sha256": "50703ac6669a2b1696e1f691e7e88af103259ec37b2b62e4d0dd50dfda21d1dd",
+  "zip_sha256_matches": true,
   "zip_bytes": 393923,
-  "content_list_entries": 22,
+  "layout_page_size_field": "layout.json -> pdf_info[].page_size (idx -> submitted page)",
+  "source_pages_submitted": [
+    8,
+    9
+  ],
   "layout_page_size_check": {
     "8": {
-      "layout": [
-        null,
-        null
+      "layout_json_page_size": [
+        595.0,
+        779.0
       ],
-      "source": [
-        595.3,
-        779.5
+      "layout_json_page_angle": 0.0,
+      "source_pdf_size_pt": [
+        595.26,
+        779.52
       ],
-      "match": false
+      "tolerance_pt": 2.0,
+      "match": true
     },
     "9": {
-      "layout": [
-        null,
-        null
+      "layout_json_page_size": [
+        595.0,
+        779.0
       ],
-      "source": [
-        595.3,
-        779.5
+      "layout_json_page_angle": 0.0,
+      "source_pdf_size_pt": [
+        595.26,
+        779.52
       ],
-      "match": false
+      "tolerance_pt": 2.0,
+      "match": true
     }
   },
+  "all_sizes_match": true,
+  "projection_page_order": [
+    8,
+    9
+  ],
+  "projection_page_sizes": {
+    "8": [
+      595.0,
+      779.0,
+      0.0
+    ],
+    "9": [
+      595.0,
+      779.0,
+      0.0
+    ]
+  },
+  "pages_produced": [
+    8,
+    9
+  ],
+  "pages_without_live_size": [],
+  "blocks_without_verified_frame": 0,
+  "max_abs_bbox_extent": 749.4,
   "coordinate_basis": {
     "unit": "normalized_1000",
     "origin": "top_left",
     "protocol": "mineru-content-list-v1",
     "transform": "coord / 1000 * source_page_size"
   },
+  "coordinate_basis_verified": true,
+  "page_size_verified": true,
   "projection_warnings": [],
-  "pages_produced": [
-    1,
-    2
-  ],
   "sequence_count": 0,
   "sequences": {},
   "measurement_count": 0,
-  "measurements_sample": [],
-  "note": "remote parsed OUR submission; the local plain-HTTPS download path failed (CDN TLS EOF, same environment issue as the F-round reviewer); this zip was fetched with TLS verification ON via a temporary DoH-resolved connection and replayed through the product projection — not a constructed fixture"
+  "note": "remote parsed OUR submission; the local plain-HTTPS download path failed (CDN TLS EOF); the zip was fetched with TLS verification ON via a temporary DoH-resolved connection and replayed through the product projection"
 }

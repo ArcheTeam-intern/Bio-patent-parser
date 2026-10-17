@@ -74,6 +74,17 @@ class NetworkTransientError(WorkflowError):
     code = "NETWORK_TRANSIENT"
 
 
+class UploadSlotExpiredError(WorkflowError):
+    """I03/S03: the signed upload slot is CONFIRMED expired/invalid.
+
+    Only this class may trigger a fresh batch allocation. Transient HTTP
+    failures (500/429/timeouts) never do — they re-PUT the same slot on the
+    next attempt.
+    """
+
+    code = "UPLOAD_SLOT_EXPIRED"
+
+
 class RateLimitedError(WorkflowError):
     code = "RATE_LIMITED"
 

@@ -520,3 +520,114 @@ def test_worker_structurally_fails_on_an_out_of_scope_adopted_input(tmp_path: Pa
     ).fetchone()
     assert "ADOPTED_CANDIDATE_OUT_OF_SCOPE" in str(row["error_json"])
     svc.close()
+
+
+# ---- I04/S04: adopt page-input validation ---------------------------------
+
+
+def _reparse_ready(client, monkeypatch):
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(c, tmp_path)
+    from bio_pdf.extract.sequences import region_ocr
+
+    monkeypatch.setattr(
+        region_ocr,
+        "ocr_residue_pages",
+        lambda pdf_path, pages: {int(pages[0]): [(40.0, 700.0, 200.0, 710.0, "MKTG")]},
+    )
+    rep = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert rep.status_code == 200, rep.text
+    return c, tmp_path, job_id, issue_id
+
+
+def _counts(tmp_path: Path) -> tuple[int, int]:
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    conn.row_factory = sqlite3.Row
+    jobs = conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"]
+    adopted = conn.execute(
+        "SELECT COUNT(*) AS n FROM issue_events WHERE action = 'adopted'"
+    ).fetchone()["n"]
+    conn.close()
+    return jobs, adopted
+
+
+def test_adopt_invalid_pages_are_422_with_zero_writes(client, monkeypatch) -> None:
+    c, tmp_path, job_id, issue_id = _reparse_ready(client, monkeypatch)
+    before = _counts(tmp_path)
+    for pages in ([0], [-1], [0, -1], []):
+        resp = c.post(
+            f"/api/v1/jobs/{job_id}/issues/{issue_id}/adopt",
+            json={"actor": "reviewer", "pages": pages},
+        )
+        assert resp.status_code == 422, (pages, resp.status_code, resp.text)
+        body = resp.json()
+        detail = body.get("error") if isinstance(body.get("error"), dict) else body.get("detail")
+        if isinstance(detail, dict):
+            assert detail["code"] in (
+                "ADOPT_PAGE_INVALID",
+                "ADOPT_PAGE_OUT_OF_SCOPE",
+                "PAGE_RANGE_INVALID",
+            )
+        # model-boundary validation errors arrive list-shaped; the contract
+        # here is the 422 + zero writes.
+        assert "jobs" not in body, "a rejected adopt must create nothing"
+    assert _counts(tmp_path) == before, "no job/event may be written for invalid pages"
+
+
+def test_adopt_without_pages_defaults_to_the_candidate_page(client, monkeypatch) -> None:
+    c, tmp_path, job_id, issue_id = _reparse_ready(client, monkeypatch)
+    adopted = c.post(
+        f"/api/v1/jobs/{job_id}/issues/{issue_id}/adopt", json={"actor": "reviewer"}
+    )
+    assert adopted.status_code == 201, adopted.text
+    assert adopted.json()["adopted"]["pages"] == [1]
+
+
+def test_adopt_page_beyond_the_document_is_422(client, monkeypatch) -> None:
+    c, tmp_path = client
+    job_id, issue_id = _seed_issue(c, tmp_path)
+
+    from bio_pdf.extract.sequences import region_ocr
+
+    # Candidate targeting page 99 (beyond the 1-page fixture document).
+    monkeypatch.setattr(
+        region_ocr,
+        "ocr_residue_pages",
+        lambda pdf_path, pages: {int(pages[0]): [(40.0, 700.0, 200.0, 710.0, "MKTG")]},
+    )
+    rep = c.post(f"/api/v1/jobs/{job_id}/issues/{issue_id}/reparse")
+    assert rep.status_code == 200
+    conn = sqlite3.connect(tmp_path / "data" / "bio.sqlite")
+    cand = conn.execute(
+        "SELECT candidate_id FROM issue_candidates ORDER BY attempt DESC LIMIT 1"
+    ).fetchone()[0]
+    meta_path = next(
+        (tmp_path / "data" / "jobs" / job_id / "issues" / issue_id).glob(
+            f"candidate-{cand}.meta.json"
+        )
+    )
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["page_number"] = 99
+    meta_text = json.dumps(meta, ensure_ascii=False, indent=2, sort_keys=True)
+    meta_path.write_bytes(meta_text.encode("utf-8"))
+    import hashlib as _h
+
+    conn.execute(
+        "UPDATE issue_candidates SET meta_sha256 = ? WHERE candidate_id = ?",
+        (_h.sha256(meta_text.encode("utf-8")).hexdigest(), cand),
+    )
+    conn.commit()
+    conn.close()
+
+    before = _counts(tmp_path)
+    resp = c.post(
+        f"/api/v1/jobs/{job_id}/issues/{issue_id}/adopt",
+        json={"actor": "reviewer", "pages": [99]},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] in (
+        "ADOPT_PAGE_OUT_OF_SCOPE",
+        "ADOPT_PAGE_INVALID",
+        "PAGE_RANGE_INVALID",
+    )
+    assert _counts(tmp_path) == before

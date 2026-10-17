@@ -110,3 +110,102 @@ def test_tagfree_paragraph_containment_still_dedupes() -> None:
     )
     assert [str(b.get("text")) for b in merged] == [paragraph]
     assert records == []
+
+
+# ---- I05/P01: compatible ADDITIONS merge; only shared-value conflicts block -
+
+
+def _feed_sequence(merged_blocks) -> list:
+    from bio_pdf.extract.sequences.st25 import parse_st25_blocks_with_scan
+
+    blocks = [
+        {
+            "text": str(b.get("text") or ""),
+            "kind": "text",
+            "semantic_role": "unknown",
+            "page_number": int(b.get("page_number") or 1),
+            "bbox": b.get("bbox"),
+            "block_id": str(b.get("block_id") or "b"),
+            "source_refs": [],
+            "source_aliases": [],
+            "source_parser": str(b.get("source_parser") or "native"),
+            "source_artifact_id": None,
+        }
+        for b in merged_blocks
+    ]
+    records, _scan = parse_st25_blocks_with_scan(blocks, "sha256:fixture")
+    return records
+
+
+def test_compatible_length_addition_from_ocr_enters_the_parse_feed() -> None:
+    """I05 recheck repro: native ``<210> 1`` + OCR ``<210> 1 <211> 5`` — the
+    extra <211> is COMPATIBLE information and must reach the parser."""
+
+    blocks = [
+        _native("<210> 1", _BOX),
+        _native("Ala Gly Leu Lys", [10.0, 200.0, 200.0, 210.0]),
+    ]
+    merged, records = _merge_ocr_page_lines(
+        blocks,
+        {1: [(10.0, 100.0, 110.0, 110.0, "<210> 1 <211> 5 <400> 1")]},
+    )
+    texts = [str(b.get("text")) for b in merged]
+    assert any("<211> 5" in t for t in texts), texts
+    assert not _conflicts(records), records
+    # The field actually reaches the residue parse.
+    sequences = _feed_sequence(merged)
+    assert sequences and sequences[0].declared_length == 5, sequences
+
+
+def test_native_superset_is_kept_and_ocr_subset_consumed() -> None:
+    merged, records = _merge_ocr_page_lines(
+        [_native("<210> 1 <211> 5", _BOX)],
+        {1: [(10.0, 100.0, 110.0, 110.0, "<210> 1")]},
+    )
+    assert [str(b.get("text")) for b in merged] == ["<210> 1 <211> 5"]
+    assert not _conflicts(records)
+
+
+def test_disjoint_additions_keep_both_lines() -> None:
+    """Native declares length, OCR declares the molecule type: neither covers
+    the other's extra field — both lines stay in the feed."""
+
+    merged, records = _merge_ocr_page_lines(
+        [_native("<210> 1 <211> 5", _BOX)],
+        {1: [(10.0, 100.0, 110.0, 110.0, "<210> 1 <212> PRT")]},
+    )
+    texts = [str(b.get("text")) for b in merged]
+    assert "<210> 1 <211> 5" in texts and "<210> 1 <212> PRT" in texts
+    assert not _conflicts(records)
+    addendum = [r for r in records if r.get("kind") == "declaration_addendum"]
+    assert addendum, records
+
+
+def test_multi_sequence_declaration_blocks_compare_per_declaration() -> None:
+    text = "<210> 1 <211> 5 <210> 2 <211> 10"
+    merged, records = _merge_ocr_page_lines(
+        [_native(text, _BOX)], {1: [(10.0, 100.0, 110.0, 110.0, text)]}
+    )
+    assert len(merged) == 1 and records == []
+
+    merged2, records2 = _merge_ocr_page_lines(
+        [_native(text, _BOX)],
+        {1: [(10.0, 100.0, 110.0, 110.0, "<210> 1 <211> 5 <210> 2 <211> 20")]},
+    )
+    assert [str(b.get("text")) for b in merged2] == [text], "the 2/20 conflict keeps the native"
+    assert _conflicts(records2)
+    assert not _supersedes(records2)
+
+
+def test_field_value_conflicts_still_block_both_directions() -> None:
+    for native_text, ocr_text in (
+        ("<210> 1 <211> 5", "<210> 1 <211> 50"),
+        ("<210> 1 <211> 50", "<210> 1 <211> 5"),
+        ("<210> 12", "<210> 1"),
+    ):
+        merged, records = _merge_ocr_page_lines(
+            [_native(native_text, _BOX)],
+            {1: [(10.0, 100.0, 110.0, 110.0, ocr_text)]},
+        )
+        assert [str(b.get("text")) for b in merged] == [native_text], (native_text, ocr_text)
+        assert _conflicts(records), (native_text, ocr_text)

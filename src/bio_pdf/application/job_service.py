@@ -281,6 +281,16 @@ class JobService:
         # H02/S02: an adopted candidate whose target page is outside the
         # job's page set would be a silent no-op — refuse at creation.
         for adopted in cfg.adopted_candidates:
+            if adopted.page_number <= 0:
+                raise WorkflowError(
+                    f"adopted candidate {adopted.candidate_id} has an invalid page "
+                    f"{adopted.page_number} (must be a positive integer)",
+                    details={
+                        "candidate_id": adopted.candidate_id,
+                        "candidate_page": adopted.page_number,
+                        "code": "ADOPT_PAGE_INVALID",
+                    },
+                )
             if pages and adopted.page_number not in pages:
                 raise WorkflowError(
                     f"adopted candidate {adopted.candidate_id} targets page "

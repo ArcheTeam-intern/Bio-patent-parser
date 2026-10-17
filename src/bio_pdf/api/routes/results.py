@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, PositiveInt, field_validator
 from fastapi.responses import FileResponse
 
 from bio_pdf.api.contracts import (
@@ -1434,7 +1434,16 @@ def issue_reparse(service: ServiceDep, job_id: str, issue_id: str) -> dict:
 class _AdoptRequest(BaseModel):
     attempt: int | None = None
     actor: str = "local-operator"
-    pages: list[int] | None = None
+    #: I04/S04: when provided, every page must be a POSITIVE integer and the
+    #: set must be non-empty — [0]/[-1]/[] are 422 at the model boundary.
+    pages: list[PositiveInt] | None = None
+
+    @field_validator("pages")
+    @classmethod
+    def _pages_non_empty(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and len(value) == 0:
+            raise ValueError("pages must be non-empty when provided; omit it to target the candidate page")
+        return value
 
 
 @router.post("/issues/{issue_id}/adopt", status_code=201)
@@ -1527,12 +1536,30 @@ def issue_adopt(
             detail={"code": "SOURCE_MISSING", "message": "document source unavailable"},
         )
 
-    pages = [int(p) for p in (request.pages or [int(meta.get("page_number", 1))]) if int(p) > 0]
+    # I04/S04: prove the explicit-vs-default branches instead of an eagerly
+    # evaluated default (``meta.get(..., pages[0])`` raised IndexError on an
+    # empty filtered list and produced a 500).
+    requested_pages = [int(p) for p in (request.pages or [])]
+    meta_page_raw = meta.get("page_number")
+    candidate_page = (
+        int(meta_page_raw)
+        if meta_page_raw is not None
+        else (requested_pages[0] if requested_pages else 0)
+    )
+    if candidate_page <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ADOPT_PAGE_INVALID",
+                "message": "the candidate page is unknown or not a positive integer",
+                "details": {"candidate_page": candidate_page},
+            },
+        )
+    pages = requested_pages or [candidate_page]
     # H02/S02: the adopted page MUST be inside the requested page set —
     # otherwise the worker would silently skip the candidate while the API
     # still reported success. Reject BEFORE the job is created and before
     # any adopted event is written.
-    candidate_page = int(meta.get("page_number", pages[0]))
     if candidate_page not in pages:
         raise HTTPException(
             status_code=422,
@@ -1551,11 +1578,12 @@ def issue_adopt(
     # job's persisted inputs, and the extract stage feeds its content into
     # the extraction for that page. A copy is hash-verified into the job's
     # own adopted/ directory at creation time.
-    new_job, _page_count = service.create_job(
-        Path(str(doc_row["source_path"])),
-        engine="docling",
-        page_numbers=tuple(pages),
-        adopted_candidates=[
+    try:
+        new_job, _page_count = service.create_job(
+            Path(str(doc_row["source_path"])),
+            engine="docling",
+            page_numbers=tuple(pages),
+            adopted_candidates=[
             {
                 "candidate_id": str(chosen["candidate_id"]),
                 "artifact_path": str(artifact),
@@ -1565,11 +1593,33 @@ def issue_adopt(
                 "baseline_id": meta.get("baseline_id"),
                 "origin_job_id": job_id,
                 "origin_issue_id": issue_id,
-                "page_number": int(meta.get("page_number", pages[0])),
-                "region": meta.get("region") if isinstance(meta.get("region"), dict) else None,
-            }
-        ],
-    )
+                    "page_number": candidate_page,
+                    "region": meta.get("region") if isinstance(meta.get("region"), dict) else None,
+                }
+            ],
+        )
+    except WorkflowError as exc:
+        details = getattr(exc, "details", None) or {}
+        from bio_pdf.errors import PageRangeInvalidError
+
+        if isinstance(exc, PageRangeInvalidError):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "PAGE_RANGE_INVALID",
+                    "message": exc.message,
+                    "details": details,
+                },
+            ) from exc
+        if isinstance(details, dict) and details.get("code") in (
+            "ADOPT_PAGE_INVALID",
+            "ADOPT_PAGE_OUT_OF_SCOPE",
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={"code": details["code"], "message": exc.message, "details": details},
+            ) from exc
+        raise
     service.repository.append_issue_event(
         issue_id=issue_id,
         actor=request.actor,

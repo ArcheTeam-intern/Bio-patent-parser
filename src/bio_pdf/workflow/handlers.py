@@ -872,21 +872,62 @@ def _merge_ocr_page_lines(
 
     _tag_capture = _re.compile(r"<\s*(\d{3})\s*>\s*([^<]*)")
 
-    def tag_signature(text: str) -> tuple[tuple[str, str], ...] | None:
-        """H05/P02: ST.25 declaration signature — tag number + field value.
+    def tag_declarations(text: str) -> list[dict[str, str]] | None:
+        """H05+I05/P01: per-DECLARATION tag maps (a new map starts at <210>).
 
-        ``<210> 1`` and ``<210> 12`` are DIFFERENT declarations; their
-        fingerprints are not in a containment relation either, but the
-        generic substring path would treat ``<210>1`` as covered by
-        ``<210>12``. Declaration-bearing lines therefore never take the
-        substring cover/supersede route — only an identical signature may
-        merge. None = the text carries no tag (residues/paragraphs keep the
-        normal containment behaviour)."""
+        A multi-sequence line must never be flattened into one tag→value
+        dict (later tags would overwrite earlier ones); each <210> opens its
+        own map, and tags before the first <210> form a leading anonymous
+        declaration. None = the text carries no tag."""
 
         matches = _tag_capture.findall(text)
         if not matches:
             return None
-        return tuple((num, value.strip()) for num, value in matches)
+        declarations: list[dict[str, str]] = []
+        current: dict[str, str] | None = None
+        for tag, value in matches:
+            if tag == "210":
+                current = {"210": value.strip()}
+                declarations.append(current)
+            else:
+                if current is None:
+                    current = {}
+                    declarations.append(current)
+                current[tag] = value.strip()
+        return declarations
+
+    def declaration_verdict(native_text: str, ocr_text: str) -> str:
+        """Compare two tag-bearing texts FIELD BY FIELD.
+
+        Returns 'equal' | 'native_superset' | 'ocr_superset' | 'addendum' |
+        'conflict' | 'incomparable'. Only value differences on a SHARED tag
+        (or a declaration-count mismatch) are conflicts — a compatible
+        ADDITION such as native ``<210> 1`` vs OCR ``<210> 1 <211> 5`` is
+        mergeable and must not be swallowed as a conflict."""
+
+        na = tag_declarations(native_text)
+        nb = tag_declarations(ocr_text)
+        if na is None or nb is None:
+            return "incomparable"
+        if len(na) != len(nb):
+            return "conflict"
+        native_only = False
+        ocr_only = False
+        for decl_a, decl_b in zip(na, nb):
+            shared = set(decl_a) & set(decl_b)
+            if any(decl_a[tag] != decl_b[tag] for tag in shared):
+                return "conflict"
+            if set(decl_a) - set(decl_b):
+                native_only = True
+            if set(decl_b) - set(decl_a):
+                ocr_only = True
+        if not native_only and not ocr_only:
+            return "equal"
+        if ocr_only and not native_only:
+            return "ocr_superset"
+        if native_only and not ocr_only:
+            return "native_superset"
+        return "addendum"
 
     def _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
         return a0 - 2.0 <= b1 and b0 - 2.0 <= a1
@@ -930,7 +971,7 @@ def _merge_ocr_page_lines(
                 ),
                 fingerprint(str(b.get("text") or "")),
                 loose_fingerprint(str(b.get("text") or "")),
-                tag_signature(str(b.get("text") or "")),
+                tag_declarations(str(b.get("text") or "")) is not None,
                 str(b.get("text") or ""),
                 str(b.get("block_id") or ""),
             )
@@ -941,23 +982,81 @@ def _merge_ocr_page_lines(
         for order, (x0, y0, x1, y1, text) in enumerate(lines):
             fp = fingerprint(text)
             ocr_loose = loose_fingerprint(text)
-            ocr_sig = tag_signature(text)
+            ocr_tagged = tag_declarations(text) is not None
             if letter_len(fp) < 2:
                 continue
             overlapping = [
-                (item_index, n_fp, n_loose, n_sig, n_text, n_block_id)
-                for item_index, n_box, n_fp, n_loose, n_sig, n_text, n_block_id in natives
+                (item_index, n_fp, n_loose, n_tagged, n_text, n_block_id)
+                for item_index, n_box, n_fp, n_loose, n_tagged, n_text, n_block_id in natives
                 if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
             ]
             # Exact (digit-preserving) equality merges — tags included.
-            merge_equal = any(n_fp == fp for _i, n_fp, _nl, _ns, _t, _b in overlapping)
-            # H05/P02: identical DECLARATION signatures also merge (the
-            # same tag/value pair from both channels).
-            if not merge_equal and ocr_sig is not None:
-                merge_equal = any(
-                    n_sig is not None and n_sig == ocr_sig
-                    for _i, _nfp, _nl, n_sig, _t, _b in overlapping
-                )
+            merge_equal = any(n_fp == fp for _i, n_fp, _nl, _nt, _t, _b in overlapping)
+            if ocr_tagged:
+                # I05/P01: declaration lines are compared FIELD BY FIELD.
+                # A compatible addition (native <210>1 vs OCR <210>1 <211>5)
+                # is merged with its extra fields preserved; only shared-tag
+                # VALUE conflicts (1 vs 12) block completion. Multi-sequence
+                # lines are compared declaration by declaration.
+                verdicts = [
+                    (item_index, declaration_verdict(n_text, text), n_text, n_block_id)
+                    for item_index, _nfp, _nl, _nt, n_text, n_block_id in overlapping
+                    if tag_declarations(n_text) is not None
+                ]
+                if any(verdict in ("equal", "native_superset") for _i, verdict, _t, _b in verdicts):
+                    continue  # retained native already carries every field
+                ocr_superior = [v for v in verdicts if v[1] == "ocr_superset"]
+                if ocr_superior:
+                    superseded_native = []
+                    for item_index, _verdict, n_text, n_block_id in ocr_superior:
+                        superseded.add(item_index)
+                        superseded_native.append(
+                            {"text": n_text, "block_id": n_block_id, "fingerprint": fingerprint(n_text)}
+                        )
+                        records.append(
+                            {
+                                "kind": "coverage_supersede",
+                                "page_number": page,
+                                "x0": float(round(x0, 1)),
+                                "y_top": float(round(y0, 1)),
+                                "x1": float(round(x1, 1)),
+                                "y_bottom": float(round(y1, 1)),
+                                "native_text": n_text,
+                                "ocr_text": text,
+                                "native_block_id": n_block_id,
+                                "reason": (
+                                    "compatible field ADDITION: the OCR declaration carries "
+                                    "the same shared field values plus additional fields; the "
+                                    "complete line replaces the short fragment in the feed "
+                                    "(native artifact untouched)"
+                                ),
+                            }
+                        )
+                    kept.append((y0, order, "ocr", (x0, y0, x1, y1, text, superseded_native)))
+                    continue
+                if any(verdict == "addendum" for _i, verdict, _t, _b in verdicts):
+                    # Disjoint extra fields on both sides: keep BOTH lines
+                    # (the parser consumes both; every field stays traceable).
+                    records.append(
+                        {
+                            "kind": "declaration_addendum",
+                            "page_number": page,
+                            "x0": float(round(x0, 1)),
+                            "y_top": float(round(y0, 1)),
+                            "x1": float(round(x1, 1)),
+                            "y_bottom": float(round(y1, 1)),
+                            "native_text": [t for _i, v, t, _b in verdicts if v == "addendum"],
+                            "ocr_text": text,
+                            "reason": (
+                                "compatible disjoint fields from both channels — both "
+                                "declaration lines are kept"
+                            ),
+                        }
+                    )
+                    kept.append((y0, order, "ocr", (x0, y0, x1, y1, text, None)))
+                    continue
+                # conflict / incomparable among tagged pairs → generic path
+                # (conflict record when comparable; containment disabled).
             # G06/P01: count-marker tolerance applies ONLY to tag-free texts
             # and ONLY when the difference is standalone integer tokens (the
             # 1 5 10… margin counters of residue rows). ``<210> 1`` vs
@@ -965,24 +1064,23 @@ def _merge_ocr_page_lines(
             if not merge_equal and ocr_loose is not None:
                 merge_equal = any(
                     n_loose is not None and n_loose == ocr_loose
-                    for _i, n_fp, n_loose, _ns, _t, _b in overlapping
+                    for _i, n_fp, n_loose, _nt, _t, _b in overlapping
                 )
             # F05 + H05: the substring cover/supersede route is for
             # tag-FREE content only — ``<210> 1`` ⊂ ``<210> 12`` is digit
-            # coincidence, not coverage. Declaration lines with different
-            # signatures fall through to the conflict path below.
-            containment_allowed = ocr_sig is None and all(
-                n_sig is None for _i, _nfp, _nl, n_sig, _t, _b in overlapping
+            # coincidence, not coverage.
+            containment_allowed = not ocr_tagged and all(
+                not n_tagged for _i, _nfp, _nl, n_tagged, _t, _b in overlapping
             )
             covered = containment_allowed and any(
                 n_fp and n_fp != fp and fp in n_fp
-                for _i, n_fp, _nl, _ns, _t, _b in overlapping
+                for _i, n_fp, _nl, _nt, _t, _b in overlapping
             )
             if merge_equal or covered:
                 continue  # nothing beyond the retained text could be lost
             supersedes = [
                 (item_index, n_fp, n_text, n_block_id)
-                for item_index, n_fp, _n_loose, _n_sig, n_text, n_block_id in overlapping
+                for item_index, n_fp, _n_loose, _n_tagged, n_text, n_block_id in overlapping
                 if containment_allowed and n_fp and n_fp != fp and n_fp in fp
             ]
             if supersedes:
@@ -1021,7 +1119,7 @@ def _merge_ocr_page_lines(
             # recorded as a content conflict, never merged.
             disagree = [
                 (n_fp, n_text)
-                for _i, n_fp, _nl, _ns, n_text, _b in overlapping
+                for _i, n_fp, _nl, _nt, n_text, _b in overlapping
                 if max(letter_len(fp), letter_len(n_fp))
                 <= 2 * max(min(letter_len(fp), letter_len(n_fp)), 1)
             ]

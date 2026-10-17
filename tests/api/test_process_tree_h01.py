@@ -1,19 +1,21 @@
-"""H01/S01: the execution budget must kill the WHOLE process tree.
+"""H01 + I01: the budget kills the WHOLE process tree — scoped to OUR tree.
 
-The chain is comparison thread → spawn child → engine inference child
-(Docling runs its converter in its own subprocess). ``terminate()`` on the
-middle process left the grandchild burning CPU. These tests use the REAL
-Docling chain: they wait until the inference child exists, let the budget
-fire, and assert every recorded descendant is gone.
+The old tests used a machine-wide ``*docling_child*`` CIM match for both
+the "grandchild started" wait and the cleanup — so the query command itself
+could satisfy the wait (its command line contained the pattern), and a
+cleanup could hit unrelated jobs' inference processes. Everything here is
+scoped by ParentProcessId chains from the comparison child THIS test
+spawned; the discovery query never contains the engine-entry string, and
+cleanup only ever targets the recorded root PID tree.
 
-Windows detection uses a CIM query on the command line; the scenario
-process records its own grandchild PID before exiting so the assertion
-checks actual PIDs, not a bookkeeping flag.
+A real unrelated long-running process runs beside each scenario and must
+survive the test.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -23,44 +25,13 @@ import pytest
 
 pytestmark = pytest.mark.slow
 
+TESTS_DIR = Path(__file__).resolve().parents[1]
+REPO = TESTS_DIR.parent
+sys.path.insert(0, str(TESTS_DIR))
 
-def _docling_child_pids() -> list[int]:
-    """PIDs of live ``docling_child`` processes (the inference grandchild)."""
+from helpers import proc_tree  # noqa: E402
 
-    try:
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*docling_child*' }"
-                " | Select-Object -ExpandProperty ProcessId",
-            ],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=60,
-        )
-    except Exception:  # noqa: BLE001
-        return []
-    return [int(token) for token in result.stdout.split() if token.strip().isdigit()]
-
-
-def _pid_alive(pid: int) -> bool:
-    result = subprocess.run(
-        ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-        capture_output=True,
-        text=True,
-        errors="replace",
-        timeout=30,
-    )
-    return str(pid) in (result.stdout or "")
-
-
-def _force_kill(pid: int) -> None:
-    subprocess.run(
-        ["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, errors="replace", timeout=30
-    )
+ENGINE_ENTRY = "bio_pdf.parsers.docling_child"
 
 
 def _sample_pdf(path: Path) -> Path:
@@ -76,13 +47,25 @@ def _sample_pdf(path: Path) -> Path:
     return path
 
 
-def _wait_for_grandchild(timeout: float = 60.0) -> list[int]:
+def _spawn_unrelated() -> subprocess.Popen:
+    """A long-running process that is NOT part of any execution tree."""
+
+    return subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _wait_children(timeout: float = 30.0) -> list[int]:
+    import multiprocessing as mp
+
     deadline = time.time() + timeout
     while time.time() < deadline:
-        pids = _docling_child_pids()
-        if pids:
-            return pids
-        time.sleep(2)
+        children = [p.pid for p in mp.active_children()]
+        if children:
+            return children
+        time.sleep(0.2)
     return []
 
 
@@ -90,19 +73,21 @@ def _wait_until_dead(pids: list[int], timeout: float = 30.0) -> list[int]:
     deadline = time.time() + timeout
     remaining = list(pids)
     while time.time() < deadline and remaining:
-        remaining = [pid for pid in remaining if _pid_alive(pid)]
+        remaining = [pid for pid in remaining if proc_tree.pid_alive(pid)]
         if remaining:
             time.sleep(1)
     return remaining
 
 
-def test_budget_timeout_terminates_the_real_docling_grandchild(tmp_path: Path) -> None:
-    """The reviewer's repro: the inference grandchild is RUNNING when the
-    budget fires (the middle process alone is not the execution unit)."""
+def test_budget_timeout_terminates_our_own_docling_descendants(tmp_path: Path) -> None:
+    """Wait until OUR comparison child has a real inference descendant, let
+    the budget fire, and assert exactly that subtree is gone — while an
+    unrelated process keeps running."""
 
     from bio_pdf.application.comparison_service import ComparisonService
     from bio_pdf.storage.repository import Repository
 
+    unrelated = _spawn_unrelated()
     pdf = _sample_pdf(tmp_path / "cmp.pdf")
     data = tmp_path / "data"
     svc = ComparisonService(
@@ -112,15 +97,25 @@ def test_budget_timeout_terminates_the_real_docling_grandchild(tmp_path: Path) -
         execution_budget_seconds=30.0,
         run_mode="process",
     )
-    cid = svc.create(document_id="doc-h01", source_path=pdf, pages=[1], engines=["docling"])
-    recorded: list[int] = []
+    cid = svc.create(document_id="doc-i01", source_path=pdf, pages=[1], engines=["docling"])
+    middle_ids: list[int] = []
+    grand_ids: list[int] = []
     try:
         svc.start(cid)
-        recorded = _wait_for_grandchild(60.0)
-        if not recorded:
-            pytest.skip("the docling inference child never appeared in this environment")
-        # Budget 30 s from side start: the grandchild is alive NOW and must
-        # be gone shortly after the fence.
+        middle_ids = _wait_children(30.0)
+        assert middle_ids, "the comparison child process never appeared"
+        middle = middle_ids[0]
+        # I01: discovery is scoped to our child's descendants; the query
+        # itself is not among them and cannot satisfy the wait.
+        matches = proc_tree.wait_for_engine_descendant(middle, ENGINE_ENTRY, timeout=60.0)
+        if not matches:
+            pytest.skip("the docling inference descendant never appeared in this environment")
+        grand_ids = [m.pid for m in matches]
+        assert all(ENGINE_ENTRY in m.cmdline for m in matches)
+        # Parent-child relation is guaranteed by construction; also require
+        # a real creation timestamp for each descendant.
+        assert all(m.created for m in matches), "descendants must be reachable with creation data"
+
         deadline = time.time() + 90
         while time.time() < deadline:
             side = svc.get(cid)["sides"][0]
@@ -130,37 +125,37 @@ def test_budget_timeout_terminates_the_real_docling_grandchild(tmp_path: Path) -
         side = svc.get(cid)["sides"][0]
         assert side["status"] == "failed", side
         assert "EXECUTION_BUDGET_EXCEEDED" in (side["error"] or "")
-        remaining = _wait_until_dead(recorded, timeout=30.0)
-        assert remaining == [], f"grandchild still running after budget: {remaining}"
+        remaining = _wait_until_dead(grand_ids + middle_ids, timeout=30.0)
+        assert remaining == [], f"test-owned descendants still running: {remaining}"
+        assert proc_tree.pid_alive(unrelated.pid), "an unrelated process must survive"
+        # The discovery query never carries the engine-entry string, so it
+        # cannot be mistaken for an inference descendant even in principle.
+        query_procs = [
+            info
+            for info in proc_tree.descendants_of(os.getpid())
+            if "Get-CimInstance" in info.cmdline
+        ]
+        assert all(ENGINE_ENTRY not in info.cmdline for info in query_procs)
     finally:
-        for pid in recorded:
-            if _pid_alive(pid):
-                _force_kill(pid)
+        # Cleanup is scoped to THIS test's own subtree roots — never a
+        # machine-wide match.
+        for pid in middle_ids:
+            if proc_tree.pid_alive(pid):
+                proc_tree.kill_tree(pid)
+        unrelated.kill()
         svc.repository.close()
 
 
 _SCENARIO = '''
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
 
+from helpers import proc_tree
+
 from bio_pdf.application.comparison_service import ComparisonService
 from bio_pdf.storage.repository import Repository
-
-
-def pids() -> list[int]:
-    try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*docling_child*' }"
-             " | Select-Object -ExpandProperty ProcessId"],
-            capture_output=True, text=True, errors="replace", timeout=60,
-        )
-        return [int(t) for t in result.stdout.split() if t.strip().isdigit()]
-    except Exception:
-        return []
 
 
 def main() -> None:
@@ -174,45 +169,69 @@ def main() -> None:
         execution_budget_seconds=600.0,
         run_mode="process",
     )
-    cid = svc.create(document_id="doc-shutdown", source_path=pdf, pages=[1], engines=["docling"])
+    cid = svc.create(document_id="doc-i01b", source_path=pdf, pages=[1], engines=["docling"])
     svc.start(cid)
-    grand = []
-    deadline = time.time() + 90
-    while time.time() < deadline:
-        grand = pids()
-        if grand:
-            break
-        time.sleep(2)
     import multiprocessing as mp
-    middle = [p.pid for p in mp.active_children()]
-    out.write_text(json.dumps({"grand": grand, "middle": middle}), encoding="utf-8")
-    # NORMAL interpreter exit → atexit must sweep the registered trees.
+    middle = []
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        middle = [p.pid for p in mp.active_children()]
+        if middle:
+            break
+        time.sleep(0.2)
+    grand = []
+    if middle:
+        grand = [
+            m.pid
+            for m in proc_tree.wait_for_engine_descendant(
+                middle[0], "bio_pdf.parsers.docling_child", timeout=90.0
+            )
+        ]
+    out.write_text(json.dumps({"middle": middle, "grand": grand}), encoding="utf-8")
+    # NORMAL interpreter exit -> our atexit sweeps the registered trees.
 
 
 main()
 '''
 
 
-def test_service_shutdown_sweeps_the_process_trees(tmp_path: Path) -> None:
-    """An API-style NORMAL shutdown (atexit) must clean the same scope: the
-    scenario process records its live middle + grandchild PIDs, exits, and
-    the parent asserts both are gone."""
-
-    scenario = tmp_path / "scenario.py"
+def test_service_shutdown_sweeps_only_our_trees(tmp_path: Path) -> None:
+    scenario = tmp_path / "scenario_i01.py"
     scenario.write_text(_SCENARIO, encoding="utf-8")
     pdf = _sample_pdf(tmp_path / "cmp.pdf")
     data = tmp_path / "data"
     out = tmp_path / "pids.json"
-    proc = subprocess.run(
-        [sys.executable, str(scenario), str(data), str(out), str(pdf)],
-        capture_output=True,
-        text=True,
-        errors="replace",
-        timeout=300,
+    unrelated = _spawn_unrelated()
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(scenario), str(data), str(out), str(pdf)],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=300,
+            cwd=str(REPO),
+            env={**os.environ, "PYTHONPATH": str(TESTS_DIR)},
+        )
+        assert proc.returncode == 0, proc.stderr[-800:]
+        recorded = json.loads(out.read_text(encoding="utf-8"))
+        assert recorded["middle"], "the scenario never spawned its comparison child"
+        if not recorded["grand"]:
+            pytest.skip("the docling inference descendant never appeared in this environment")
+        remaining = _wait_until_dead(
+            recorded["grand"] + recorded["middle"], timeout=30.0
+        )
+        assert remaining == [], f"test-owned processes survived shutdown: {remaining}"
+        assert proc_tree.pid_alive(unrelated.pid), "an unrelated process must survive"
+    finally:
+        unrelated.kill()
+
+
+def test_wait_fails_without_an_engine_descendant() -> None:
+    """I01: with only the query process around (no inference child), the
+    wait MUST time out — the old machine-wide match returned the query
+    itself (false positive)."""
+
+    matches = proc_tree.wait_for_engine_descendant(
+        os.getpid(), ENGINE_ENTRY, timeout=4.0, poll_interval=1.0
     )
-    assert proc.returncode == 0, proc.stderr[-800:]
-    recorded = json.loads(out.read_text(encoding="utf-8"))
-    if not recorded["grand"]:
-        pytest.skip("the docling inference child never appeared in this environment")
-    remaining = _wait_until_dead(recorded["grand"] + recorded["middle"], timeout=30.0)
-    assert remaining == [], f"processes survived the service shutdown: {remaining}"
+    assert matches == []
