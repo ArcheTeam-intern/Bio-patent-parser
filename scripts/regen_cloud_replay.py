@@ -49,18 +49,44 @@ TARGETS = {
 }
 
 
+class ReplayGeometryError(RuntimeError):
+    """Strict mode: the layout geometry failed verification against the
+    source PDF; no trustworthy projection can be produced."""
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib as _h
+
+    digest = _h.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def replay_zip(
     zip_path: Path,
     pdf_path: Path,
     source_pages: list[int],
     *,
     expected_zip_sha256: str | None = None,
+    strict: bool = True,
 ) -> dict:
     """Replay one fixed zip through the product projection + domain pass.
 
     ``source_pages`` is the SUBMITTED page order: content_list ``page_idx i``
-    corresponds to ``source_pages[i]``. The same mapping is used for the
-    layout size check AND the projection — never a subset-index shortcut.
+    corresponds to ``source_pages[i]``. The same mapping feeds the size
+    check AND the projection — never a subset-index shortcut.
+
+    J06: ``strict=True`` raises :class:`ReplayGeometryError` when any page's
+    layout size mismatches the source PDF or is missing — a wrong-size frame
+    must not be silently projected. ``strict=False`` (diagnostic) continues,
+    but only VERIFIED pages enter the trusted mapping; mismatched/missing
+    pages keep raw coordinates with ``bbox_verified=False``.
     """
 
     zip_bytes = zip_path.read_bytes()
@@ -78,7 +104,8 @@ def replay_zip(
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         content_name = next(m for m in zf.namelist() if m.endswith("_content_list.json"))
         content_list = json.loads(zf.read(content_name).decode("utf-8"))
-        layout = json.loads(zf.read("layout.json").decode("utf-8"))
+        layout_bytes = zf.read("layout.json")
+        layout = json.loads(layout_bytes.decode("utf-8"))
 
     # --- I07: ONE shared subset-index -> source-page mapping ----------------
     layout_sizes: dict[int, tuple[float, float, float]] = {}
@@ -102,6 +129,9 @@ def replay_zip(
     doc = pdfium.PdfDocument(str(pdf_path))
     try:
         source_sizes = {p: doc[p - 1].get_size() for p in source_pages}
+        source_sizes_rotation = {
+            p: float(doc[p - 1].get_rotation() or 0) for p in source_pages
+        }
     finally:
         doc.close()
 
@@ -109,26 +139,64 @@ def replay_zip(
     for source_no in source_pages:
         layout_size = layout_sizes.get(source_no)
         source = source_sizes[source_no]
-        match = bool(
-            layout_size
-            and abs(layout_size[0] - source[0]) <= TOLERANCE_PT
-            and abs(layout_size[1] - source[1]) <= TOLERANCE_PT
+        rotation_deg = float(source_sizes_rotation.get(source_no, 0.0))
+        width_match = bool(layout_size and abs(layout_size[0] - source[0]) <= TOLERANCE_PT)
+        height_match = bool(layout_size and abs(layout_size[1] - source[1]) <= TOLERANCE_PT)
+        rotation_match = bool(
+            layout_size and abs(((layout_size[2] - rotation_deg) + 180.0) % 360.0 - 180.0) <= 0.5
         )
+        match = bool(width_match and height_match and rotation_match)
+        reasons: list[str] = []
+        if layout_size is None:
+            reasons.append("layout has no page_size for this submitted page")
+        else:
+            if not width_match:
+                reasons.append(
+                    f"width {layout_size[0]} vs source {round(source[0], 2)} (tolerance {TOLERANCE_PT})"
+                )
+            if not height_match:
+                reasons.append(
+                    f"height {layout_size[1]} vs source {round(source[1], 2)} (tolerance {TOLERANCE_PT})"
+                )
+            if not rotation_match:
+                reasons.append(
+                    f"rotation {layout_size[2]} vs source {rotation_deg}"
+                )
         size_check[str(source_no)] = {
             "layout_json_page_size": [layout_size[0], layout_size[1]] if layout_size else None,
             "layout_json_page_angle": layout_size[2] if layout_size else None,
             "source_pdf_size_pt": [round(source[0], 2), round(source[1], 2)],
+            "source_pdf_rotation_deg": rotation_deg,
             "tolerance_pt": TOLERANCE_PT,
+            "width_match": width_match,
+            "height_match": height_match,
+            "rotation_match": rotation_match,
             "match": match,
+            "reasons": reasons,
         }
 
-    # The projection receives the SUBMITTED order and ONLY real sizes — a
-    # page without a layout size stays unverified instead of inheriting A4.
+    mismatched_pages = [
+        page_no for page_no in source_pages if not size_check[str(page_no)]["match"]
+    ]
+    if strict and mismatched_pages:
+        raise ReplayGeometryError(
+            "layout geometry failed verification against the source PDF for pages "
+            f"{mismatched_pages}: "
+            + "; ".join(
+                f"p{page_no}: {' | '.join(size_check[str(page_no)]['reasons'])}"
+                for page_no in mismatched_pages
+            )
+        )
+
+    # J06: the projection receives the SUBMITTED order and ONLY VERIFIED
+    # sizes — a page that failed the check (or has no layout size) keeps raw
+    # coordinates and stays unverified; a layout size is never its own
+    # verification source.
     page_order = list(source_pages)
     projection_page_sizes = {
         page_no: layout_sizes[page_no]
         for page_no in source_pages
-        if page_no in layout_sizes
+        if page_no in layout_sizes and size_check[str(page_no)]["match"]
     }
     projected = _project_mineru_payload(
         {"content_list": content_list},
@@ -183,6 +251,23 @@ def replay_zip(
         },
         "pages_produced": produced_pages,
         "pages_without_live_size": pages_without_live_size,
+        "mismatched_pages": mismatched_pages,
+        "mode": "strict" if strict else "diagnostic",
+        "coordinate_unit_known": bool(basis and basis.get("unit")),
+        "coordinate_unit_note": (
+            "protocol frame known (content_list 0-1000) — says NOTHING about whether "
+            "the page geometry matched the source PDF"
+        ),
+        "source_geometry_verified": (
+            bool(mismatched_pages) is False
+            and not pages_without_live_size
+            and not warnings
+        ),
+        "hashes": {
+            "zip_sha256": zip_sha,
+            "layout_sha256": _sha256_bytes(layout_bytes),
+            "source_pdf_sha256": _sha256_file(pdf_path),
+        },
         "blocks_without_verified_frame": blocks_without_verified_frame,
         "max_abs_bbox_extent": max(bbox_extents, default=None),
         "coordinate_basis": basis,
@@ -214,6 +299,7 @@ def main() -> int:
                 spec["pdf"],
                 spec["source_pages"],
                 expected_zip_sha256=spec["expected_zip_sha256"],
+                strict=True,
             ),
         }
         report["zip_path"] = str(Path(report["zip_path"]).relative_to(REPO))
@@ -227,6 +313,7 @@ def main() -> int:
                     "all_sizes_match": report["all_sizes_match"],
                     "projection_page_order": report["projection_page_order"],
                     "coordinate_basis_verified": report["coordinate_basis_verified"],
+                    "source_geometry_verified": report["source_geometry_verified"],
                     "sequences": report["sequence_count"],
                     "measurements": report["measurement_count"],
                 },

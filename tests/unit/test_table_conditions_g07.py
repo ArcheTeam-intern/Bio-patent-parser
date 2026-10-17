@@ -271,3 +271,80 @@ def test_concentration_magnitudes_stay_distinct_in_conditions() -> None:
     )
     out = pair_measurements(a["measurements"], b["measurements"])
     assert out["paired"] == 0
+
+
+# ---- J05: equivalent glyphs in identity contexts must not block pairing ----
+
+
+def _header_doc(header: str, *, document_id: str) -> dict:
+    doc = _doc(caption="MIC at 10 µM", document_id=document_id)
+    table = doc["pages"][0]["tables"][0]
+    table["cells"][1] = {
+        "cell_id": "1:t0:r0c1",
+        "row_index": 0,
+        "column_index": 1,
+        "text_raw": header,
+        "header_role": "column",
+    }
+    return doc
+
+
+def test_micro_glyph_in_column_header_does_not_block_pairing() -> None:
+    """J05 recheck repro: same caption (µM), same entity/value, headers
+    'MIC (µg/mL)' vs 'MIC (μg/mL)' — µ (U+00B5) vs μ (U+03BC). Unit
+    normalization already merged them; the column context must too."""
+
+    a = _domain_pass_spec(
+        _header_doc("MIC (\u00b5g/mL)", document_id="sha256:hj1"),
+        document_id="sha256:hj1",
+        engine="docling",
+    )
+    b = _domain_pass_spec(
+        _header_doc("MIC (\u03bcg/mL)", document_id="sha256:hj2"),
+        document_id="sha256:hj2",
+        engine="mineru_http",
+    )
+    ma, mb = a["measurements"][0], b["measurements"][0]
+    assert ma["unit_normalized"] == mb["unit_normalized"] == "ug/mL"
+    out = pair_measurements(a["measurements"], b["measurements"])
+    assert out["paired"] == 1, out
+    assert out["keys_only_a"] == [] and out["keys_only_b"] == []
+
+
+def test_identity_contexts_keep_si_case_distinctions() -> None:
+    """The glyph rule must NOT lowercase identity contexts: a µM header and
+    a µm header are different columns and must stay unpaired."""
+
+    a = _domain_pass_spec(
+        _header_doc("MIC (\u00b5M)", document_id="sha256:cj1"),
+        document_id="sha256:cj1",
+        engine="docling",
+    )
+    b = _domain_pass_spec(
+        _header_doc("MIC (\u00b5m)", document_id="sha256:cj2"),
+        document_id="sha256:cj2",
+        engine="mineru_http",
+    )
+    out = pair_measurements(a["measurements"], b["measurements"])
+    assert out["paired"] == 0
+
+
+def test_duplicate_cells_still_ambiguous_after_glyph_normalization() -> None:
+    """Glyph merging must not over-merge genuinely repeated cells: two rows
+    with the SAME identity on one side stay ambiguous, never force-paired."""
+
+    a = _domain_pass_spec(
+        _doc(caption="MIC after incubation for 1 h", document_id="sha256:dj1"),
+        document_id="sha256:dj1",
+        engine="docling",
+    )
+    a_ms = [dict(m) for m in a["measurements"]]
+    a_ms.append(dict(a_ms[0]))  # duplicate identity on side A
+    b = _domain_pass_spec(
+        _doc(caption="MIC after incubation for 1 h", document_id="sha256:dj2"),
+        document_id="sha256:dj2",
+        engine="mineru_http",
+    )
+    out = pair_measurements(a_ms, b["measurements"])
+    assert out["ambiguous"] == 1
+    assert out["paired"] == 0

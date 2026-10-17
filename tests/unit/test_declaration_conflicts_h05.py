@@ -166,19 +166,27 @@ def test_native_superset_is_kept_and_ocr_subset_consumed() -> None:
     assert not _conflicts(records)
 
 
-def test_disjoint_additions_keep_both_lines() -> None:
-    """Native declares length, OCR declares the molecule type: neither covers
-    the other's extra field — both lines stay in the feed."""
+def test_disjoint_additions_merge_into_one_logical_declaration() -> None:
+    """J04: native declares length, OCR declares the molecule type — they are
+    merged into ONE logical declaration (a second raw ``<210>`` line would
+    restart the parser's declaration state and lose the first field)."""
 
     merged, records = _merge_ocr_page_lines(
         [_native("<210> 1 <211> 5", _BOX)],
         {1: [(10.0, 100.0, 110.0, 110.0, "<210> 1 <212> PRT")]},
     )
     texts = [str(b.get("text")) for b in merged]
-    assert "<210> 1 <211> 5" in texts and "<210> 1 <212> PRT" in texts
+    assert texts == ["<210> 1 <211> 5 <212> PRT"], texts
     assert not _conflicts(records)
-    addendum = [r for r in records if r.get("kind") == "declaration_addendum"]
-    assert addendum, records
+    merges = [r for r in records if r.get("kind") == "declaration_merge"]
+    assert merges, records
+    fields = {f["field"]: f["origin"] for f in merges[0]["fields"]}
+    assert fields["211"] == "native" and fields["212"] == "ocr"
+    assert merges[0]["merged_text"] == "<210> 1 <211> 5 <212> PRT"
+    # Provenance for BOTH channels rides on the surviving block.
+    block = next(b for b in merged if "<211> 5" in str(b.get("text")))
+    kinds = {a["kind"] for a in block.get("source_aliases") or []}
+    assert {"declaration_merge_native", "declaration_merge_ocr"} <= kinds
 
 
 def test_multi_sequence_declaration_blocks_compare_per_declaration() -> None:

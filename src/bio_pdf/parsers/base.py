@@ -33,6 +33,10 @@ class ParseRequest:
     #: search fell back to the attempt dir and every retry re-uploaded.
     #: None → the adapter keeps its legacy (workflow) discovery.
     remote_state_dir: str | None = None
+    #: J01: the lease/attempt token that owns this execution. Stored with
+    #: the remote identity so a new-generation allocation is attributable
+    #: and concurrent retries stay attributable/fenced.
+    attempt_token: str | None = None
 
 
 @dataclass(frozen=True)

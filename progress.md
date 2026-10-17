@@ -400,3 +400,23 @@ exit "$__zcode_status"
 - H08/P05 allowed_actions 服务端 capability（列表与详情同一构造器）；前端按钮能力驱动+禁用原因；真实 TABLE_STRUCTURE issue 浏览器点击 → 候选+审计+制品（截图存证）；能力=端点行为测试锁定。
 - H09 取证脚本索引修正（zip pdf_info page_idx=提交子集序号）+ scripts/regen_cloud_replay.py 重生成：六页尺寸全 match、zip SHA 校验、EP 序列 8。
 - 验证：658 后端 + 37 vitest + build 全绿；服务重启单实例（旧 G 轮 worker 已终止）。
+
+### 第七轮 I01-I08（H01-H09 独立复核驱动，2026-10-17）
+- I01/S01 进程测试隔离：tests/helpers/proc_tree.py 按父链递归定位自有中继子树（查询不含引擎入口、清理只杀本测试根）；重写 3 项测试（真实预算 kill 子树+无关进程存活、退出清扫、无推理进程等待必须失败）；该文件已恢复进全量。
+- I02/S02 状态机：None/slot_expired→重分配（先落盘再 PUT）、allocated→同 slot PUT、uploaded/polling/completed→轮询、未知 phase→标记过期并报错；重分配失败保持 slot_expired（零轮询）。
+- I03/S03 PUT 分类：401/403/404→UploadSlotExpiredError（唯一重分配触发）；429/5xx/网络→可重试同 slot（phase 保持 allocated）；分配端 5xx/429 同样可重试。
+- I04/S04 adopt 页校验：PositiveInt+非空模型、显式分支（无 pages[0] 提前求值）、候选页≤0/越界/超文档→422 零写入；默认页语义保留。
+- I05/P01 声明字段兼容：按 <210> 拆每声明字典；仅共有值冲突判冲突；新增字段合并入 feed（OCR 超集取代/原生超集消耗/disjoint 双保留），多序列块按声明对比较。
+- I06/P02 条件单位：dose 单位大小写敏感（µm 非浓度）、去重键大小写敏感、条件 value 归一字形等价但保留大小写、表锚点字形归一。
+- I07/P03 回放投影统一：page_idx→提交源页映射用于核对与投影同一命名空间；缺失尺寸明确未验证（无默认 A4 可信）；报告输出投影页序/尺寸/未验证框数/最大框界；3 项脚本级测试（非 A4 非连续、缺尺寸、固定 ZIP）。
+- I08 两份回放 JSON 重生成并随本轮提交（此前 HEAD 仍旧 false）。
+- 验证：676 后端 + 37 vitest + build 全绿（含修复后的进程测试）。
+
+### 第八轮 J01-J06（I01-I08 独立复核驱动，2026-10-17）
+- J01 远端终态失败：RemoteBatchFailedError 区分终态/传输；phase=terminal_failed + append-only 失败历史 + generation/batch_history；恢复分派在身份文件排他锁内（并发 retry 只产生一个新批次）；下载失败/PUT 可重试复用行为保留；回归含 b1 failed→retry→b2 成功与并发单新代次。
+- J02 测试根归属：执行根注册表带 {comparison_id, side, attempt, lease_token}，测试按 comparison_id 取自有中继（弃 active_children）；无关 mp+subprocess 双哨兵存活；外来 mp 子进程不被认领。
+- J03 退出脚本：__main__ 防护 + owner PID/run token/comparison_id 绑定、仅外层写制品；bootstrap 导入零比较零文件；真实退出清扫自有树。
+- J04 互补声明真正合并：逐声明字段并集成单一逻辑声明（字段级来源+双通道别名），多序列按声明对合并；全链回归 declared_length=5/protein/observed=4、inventory 单声明无伪冲突、真实 4≠5 保留。
+- J05 配对身份上下文字形归一（µ/μ→u，大小写保留）：µg/mL vs μg/mL 表头 paired=1；µM vs µm 表头不配对；重复单元格仍 ambiguous。
+- J06 回放信任分离：逐页 width/height/rotation 核对与原因、仅通过页进入投影映射；strict 拒绝/诊断降级（raw+未验证）；coordinate_unit_known 与 source_geometry_verified 分离；hashes 入档；±2pt 边界/旋转/非 A4/固定 ZIP 六项测试。
+- 验证：691 后端 + 37 vitest + build 全绿；回放 JSON 严格模式重生成。

@@ -1035,25 +1035,72 @@ def _merge_ocr_page_lines(
                     kept.append((y0, order, "ocr", (x0, y0, x1, y1, text, superseded_native)))
                     continue
                 if any(verdict == "addendum" for _i, verdict, _t, _b in verdicts):
-                    # Disjoint extra fields on both sides: keep BOTH lines
-                    # (the parser consumes both; every field stays traceable).
+                    # J04: disjoint extra fields on both sides are merged
+                    # into ONE logical declaration line. Two separate lines
+                    # would make the ST.25 parser start a SECOND declaration
+                    # (losing the first line's fields and producing a
+                    # pseudo-duplicate inventory entry). Field-level
+                    # provenance travels in the aliases; the native raw line
+                    # is consumed (its bytes remain in its own artifact).
+                    merged_declarations: list[str] = []
+                    field_provenance: list[dict[str, str]] = []
+                    addendum_native: list[str] = []
+                    for item_index, verdict, n_text, n_block_id in verdicts:
+                        native_fields = tag_declarations(n_text) or []
+                        ocr_fields = tag_declarations(text) or []
+                        if verdict != "addendum":
+                            continue
+                        addendum_native.append(n_text)
+                        superseded.add(item_index)
+                        for pair_index in range(max(len(native_fields), len(ocr_fields))):
+                            n_map = native_fields[pair_index] if pair_index < len(native_fields) else {}
+                            o_map = ocr_fields[pair_index] if pair_index < len(ocr_fields) else {}
+                            merged_map: dict[str, str] = dict(n_map)
+                            for tag, value in o_map.items():
+                                merged_map.setdefault(tag, value)
+                            parts = []
+                            for tag, value in merged_map.items():
+                                origin = "native" if n_map.get(tag) is not None else "ocr"
+                                field_provenance.append(
+                                    {
+                                        "kind": "declaration_field",
+                                        "field": tag,
+                                        "value": value,
+                                        "origin": origin,
+                                        "block_id": n_block_id if origin == "native" else "",
+                                    }
+                                )
+                                parts.append(f"<{tag}> {value}".strip())
+                            merged_declarations.append(" ".join(parts))
+                    merged_text = " ".join(merged_declarations)
                     records.append(
                         {
-                            "kind": "declaration_addendum",
+                            "kind": "declaration_merge",
                             "page_number": page,
                             "x0": float(round(x0, 1)),
                             "y_top": float(round(y0, 1)),
                             "x1": float(round(x1, 1)),
                             "y_bottom": float(round(y1, 1)),
-                            "native_text": [t for _i, v, t, _b in verdicts if v == "addendum"],
+                            "native_text": addendum_native,
                             "ocr_text": text,
+                            "merged_text": merged_text,
+                            "fields": [
+                                dict(entry) for entry in field_provenance if entry["kind"] == "declaration_field"
+                            ][:64],
                             "reason": (
-                                "compatible disjoint fields from both channels — both "
-                                "declaration lines are kept"
+                                "compatible disjoint fields from both channels merged into ONE "
+                                "logical declaration (field provenance kept; native artifact "
+                                "untouched)"
                             ),
                         }
                     )
-                    kept.append((y0, order, "ocr", (x0, y0, x1, y1, text, None)))
+                    merge_aliases = [
+                        {"kind": "declaration_merge_native", "text": t}
+                        for t in addendum_native
+                    ] + [{"kind": "declaration_merge_ocr", "text": text}]
+                    kept.append(
+                        (y0, order, "ocr", (x0, y0, x1, y1, merged_text, merge_aliases))
+                    )
                     continue
                 # conflict / incomparable among tagged pairs → generic path
                 # (conflict record when comparable; containment disabled).
@@ -1156,13 +1203,15 @@ def _merge_ocr_page_lines(
                 x0, y_top, x1, y_bottom, text, superseded_native = payload
                 aliases = []
                 for sup in superseded_native or []:
-                    aliases.append(
-                        {
-                            "kind": "superseded_native",
-                            "text": str(sup["text"]),
-                            "block_id": str(sup["block_id"]),
-                        }
-                    )
+                    # J04: merged-declaration aliases carry their own kind and
+                    # may lack a block_id — keep every provided key.
+                    entry = {
+                        "kind": str(sup.get("kind") or "superseded_native"),
+                        "text": str(sup.get("text") or ""),
+                    }
+                    if sup.get("block_id"):
+                        entry["block_id"] = str(sup["block_id"])
+                    aliases.append(entry)
                 # F09: adopted-candidate lines carry their candidate identity
                 # on the block, so evidence written from it traces back to
                 # the exact adopted artifact.

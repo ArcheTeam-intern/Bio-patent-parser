@@ -38,6 +38,7 @@ from bio_pdf.errors import (
     EngineTimeoutError,
     EngineUnavailableError,
     NetworkTransientError,
+    RemoteBatchFailedError,
     UploadSlotExpiredError,
 )
 from bio_pdf.parsers.base import ParseArtifacts, ParseRequest
@@ -59,6 +60,56 @@ DEFAULT_POLL_INTERVAL = 3.0
 #: remote job is *not* cancelled by this; the runner can resume with the
 #: same ``task_id``.
 DEFAULT_MAX_POLLS = 600  # ~30 min at the default interval
+
+
+def _identity_lock(path: Path, *, timeout: float = 30.0):
+    """J01: exclusive lock around identity read-modify-write decisions.
+
+    Two concurrent retries racing on the same side identity could each
+    allocate a new remote generation. The lock file is created with O_EXCL;
+    a stale lock (crashed process) older than 120 s is removed. Yields after
+    acquisition; the caller MUST do its decision + allocation + write inside
+    the context.
+    """
+
+    import contextlib
+    import os
+    import time
+
+    @contextlib.contextmanager
+    def _lock():
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.time() + timeout
+        fd = None
+        while fd is None:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    age = time.time() - lock_path.stat().st_mtime
+                except OSError:
+                    age = 0.0
+                if age > 120.0:
+                    with contextlib.suppress(OSError):
+                        lock_path.unlink()
+                    continue
+                if time.time() > deadline:
+                    raise EngineUnavailableError(
+                        "timed out waiting for the remote-identity lock",
+                        details={"lock": str(lock_path), "code": "IDENTITY_LOCK_TIMEOUT"},
+                    )
+                time.sleep(0.1)
+        try:
+            os.write(fd, str(os.getpid()).encode("ascii"))
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+            with contextlib.suppress(OSError):
+                lock_path.unlink()
+
+    return _lock()
 
 
 def _write_identity(path: Path, identity: dict[str, Any]) -> None:
@@ -528,9 +579,16 @@ class MinerUAdapter:
                 return entry
             state = str(entry.get("state") or "unknown").lower()
             if state in _FAILED_STATES:
-                raise EngineUnavailableError(
+                # J01: a REMOTE terminal failure is not a transport error —
+                # polling this batch again can never succeed.
+                raise RemoteBatchFailedError(
                     f"MinerU batch file {file_name} failed with state {state!r}",
-                    details={"batch_id": batch_id, "state": state, "entry": entry},
+                    details={
+                        "batch_id": batch_id,
+                        "state": state,
+                        "entry": entry,
+                        "code": "REMOTE_BATCH_FAILED",
+                    },
                 )
             if state in _COMPLETED_STATES and not entry.get("full_zip_url"):
                 raise EngineProtocolUnsupportedError(
@@ -1201,37 +1259,69 @@ class MinerUAdapter:
             if isinstance(loaded, dict) and loaded.get("fingerprint") == fingerprint:
                 identity = loaded
 
-        # I02/S02: explicit recovery dispatch over EVERY persisted phase.
-        # A fresh allocation happens only when there is no identity or the
-        # slot is CONFIRMED expired; the identity is persisted before any
-        # upload; only an uploaded/polling/completed batch may be polled.
+        # I02/S02 + J01: explicit recovery dispatch over EVERY persisted
+        # phase. A fresh allocation happens when there is no identity, the
+        # slot is CONFIRMED expired, or the REMOTE BATCH reached a terminal
+        # failure (polling it again can never succeed — an explicit retry
+        # must produce a new generation). The identity is persisted before
+        # any upload; only uploaded/polling/completed may be polled.
         phase = str(identity.get("phase") or "") if identity is not None else ""
-        if identity is None or phase == "slot_expired":
-            batch_id, slots, file_name = self.allocate_upload_slot(
-                local_file,
-                data_id=local_sha[:16],
-                language=str(params["language"]),
-                enable_table=bool(params["enable_table"]),
-                enable_formula=bool(params["enable_formula"]),
-                is_ocr=bool(params["is_ocr"]),
-                page_ranges=params["page_ranges"],
-            )
-            identity = {
-                "batch_id": batch_id,
-                "data_id": local_sha[:16],
-                "file_name": file_name,
-                "upload_url": str(slots[0]),
-                "base_url": self.base_url,
-                "fingerprint": fingerprint,
-                "source_sha256": local_sha,
-                "pages": fingerprint_payload["pages"],
-                "profile": request.profile,
-                "params": params,
-                "phase": "allocated",
-                "submitted_at": datetime.now(tz=timezone.utc).isoformat(),
-            }
-            _write_identity(identity_path, identity)
-            phase = "allocated"
+        if identity is None or phase in ("slot_expired", "terminal_failed"):
+            # J01: the allocation decision is serialized per identity so two
+            # concurrent retries cannot both submit a new generation.
+            with _identity_lock(identity_path):
+                # Re-read under the lock: a sibling retry may have just
+                # created the new generation we were about to create.
+                fresh: dict[str, Any] | None = None
+                if identity_path.is_file():
+                    try:
+                        loaded_now = json.loads(identity_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        loaded_now = None
+                    if isinstance(loaded_now, dict) and loaded_now.get("fingerprint") == fingerprint:
+                        fresh = loaded_now
+                if fresh is not None and str(fresh.get("phase") or "") not in (
+                    "slot_expired",
+                    "terminal_failed",
+                ):
+                    identity = fresh  # another retry already allocated
+                else:
+                    previous = fresh if fresh is not None else identity
+                    generation = int((previous or {}).get("generation") or 0) + 1
+                    history = list((previous or {}).get("batch_history") or [])
+                    previous_batch = (previous or {}).get("batch_id")
+                    if previous_batch and previous_batch not in history:
+                        history.append(previous_batch)
+                    batch_id, slots, file_name = self.allocate_upload_slot(
+                        local_file,
+                        data_id=local_sha[:16],
+                        language=str(params["language"]),
+                        enable_table=bool(params["enable_table"]),
+                        enable_formula=bool(params["enable_formula"]),
+                        is_ocr=bool(params["is_ocr"]),
+                        page_ranges=params["page_ranges"],
+                    )
+                    identity = {
+                        "batch_id": batch_id,
+                        "data_id": local_sha[:16],
+                        "file_name": file_name,
+                        "upload_url": str(slots[0]),
+                        "base_url": self.base_url,
+                        "fingerprint": fingerprint,
+                        "source_sha256": local_sha,
+                        "pages": fingerprint_payload["pages"],
+                        "profile": request.profile,
+                        "params": params,
+                        "phase": "allocated",
+                        "generation": generation,
+                        "batch_history": history,
+                        # J01: which attempt/lease owns this generation.
+                        "last_attempt_token": request.attempt_token,
+                        "terminal_failures": list((previous or {}).get("terminal_failures") or []),
+                        "submitted_at": datetime.now(tz=timezone.utc).isoformat(),
+                    }
+                    _write_identity(identity_path, identity)
+            phase = str(identity.get("phase") or "allocated")
 
         if phase == "allocated":
             upload_url = str(identity.get("upload_url") or "")
@@ -1281,15 +1371,37 @@ class MinerUAdapter:
             )
 
         identity["phase"] = "polling"
+        # J01: record the polling attempt's owner for auditability.
+        identity["last_attempt_token"] = request.attempt_token
         _write_identity(identity_path, identity)
 
-        with self._client() as client:
-            entry = self.poll_batch_entry(
-                client, str(identity["batch_id"]), file_name=str(identity["file_name"])
+        try:
+            with self._client() as client:
+                entry = self.poll_batch_entry(
+                    client, str(identity["batch_id"]), file_name=str(identity["file_name"])
+                )
+                result_payload = self._fetch_zip_result(
+                    client, str(entry["full_zip_url"]), str(identity["batch_id"])
+                )
+        except RemoteBatchFailedError as exc:
+            # J01: persist the terminal failure (append-only history) so the
+            # retry's dispatch allocates a NEW generation instead of polling
+            # this dead batch forever.
+            failures = list(identity.get("terminal_failures") or [])
+            failures.append(
+                {
+                    "batch_id": identity.get("batch_id"),
+                    "generation": identity.get("generation"),
+                    "state": (exc.details or {}).get("state") if isinstance(exc.details, dict) else None,
+                    "reason": exc.message[:300],
+                    "attempt_token": request.attempt_token,
+                    "at": datetime.now(tz=timezone.utc).isoformat(),
+                }
             )
-            result_payload = self._fetch_zip_result(
-                client, str(entry["full_zip_url"]), str(identity["batch_id"])
-            )
+            identity["terminal_failures"] = failures
+            identity["phase"] = "terminal_failed"
+            _write_identity(identity_path, identity)
+            raise
 
         identity["phase"] = "completed"
         identity["completed_at"] = datetime.now(tz=timezone.utc).isoformat()

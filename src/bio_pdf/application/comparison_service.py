@@ -181,6 +181,17 @@ def pair_measurements(ms_a: list[dict[str, Any]], ms_b: list[dict[str, Any]]) ->
                 items.append((norm_text(cond),))
         return tuple(sorted(items, key=str))
 
+    def norm_identity(text: Any) -> str:
+        """J05: identity-text normalization for contexts and anchors.
+
+        Equivalent glyphs are merged (µ/μ→u) but CASE IS PRESERVED — header
+        text like "MIC (µg/mL)" vs "MIC (μg/mL)" is the same column, while
+        "µM" vs "µm" (concentration vs length) keeps its distinctive case
+        and can never collapse into the same identity.
+        """
+
+        return norm_condition_value(text)
+
     def measurement_key(m: dict[str, Any]) -> tuple:
         return (
             norm_text(m.get("entity")),
@@ -188,9 +199,9 @@ def pair_measurements(ms_a: list[dict[str, Any]], ms_b: list[dict[str, Any]]) ->
             norm_text(m.get("target")),
             conditions_key(m),
             int(m.get("page_number") or 0),
-            norm_text(m.get("table_anchor")),
-            norm_text(m.get("row_context")),
-            norm_text(m.get("column_context")),
+            norm_identity(m.get("table_anchor")),
+            norm_identity(m.get("row_context")),
+            norm_identity(m.get("column_context")),
         )
 
     def group(ms: list[dict[str, Any]]) -> dict[tuple, list[dict[str, Any]]]:
@@ -781,6 +792,9 @@ class ComparisonService:
                 "pages": pages,
                 "artifact_root": str(self.artifact_root),
                 "remote_state_dir": str(remote_state_dir),
+                # J01: bind the attempt's lease token into the side spec so
+                # the remote identity records its owner.
+                "attempt_token": lease_token,
             }
             kind, summary, error = self._execute_governed(
                 spec,
@@ -889,7 +903,15 @@ class ComparisonService:
                 pass
             return "error", None, _side_error_text(exc)
         child_conn.close()
-        _register_live_child(int(proc.pid or 0), str(spec.get("engine") or ""))
+        _register_live_child(
+            int(proc.pid or 0),
+            {
+                "comparison_id": str(spec.get("comparison_id") or ""),
+                "side": str(spec.get("engine") or ""),
+                "attempt": int(spec.get("attempt") or 0),
+                "lease_token": str(spec.get("attempt_token") or ""),
+            },
+        )
         try:
             # H01: poll in short slices so a lease loss aborts (and cleans)
             # the tree mid-flight instead of running to the budget.
@@ -1125,7 +1147,8 @@ class ComparisonService:
 #: H01/S01: live comparison child PIDs → engine label. Registered while a
 #: supervised side runs; the tree-kill sweeps them on timeout, lease loss
 #: and interpreter shutdown (atexit).
-_LIVE_SIDE_CHILDREN: dict[int, str] = {}
+#: pid -> execution identity (comparison_id, side, attempt, lease_token).
+_LIVE_SIDE_CHILDREN: dict[int, dict[str, Any]] = {}
 _LIVE_SIDE_LOCK = __import__("threading").Lock()
 
 
@@ -1158,14 +1181,26 @@ def _kill_process_tree(pid: int) -> None:
         pass
 
 
-def _register_live_child(pid: int, engine: str) -> None:
+def _register_live_child(pid: int, identity: dict[str, Any]) -> None:
+    """J02: the registry carries the FULL execution identity — comparison,
+    side, attempt and the attempt's lease token — captured at start() time.
+    Callers (tests included) look their own root up by identity instead of
+    guessing from ``multiprocessing.active_children()``."""
+
     with _LIVE_SIDE_LOCK:
-        _LIVE_SIDE_CHILDREN[pid] = engine
+        _LIVE_SIDE_CHILDREN[pid] = dict(identity)
 
 
 def _unregister_live_child(pid: int) -> None:
     with _LIVE_SIDE_LOCK:
         _LIVE_SIDE_CHILDREN.pop(pid, None)
+
+
+def live_side_processes() -> dict[int, dict[str, Any]]:
+    """Snapshot of currently registered execution roots (pid -> identity)."""
+
+    with _LIVE_SIDE_LOCK:
+        return {pid: dict(info) for pid, info in _LIVE_SIDE_CHILDREN.items()}
 
 
 def _kill_all_live_children() -> None:
@@ -1221,6 +1256,7 @@ def _execute_side_spec(spec: dict[str, Any]) -> dict[str, Any]:
         # G05/S05: cloud identity state lives at the side level, shared
         # across attempts; when absent the adapter keeps its legacy search.
         remote_state_dir=str(spec["remote_state_dir"]) if spec.get("remote_state_dir") else None,
+        attempt_token=str(spec["attempt_token"]) if spec.get("attempt_token") else None,
     )
     # Resolve the engine factory at call time so tests can monkeypatch
     # ``comparison_service._side_engine`` (staticmethods freeze the

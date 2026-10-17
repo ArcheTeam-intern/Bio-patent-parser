@@ -22,8 +22,13 @@
         595.26,
         779.52
       ],
+      "source_pdf_rotation_deg": 0.0,
       "tolerance_pt": 2.0,
-      "match": true
+      "width_match": true,
+      "height_match": true,
+      "rotation_match": true,
+      "match": true,
+      "reasons": []
     },
     "9": {
       "layout_json_page_size": [
@@ -35,8 +40,13 @@
         595.26,
         779.52
       ],
+      "source_pdf_rotation_deg": 0.0,
       "tolerance_pt": 2.0,
-      "match": true
+      "width_match": true,
+      "height_match": true,
+      "rotation_match": true,
+      "match": true,
+      "reasons": []
     }
   },
   "all_sizes_match": true,
@@ -61,6 +71,16 @@
     9
   ],
   "pages_without_live_size": [],
+  "mismatched_pages": [],
+  "mode": "strict",
+  "coordinate_unit_known": true,
+  "coordinate_unit_note": "protocol frame known (content_list 0-1000) — says NOTHING about whether the page geometry matched the source PDF",
+  "source_geometry_verified": true,
+  "hashes": {
+    "zip_sha256": "50703ac6669a2b1696e1f691e7e88af103259ec37b2b62e4d0dd50dfda21d1dd",
+    "layout_sha256": "4853ed0da6161cd85c92b82f0262f69522e863461a64f29e22c58ecd6bf260e9",
+    "source_pdf_sha256": "d927d1c3d8f80fe396d1090190bac25e944ade61b74683fffcab382cc596da35"
+  },
   "blocks_without_verified_frame": 0,
   "max_abs_bbox_extent": 749.4,
   "coordinate_basis": {

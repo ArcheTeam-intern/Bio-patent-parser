@@ -24,8 +24,13 @@
         595.22,
         842.0
       ],
+      "source_pdf_rotation_deg": 0.0,
       "tolerance_pt": 2.0,
-      "match": true
+      "width_match": true,
+      "height_match": true,
+      "rotation_match": true,
+      "match": true,
+      "reasons": []
     },
     "31": {
       "layout_json_page_size": [
@@ -37,8 +42,13 @@
         595.22,
         842.0
       ],
+      "source_pdf_rotation_deg": 0.0,
       "tolerance_pt": 2.0,
-      "match": true
+      "width_match": true,
+      "height_match": true,
+      "rotation_match": true,
+      "match": true,
+      "reasons": []
     },
     "32": {
       "layout_json_page_size": [
@@ -50,8 +60,13 @@
         595.22,
         842.0
       ],
+      "source_pdf_rotation_deg": 0.0,
       "tolerance_pt": 2.0,
-      "match": true
+      "width_match": true,
+      "height_match": true,
+      "rotation_match": true,
+      "match": true,
+      "reasons": []
     },
     "33": {
       "layout_json_page_size": [
@@ -63,8 +78,13 @@
         595.22,
         842.0
       ],
+      "source_pdf_rotation_deg": 0.0,
       "tolerance_pt": 2.0,
-      "match": true
+      "width_match": true,
+      "height_match": true,
+      "rotation_match": true,
+      "match": true,
+      "reasons": []
     }
   },
   "all_sizes_match": true,
@@ -103,6 +123,16 @@
     33
   ],
   "pages_without_live_size": [],
+  "mismatched_pages": [],
+  "mode": "strict",
+  "coordinate_unit_known": true,
+  "coordinate_unit_note": "protocol frame known (content_list 0-1000) — says NOTHING about whether the page geometry matched the source PDF",
+  "source_geometry_verified": true,
+  "hashes": {
+    "zip_sha256": "f42bbb7a684d814ea255495a9f196197c2dee2921bb1591310f00c4fe465f930",
+    "layout_sha256": "0290e156dc8a838661529310b17ed49c5bb927503afa6d4911369375de3d8a34",
+    "source_pdf_sha256": "ffb2e5bb7a63a87ddb6f7d3bd6c5978e5004fece2045d836aeef4288130e9295"
+  },
   "blocks_without_verified_frame": 0,
   "max_abs_bbox_extent": 812.53,
   "coordinate_basis": {

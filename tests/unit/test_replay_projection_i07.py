@@ -64,7 +64,7 @@ def test_projection_uses_submitted_source_pages_and_real_paper(tmp_path: Path) -
             {"page_idx": 1, "page_size": [500, 700]},
         ],
     )
-    report = module.replay_zip(zip_path, pdf, [2, 3])
+    report = module.replay_zip(zip_path, pdf, [2, 3], strict=True)
     # I07: content idx 0/1 maps to the SUBMITTED pages 2/3 — not 1/2.
     assert report["pages_produced"] == [2, 3]
     assert report["projection_page_order"] == [2, 3]
@@ -82,6 +82,11 @@ def test_projection_uses_submitted_source_pages_and_real_paper(tmp_path: Path) -
 
 
 def test_missing_layout_size_is_never_marked_verified(tmp_path: Path) -> None:
+    """Strict mode REFUSES (J06); diagnostic mode continues with the page
+    unverified — never a fabricated A4 frame."""
+
+    import pytest as _pytest
+
     module = _load_script()
     pdf = _pdf(tmp_path / "small.pdf", pages=5, size=(500.0, 700.0))
     zip_path = _zip(
@@ -89,12 +94,22 @@ def test_missing_layout_size_is_never_marked_verified(tmp_path: Path) -> None:
         content_items=_CONTENT,
         layout_pages=[{"page_idx": 0, "page_size": [500, 700]}],  # page 3 missing
     )
-    report = module.replay_zip(zip_path, pdf, [2, 3])
+    with _pytest.raises(module.ReplayGeometryError):
+        module.replay_zip(zip_path, pdf, [2, 3], strict=True)
+
+    report = module.replay_zip(zip_path, pdf, [2, 3], strict=False)
+    assert report["mode"] == "diagnostic"
     assert report["all_sizes_match"] is False
     assert report["pages_without_live_size"] == [3]
+    assert report["mismatched_pages"] == [3]
+    assert report["source_geometry_verified"] is False
     assert report["coordinate_basis_verified"] is False, "an unknown size must not verify"
     assert report["blocks_without_verified_frame"] >= 1, "page-3 boxes keep raw + unverified"
     assert report["projection_page_sizes"] == {"2": [500.0, 700.0, 0.0]}
+    # Both trust axes are reported separately, with hashes kept for audit.
+    assert report["coordinate_unit_known"] is True
+    assert report["hashes"]["source_pdf_sha256"]
+    assert report["hashes"]["layout_sha256"]
 
 
 def test_fixed_zips_replay_with_their_real_source_pages() -> None:
@@ -111,7 +126,11 @@ def test_fixed_zips_replay_with_their_real_source_pages() -> None:
             continue
         spec = module.TARGETS[target]
         report = module.replay_zip(
-            data, spec["pdf"], spec["source_pages"], expected_zip_sha256=spec["expected_zip_sha256"]
+            data,
+            spec["pdf"],
+            spec["source_pages"],
+            expected_zip_sha256=spec["expected_zip_sha256"],
+            strict=True,
         )
         assert report["zip_sha256_matches"] is True
         assert report["projection_page_order"] == pages
@@ -120,3 +139,84 @@ def test_fixed_zips_replay_with_their_real_source_pages() -> None:
             assert abs(entry[1] - height) <= 2, entry
         assert report["coordinate_basis_verified"] is True
         assert report["max_abs_bbox_extent"] is None or report["max_abs_bbox_extent"] <= height + 2
+
+
+def test_size_mismatch_is_refused_strict_and_downgraded_in_diagnostic(tmp_path: Path) -> None:
+    """J06 recheck repro: source PDF 500x700 but layout claims 595x842 —
+    strict mode refuses; diagnostic mode keeps the page's coordinates RAW
+    and unverified (the converted box would exceed the real page)."""
+
+    import pytest as _pytest
+
+    module = _load_script()
+    pdf = _pdf(tmp_path / "small.pdf", pages=5, size=(500.0, 700.0))
+    zip_path = _zip(
+        tmp_path / "r.zip",
+        content_items=[{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [100, 100, 900, 900]}],
+        layout_pages=[{"page_idx": 0, "page_size": [595, 842]}],
+    )
+    with _pytest.raises(module.ReplayGeometryError) as excinfo:
+        module.replay_zip(zip_path, pdf, [1], strict=True)
+    assert "height" in str(excinfo.value), str(excinfo.value)
+
+    report = module.replay_zip(zip_path, pdf, [1], strict=False)
+    assert report["all_sizes_match"] is False
+    assert report["mismatched_pages"] == [1]
+    assert report["source_geometry_verified"] is False
+    assert report["coordinate_basis_verified"] is False
+    # The mismatched frame never enters the projection mapping…
+    assert report["projection_page_sizes"] == {}
+    assert report["pages_without_live_size"] == [1]
+    # …so the block keeps RAW coordinates (0-1000 protocol values), flagged
+    # unverified — not silently converted into a wrong-size frame.
+    assert report["blocks_without_verified_frame"] >= 1
+    assert report["max_abs_bbox_extent"] == 900.0
+    reasons = report["layout_page_size_check"]["1"]["reasons"]
+    assert any("height" in r for r in reasons) and any("width" in r for r in reasons)
+
+
+def test_rotation_mismatch_is_recorded_and_blocks_trust(tmp_path: Path) -> None:
+    """J06: rotation is checked separately — a layout page_angle that
+    contradicts the source rotation cannot verify the frame."""
+
+    import pytest as _pytest
+
+    module = _load_script()
+    pdf = _pdf(tmp_path / "small.pdf", pages=5, size=(500.0, 700.0))
+    zip_path = _zip(
+        tmp_path / "r.zip",
+        content_items=[{"type": "text", "text": "Hello", "page_idx": 0, "bbox": [100, 100, 900, 900]}],
+        layout_pages=[{"page_idx": 0, "page_size": [500, 700], "page_angle": 90}],
+    )
+    with _pytest.raises(module.ReplayGeometryError):
+        module.replay_zip(zip_path, pdf, [1], strict=True)
+    report = module.replay_zip(zip_path, pdf, [1], strict=False)
+    entry = report["layout_page_size_check"]["1"]
+    assert entry["width_match"] is True and entry["height_match"] is True
+    assert entry["rotation_match"] is False
+    assert entry["source_pdf_rotation_deg"] == 0.0
+    assert report["coordinate_basis_verified"] is False
+
+
+def test_tolerance_boundary_is_respected(tmp_path: Path) -> None:
+    """±2 pt is accepted; beyond it is not (boundary probe, not a snapshot)."""
+
+    import pytest as _pytest
+
+    module = _load_script()
+    pdf = _pdf(tmp_path / "b.pdf", pages=3, size=(500.0, 700.0))
+    within = _zip(
+        tmp_path / "within.zip",
+        content_items=[{"type": "text", "text": "x", "page_idx": 0, "bbox": [100, 100, 900, 900]}],
+        layout_pages=[{"page_idx": 0, "page_size": [501.5, 701.5]}],
+    )
+    report = module.replay_zip(within, pdf, [1], strict=True)
+    assert report["all_sizes_match"] is True
+
+    beyond = _zip(
+        tmp_path / "beyond.zip",
+        content_items=[{"type": "text", "text": "x", "page_idx": 0, "bbox": [100, 100, 900, 900]}],
+        layout_pages=[{"page_idx": 0, "page_size": [503.0, 700.0]}],
+    )
+    with _pytest.raises(module.ReplayGeometryError):
+        module.replay_zip(beyond, pdf, [1], strict=True)

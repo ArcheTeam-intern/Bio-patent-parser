@@ -1302,3 +1302,201 @@ def test_unknown_phase_requires_reallocation(tmp_path: Path) -> None:
         raise AssertionError("an unknown phase must not be polled blindly")
     ident = json.loads(identity_path.read_text(encoding="utf-8"))
     assert ident["phase"] == "slot_expired"
+
+# ---- J01: remote terminal failure -> new generation on explicit retry -----
+
+
+def test_terminal_remote_failure_reallocates_only_on_retry(tmp_path: Path) -> None:
+    """The reviewer's repro: b1 always answers state=failed. Repeated
+    attempts must poll b1 once (recording the terminal failure), then — on
+    the next attempt — allocate a NEW generation b2 and succeed. Download
+    recovery and PUT retry behaviour are locked by their own tests."""
+
+    from bio_pdf.errors import RemoteBatchFailedError
+    from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+    posts = {"post": 0, "put": 0, "poll": []}
+    served = {"b1_failed": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            posts["post"] += 1
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "batch_id": f"b{posts['post']}",
+                        "file_urls": [f"https://oss.example/put/j1-{posts['post']}"],
+                    }
+                },
+            )
+        if request.method == "PUT":
+            posts["put"] += 1
+            return httpx.Response(200)
+        if "/extract-results/batch/" in url:
+            batch = url.rsplit("/", 1)[-1]
+            posts["poll"].append(batch)
+            if batch == "b1":
+                state = "failed" if served["b1_failed"] else "done"
+                entry = {"file_name": "source.pdf", "state": state}
+                if state == "done":
+                    entry["full_zip_url"] = "https://oss.example/zip/j1-b1"
+                return httpx.Response(200, json={"data": {"extract_result": [entry]}})
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {"file_name": "source.pdf", "state": "done",
+                             "full_zip_url": "https://oss.example/zip/j1-b2"}
+                        ]
+                    }
+                },
+            )
+        if url.endswith("/zip/j1-b2"):
+            return httpx.Response(200, content=_a4_zip_bytes())
+        raise AssertionError(url)
+
+    adapter = MinerUAdapter(token="t", transport=httpx.MockTransport(handler), poll_interval=0.0)
+    identity_path = tmp_path / "jobs" / "job-x" / "mineru_remote_identity.json"
+
+    req1 = _job_request(tmp_path, "attempt-1")
+    try:
+        adapter.parse(req1, local_file=req1.source_path)
+    except RemoteBatchFailedError as exc:
+        assert exc.details.get("batch_id") == "b1"
+    else:
+        raise AssertionError("the terminal remote failure must surface")
+
+    ident = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert ident["phase"] == "terminal_failed"
+    assert ident["generation"] == 1
+    failures = ident["terminal_failures"]
+    assert failures and failures[0]["batch_id"] == "b1" and failures[0]["state"] == "failed"
+
+    # The NEXT attempt (the user's explicit retry) allocates a new
+    # generation and never re-polls the dead batch.
+    req2 = _job_request(tmp_path, "attempt-2")
+    adapter.parse(req2, local_file=req2.source_path)
+    ident = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert ident["batch_id"] == "b2"
+    assert ident["generation"] == 2
+    assert ident["batch_history"] == ["b1"]
+    assert ident["phase"] == "completed"
+    assert posts["poll"].count("b1") == 1, "a terminal-failed batch is polled once, not per retry"
+    assert posts["post"] == 2 and posts["put"] == 2
+    # The failure history survives the successful retry (audit trail).
+    assert ident["terminal_failures"][0]["batch_id"] == "b1"
+
+
+def test_concurrent_retries_produce_at_most_one_new_generation(tmp_path: Path) -> None:
+    """J01 fence: two threads race the same identity while it is
+    terminal_failed — the identity lock serializes the decision and only ONE
+    new generation is allocated; both callers then poll/use that batch."""
+
+    import threading
+
+    from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+
+    posts = {"post": 0}
+    start = threading.Event()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url.endswith("/file-urls/batch"):
+            posts["post"] += 1
+            idx = posts["post"]
+            return httpx.Response(
+                200,
+                json={"data": {"batch_id": f"bg{idx}", "file_urls": [f"https://oss.example/put/g{idx}"]}},
+            )
+        if request.method == "PUT":
+            return httpx.Response(200)
+        if "/extract-results/batch/" in url:
+            start.wait(timeout=10)  # widen the race window
+            batch = url.rsplit("/", 1)[-1]
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "extract_result": [
+                            {"file_name": "source.pdf", "state": "done",
+                             "full_zip_url": f"https://oss.example/zip/{batch}"}
+                        ]
+                    }
+                },
+            )
+        if "/zip/" in url:
+            return httpx.Response(200, content=_a4_zip_bytes())
+        raise AssertionError(url)
+
+    adapter = MinerUAdapter(token="t", transport=httpx.MockTransport(handler), poll_interval=0.0)
+    identity_path = tmp_path / "jobs" / "job-x" / "mineru_remote_identity.json"
+    identity_path.parent.mkdir(parents=True, exist_ok=True)
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-1.4 fake")
+    from bio_pdf.ingest.inspector import compute_sha256
+    import hashlib as _h
+
+    sha = compute_sha256(source)
+    req_probe = _job_request(tmp_path, "probe")
+    params = adapter._effective_remote_params(req_probe)
+    fingerprint = _h.sha256(
+        json.dumps(
+            {
+                "source_sha256": sha,
+                "pages": sorted(int(p) for p in req_probe.page_numbers),
+                "profile": req_probe.profile,
+                "base_url": adapter.base_url,
+                "params": params,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()[:24]
+    identity_path.write_text(
+        json.dumps(
+            {
+                "batch_id": "bdead",
+                "fingerprint": fingerprint,
+                "source_sha256": sha,
+                "pages": [30, 31, 32],
+                "params": params,
+                "phase": "terminal_failed",
+                "generation": 1,
+                "batch_history": [],
+                "terminal_failures": [{"batch_id": "bdead"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def _run(attempt: str) -> None:
+        try:
+            req = _job_request(tmp_path, attempt)
+            adapter.parse(req, local_file=req.source_path)
+            results.append("ok")
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+        finally:
+            if len(results) + len(errors) >= 2:
+                start.set()
+
+    threads = [
+        threading.Thread(target=_run, args=("attempt-a",)),
+        threading.Thread(target=_run, args=("attempt-b",)),
+    ]
+    start.set()  # let both threads reach the allocation race
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    assert not errors, errors
+    ident = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert posts["post"] == 1, "concurrent retries must allocate at most one new batch"
+    assert ident["batch_id"] == "bg1"
+    assert ident["phase"] == "completed"

@@ -74,6 +74,17 @@ class NetworkTransientError(WorkflowError):
     code = "NETWORK_TRANSIENT"
 
 
+class RemoteBatchFailedError(EngineUnavailableError):
+    """J01: the REMOTE batch reached a terminal failure state.
+
+    Distinct from transport/timeout errors: polling this batch again cannot
+    succeed. The identity records ``terminal_failed``; an explicit retry
+    allocates a NEW generation (a fresh batch) instead of re-polling.
+    """
+
+    code = "REMOTE_BATCH_FAILED"
+
+
 class UploadSlotExpiredError(WorkflowError):
     """I03/S03: the signed upload slot is CONFIRMED expired/invalid.
 
