@@ -47,6 +47,17 @@ function DiffView({ comparisonId }: { comparisonId: string }) {
   if (diff.isLoading) return <div className="dim">计算差异…</div>;
   if (diff.error) return <div className="banner warn">差异暂不可用：{String(diff.error)}</div>;
   const data = diff.data as {
+    structure?: Record<string, { blocks?: number; tables?: number; figures?: number; words?: number }>;
+    figures?: {
+      count_a?: number;
+      count_b?: number;
+      captions_a?: number;
+      captions_b?: number;
+      shared_captions?: string[];
+      only_a_captions?: string[];
+      only_b_captions?: string[];
+      per_page?: Record<string, Record<string, number>>;
+    };
     sequences?: {
       matched?: string[];
       only_a?: string[];
@@ -66,41 +77,112 @@ function DiffView({ comparisonId }: { comparisonId: string }) {
   };
   const seq = data.sequences ?? {};
   const meas = data.measurements ?? {};
+  const fig = data.figures ?? {};
+  // Side names are engine names; derive the two labels present in the map.
+  const structureNames = Object.keys(data.structure ?? {});
+  const [nameA, nameB] = structureNames.length === 2 ? structureNames : ["", ""];
+  const structA = data.structure?.[nameA] ?? {};
+  const structB = data.structure?.[nameB] ?? {};
+  const num = (v: number | undefined) => (v == null ? "—" : v);
+  const pageKeys = Object.keys(fig.per_page?.[nameB] ?? fig.per_page?.[nameA] ?? {}).sort(
+    (x, y) => Number(x) - Number(y),
+  );
   return (
     <div style={{ marginTop: 8 }}>
       <table className="data">
         <thead>
           <tr>
             <th>层面</th>
-            <th>一致</th>
-            <th>仅 A / 仅 B</th>
-            <th>字段不同</th>
+            <th>{nameA || "A"}</th>
+            <th>{nameB || "B"}</th>
+            <th>判定</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>序列（按 SEQ ID）</td>
-            <td>{seq.matched?.length ?? 0}</td>
-            <td>
-              {seq.only_a?.length ?? 0} / {seq.only_b?.length ?? 0}
+            <td>文本块</td>
+            <td>{num(structA.blocks)}</td>
+            <td>{num(structB.blocks)}</td>
+            <td className="dim">结构量，不比较优劣</td>
+          </tr>
+          <tr>
+            <td>表格</td>
+            <td>{num(structA.tables)}</td>
+            <td>{num(structB.tables)}</td>
+            <td className="dim">检出数量；结构错误另见结构闸门</td>
+          </tr>
+          <tr>
+            <td>图形</td>
+            <td>{num(structA.figures)}</td>
+            <td>{num(structB.figures)}</td>
+            <td className="dim">
+              caption 一致 {fig.shared_captions?.length ?? 0} · 仅 A {fig.only_a_captions?.length ?? 0} · 仅 B{" "}
+              {fig.only_b_captions?.length ?? 0}
             </td>
-            <td>{seq.field_diffs?.length ?? 0}</td>
+          </tr>
+          <tr>
+            <td>字数</td>
+            <td>{num(structA.words)}</td>
+            <td>{num(structB.words)}</td>
+            <td className="dim">两侧各有丢失时需对照原文</td>
+          </tr>
+          <tr>
+            <td>序列（按 SEQ ID）</td>
+            <td colSpan={2} className="dim">
+              一致 {seq.matched?.length ?? 0} · 仅 A {seq.only_a?.length ?? 0} · 仅 B{" "}
+              {seq.only_b?.length ?? 0} · 字段不同 {seq.field_diffs?.length ?? 0}
+            </td>
+            <td className="dim">{seq.matched?.length ? "按序列号配对" : "两侧未解析出序列"}</td>
           </tr>
           <tr>
             <td>活性（按 实体/指标/靶标）</td>
-            <td>
-              {meas.paired ?? 0}（歧义 {meas.ambiguous ?? 0}）
+            <td colSpan={2} className="dim">
+              配对 {meas.paired ?? 0} · 歧义 {meas.ambiguous ?? 0} · 仅 A {meas.keys_only_a?.length ?? 0} · 仅 B{" "}
+              {meas.keys_only_b?.length ?? 0} · 值不同 {meas.value_diffs?.length ?? 0}
               {(meas.pairs_with_unverified_conditions ?? 0) > 0 && (
-                <span className="dim"> · 条件未核对 {meas.pairs_with_unverified_conditions}</span>
+                <> · 条件未核对 {meas.pairs_with_unverified_conditions}</>
               )}
             </td>
-            <td>
-              {meas.keys_only_a?.length ?? 0} / {meas.keys_only_b?.length ?? 0}
+            <td className="dim">
+              {(meas.paired ?? 0) === 0 && (meas.keys_only_a?.length ?? 0) === 0 && (meas.keys_only_b?.length ?? 0) === 0
+                ? "两侧均未提取到活性测量"
+                : "条件未核对的配对不算同一实验"}
             </td>
-            <td>{meas.value_diffs?.length ?? 0}</td>
           </tr>
         </tbody>
       </table>
+
+      {pageKeys.length > 0 && (
+        <div className="dim" style={{ marginTop: 8 }}>
+          每页图形数：
+          {pageKeys.map((page) => {
+            const a = fig.per_page?.[nameA]?.[page] ?? 0;
+            const b = fig.per_page?.[nameB]?.[page] ?? 0;
+            return (
+              <span key={page} className="pd-chip meas" style={{ marginLeft: 4 }}>
+                p{page}: {a} / {b}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {((fig.only_a_captions?.length ?? 0) > 0 || (fig.only_b_captions?.length ?? 0) > 0) && (
+        <div className="dim" style={{ marginTop: 6 }}>
+          单侧独有 caption：
+          {(fig.only_a_captions ?? []).map((c) => (
+            <span key={`a-${c}`} className="pd-chip meas" style={{ marginLeft: 4 }} title="仅 A">
+              A: {c}
+            </span>
+          ))}
+          {(fig.only_b_captions ?? []).map((c) => (
+            <span key={`b-${c}`} className="pd-chip meas" style={{ marginLeft: 4 }} title="仅 B">
+              B: {c}
+            </span>
+          ))}
+        </div>
+      )}
+
       {(seq.field_diffs?.length ?? 0) > 0 && (
         <div className="dim" style={{ marginTop: 6 }}>
           字段不同的序列：
@@ -236,7 +318,7 @@ export function ComparePage() {
           <li>
             MinerU 云 API：
             {mineruConfigured ? (
-              <span>已配置（base_url = {mineruCapability?.sends_bytes_offsite ? "已就绪" : ""}）</span>
+              <span>已配置（凭据已加载；尚未向云端验证）</span>
             ) : (
               <span className="dim">
                 未配置 — {mineruReason?.message ?? "缺少 MINERU_TOKEN"}

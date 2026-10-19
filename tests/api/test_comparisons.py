@@ -247,6 +247,121 @@ def test_mineru_without_token_fails_honestly(client, monkeypatch) -> None:
     assert listing == []
 
 
+# ---- structure + figure parity in the diff --------------------------------
+
+
+def test_diff_reports_structure_and_figure_captions(client, monkeypatch) -> None:
+    """A comparison that only reports sequences/measurements hides the most
+    visible engine difference. The diff must carry per-side structure
+    counts and a caption-level figure comparison (captions are the only
+    cross-engine figure identity; local ids are engine-private)."""
+
+    c, tmp_path = client
+    document_id = _upload_doc(c, tmp_path)
+
+    def factory(engine, source_path, request):  # noqa: ANN001
+        from bio_pdf.application import comparison_service as cs
+
+        # Docling reports one captioned figure; MinerU reports two figures
+        # whose captions reuse Docling's FIGURE 1 plus an extra FIGURE 2.
+        class _FigureAdapter:
+            def parse(self, request, **kwargs):  # noqa: ANN001, ANN003
+                from bio_pdf.parsers.base import ParseArtifacts
+                import json as _json
+
+                doc = _normalized_doc(document_id, sequence="Ala Gly Leu Lys")
+                figures = (
+                    [{"figure_id": "1:fig0", "page_number": 1, "bbox": [10.0, 10.0, 200.0, 200.0],
+                      "kind": "chart", "caption": "FIGURE 1 | Growth inhibition."}]
+                    if engine == "docling"
+                    else [
+                        {"figure_id": "1:fig0", "page_number": 1, "bbox": [10.0, 10.0, 120.0, 120.0],
+                         "kind": "chart", "caption": "FIGURE 1 | Growth inhibition."},
+                        {"figure_id": "1:fig1", "page_number": 1, "bbox": [130.0, 10.0, 240.0, 120.0],
+                         "kind": "picture", "caption": "FIGURE 2 | Extra panel."},
+                    ]
+                )
+                doc["pages"][0]["figures"] = figures
+                out = Path(request.output_dir)
+                out.mkdir(parents=True, exist_ok=True)
+                norm = out / "normalized.json"
+                norm.write_text(_json.dumps(doc), encoding="utf-8")
+                (out / "raw_response.json").write_text("{}", encoding="utf-8")
+                manifest = out / "manifest.json"
+                manifest.write_text("{}", encoding="utf-8")
+                return ParseArtifacts(
+                    normalized_path=norm,
+                    raw_response_path=out / "raw_response.json",
+                    manifest_path=manifest,
+                )
+
+        return _FigureAdapter()
+
+    import bio_pdf.application.comparison_service as cs
+
+    monkeypatch.setattr(cs, "_side_engine", factory)
+    res = c.post(
+        "/api/v1/comparisons",
+        json={"document_id": document_id, "pages": [1], "engines": ["docling", "mineru_http"]},
+    )
+    comparison_id = res.json()["comparison_id"]
+    _wait_done(c, comparison_id)
+    diff = c.get(f"/api/v1/comparisons/{comparison_id}/diff").json()
+
+    structure = diff["structure"]
+    figures = diff["figures"]
+    assert set(structure) == {"docling", "mineru_http"}
+    assert structure["docling"]["figures"] == 1
+    assert structure["mineru_http"]["figures"] == 2
+    assert structure["docling"]["blocks"] >= 1
+    assert figures["count_a"] == 1 and figures["count_b"] == 2
+    assert figures["shared_captions"] == ["figure:1"]
+    assert figures["only_b_captions"] == ["figure:2"]
+    assert figures["only_a_captions"] == []
+
+
+def test_diff_never_fabricates_zero_figures_for_legacy_summaries(tmp_path) -> None:
+    """A side summary persisted before the structure inventory existed has
+    no ``structure``/``figures`` keys. The diff recomputes from the
+    artifact so a side with real figures is not reported as 0."""
+
+    import json as _json
+    from bio_pdf.application.comparison_service import _structure_and_figures_from_artifact
+
+    artifact_root = tmp_path / "artifacts"
+    side_dir = artifact_root / "comparisons" / "cmp-x" / "docling" / "attempt-1"
+    side_dir.mkdir(parents=True)
+    document = {
+        "schema_version": "1.0",
+        "document_id": "sha256:x",
+        "parser_run_id": "stub",
+        "pages": [
+            {
+                "page_number": 1,
+                "width_pt": 595.0,
+                "height_pt": 842.0,
+                "route": "native",
+                "blocks": [{"block_id": "b1", "kind": "text", "semantic_role": "unknown",
+                            "text_raw": "FIGURE 3 | Recovered caption.", "bbox": None}],
+                "tables": [],
+                "figures": [{"figure_id": "1:fig0", "page_number": 1,
+                             "bbox": [0.0, 0.0, 10.0, 10.0], "kind": "chart",
+                             "caption": "FIGURE 3 | Recovered caption."}],
+            }
+        ],
+        "errors": [],
+    }
+    (side_dir / "normalized.json").write_text(_json.dumps(document), encoding="utf-8")
+
+    structure, figures, captions = _structure_and_figures_from_artifact(
+        {"artifact_dir": "comparisons/cmp-x/docling/attempt-1"}, artifact_root
+    )
+    assert structure["figures"] == 1
+    assert structure["blocks"] == 1
+    assert structure["caption_blocks"] == 1
+    assert figures[0]["caption"] == "FIGURE 3 | Recovered caption."
+    assert captions[0]["number"] == "3"
+
 # ---- K02: structured capability + error_info persistence ---------------------
 
 

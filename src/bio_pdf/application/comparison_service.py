@@ -34,6 +34,107 @@ def _now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _figures_per_page(figures: list[dict[str, Any]]) -> dict[str, int]:
+    """Per-page figure counts, keyed by page number as a string (JSON-safe)."""
+
+    counts: dict[str, int] = {}
+    for figure in figures:
+        page = figure.get("page_number")
+        if page is None:
+            continue
+        key = str(int(page))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _structure_and_figures_from_artifact(
+    summary: dict[str, Any], artifact_root: Path
+) -> tuple[dict[str, int], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Recompute structure + figures + text-layer captions from a side's
+    normalized artifact when the persisted summary predates those fields.
+
+    Comparisons recorded before the structure inventory existed would
+    otherwise show "0 figures" forever — the visible symptom of the
+    MinerU projection gap — even though the artifact on disk carries the
+    real figures. Returns empty values when the artifact cannot be read;
+    the diff then reports "unknown" instead of a false zero.
+    """
+
+    structure = summary.get("structure")
+    figures = summary.get("figures")
+    caption_blocks = summary.get("caption_blocks")
+    if (
+        isinstance(structure, dict)
+        and structure
+        and isinstance(figures, list)
+        and isinstance(caption_blocks, list)
+    ):
+        return structure, figures, caption_blocks
+    artifact_dir = summary.get("artifact_dir")
+    if not artifact_dir:
+        return {}, [], []
+    normalized_path = Path(artifact_root) / str(artifact_dir) / "normalized.json"
+    if not normalized_path.is_file():
+        return {}, [], []
+    try:
+        from bio_pdf.contracts import NormalizedDocument
+
+        document = NormalizedDocument.model_validate_json(
+            normalized_path.read_text(encoding="utf-8")
+        )
+    except Exception:  # noqa: BLE001 — a broken artifact must not break the diff
+        return {}, [], []
+
+    figure_list = [
+        {
+            "figure_id": figure.figure_id,
+            "page_number": page.page_number,
+            "kind": figure.kind,
+            "caption": figure.caption,
+            "bbox_verified": getattr(figure, "bbox_verified", None),
+        }
+        for page in document.pages
+        for figure in page.figures
+    ]
+    import re as _caption_re
+
+    caption_blocks: list[dict[str, Any]] = []
+    for page in document.pages:
+        for block in page.blocks:
+            text = str(block.text_raw or "").strip()
+            if not text:
+                continue
+            match = _caption_re.match(
+                r"^[A-Z]?\s*[|:]?\s*(?:FIGURE|FIG\.?)\s*([0-9]+|[IVX]+)",
+                text,
+                _caption_re.IGNORECASE,
+            )
+            if match is None:
+                continue
+            caption_blocks.append(
+                {
+                    "page_number": page.page_number,
+                    "text": text[:400],
+                    "number": match.group(1),
+                }
+            )
+    return (
+        {
+            "blocks": sum(len(page.blocks) for page in document.pages),
+            "tables": sum(len(page.tables) for page in document.pages),
+            "figures": len(figure_list),
+            "caption_blocks": len(caption_blocks),
+            "words": sum(
+                len(str(block.text_raw or "").split())
+                for page in document.pages
+                for block in page.blocks
+            ),
+        },
+        figure_list,
+        caption_blocks,
+    )
+
+
 def _side_engine(engine: str, source_path: Path, request: Any) -> Any:
     """Resolve the adapter for one side (patchable in tests).
 
@@ -1239,11 +1340,106 @@ class ComparisonService:
         # value/unit/operator compared structurally.
         measurements = pair_measurements(a["measurements"], b["measurements"])
 
+        #: Figure parity: the caption prefix (``FIGURE 3``) is the only
+        #: cross-engine identity both sides can agree on — local figure
+        #: ids are engine-private. A side that detected 0 figures lists
+        #: every caption the other side recovered as "only_*", which is
+        #: exactly the visible gap the projection fix closed.
+        def _caption_key(caption: str | None) -> str:
+            import re as _re
+
+            text = _re.sub(r"\s+", " ", str(caption or "")).strip()
+            # ANCHORED: only a line that STARTS with the figure marker is a
+            # caption. A body sentence that merely mentions "Figure 2"
+            # must not enter the caption inventory. An optional leading
+            # panel label ("C | FIGURE 5", "D FIGURE ...") is allowed —
+            # MinerU attaches both to the same caption field.
+            match = _re.match(
+                r"^[A-Z]?\s*[|:]?\s*(?:FIGURE|FIG\.?)\s*([0-9]+|[IVX]+)",
+                text,
+                _re.IGNORECASE,
+            )
+            if match:
+                token = match.group(1).upper()
+                if token.isdigit():
+                    return f"figure:{int(token)}"
+                # Roman numerals occur when OCR/LaTeX rendering mangles the
+                # digit ("FIGURE $\mathsf{i}$"): keep the raw token so two
+                # sides that agree on it still pair.
+                return f"figure:roman:{token}"
+            # A bare panel label ("A", "B", "c") is a sub-figure tag, not a
+            # figure caption — it carries no figure identity.
+            if len(text) <= 2 and text.isalpha():
+                return ""
+            return f"caption:{text[:60].lower()}" if text else ""
+
+        figs_a = a.get("figures") or []
+        figs_b = b.get("figures") or []
+        caps_text_a = a.get("caption_blocks") or []
+        caps_text_b = b.get("caption_blocks") or []
+        # Comparisons recorded before the structure inventory existed carry
+        # neither field; recompute from the artifact so the diff never
+        # reports a false "0 figures" for a side that actually has them.
+        struct_a, figs_a_from_artifact, caps_a_from_artifact = (
+            _structure_and_figures_from_artifact(a, self.artifact_root)
+        )
+        struct_b, figs_b_from_artifact, caps_b_from_artifact = (
+            _structure_and_figures_from_artifact(b, self.artifact_root)
+        )
+        if not figs_a and figs_a_from_artifact:
+            figs_a = figs_a_from_artifact
+        if not figs_b and figs_b_from_artifact:
+            figs_b = figs_b_from_artifact
+        if not caps_text_a and caps_a_from_artifact:
+            caps_text_a = caps_a_from_artifact
+        if not caps_text_b and caps_b_from_artifact:
+            caps_text_b = caps_b_from_artifact
+        # Caption identity = the FIGURE number, whether the title sits on
+        # the figure object or in the text layer. Panel labels ("B", "C")
+        # carry no number and are ignored.
+        def _merge_caption_keys(
+            figures: list[dict[str, Any]], blocks: list[dict[str, Any]]
+        ) -> dict[str, dict[str, Any]]:
+            keys: dict[str, dict[str, Any]] = {}
+            for figure in figures:
+                key = _caption_key(figure.get("caption"))
+                if key:
+                    keys.setdefault(key, figure)
+            for block in blocks:
+                key = _caption_key(block.get("text"))
+                if key:
+                    keys.setdefault(key, block)
+            return keys
+
+        caps_a = _merge_caption_keys(figs_a, caps_text_a)
+        caps_b = _merge_caption_keys(figs_b, caps_text_b)
+        shared = sorted(set(caps_a) & set(caps_b))
+        figures_diff = {
+            "count_a": len(figs_a),
+            "count_b": len(figs_b),
+            "caption_blocks_a": len(caps_text_a),
+            "caption_blocks_b": len(caps_text_b),
+            "captions_a": len(caps_a),
+            "captions_b": len(caps_b),
+            "shared_captions": shared,
+            "only_a_captions": sorted(set(caps_a) - set(caps_b)),
+            "only_b_captions": sorted(set(caps_b) - set(caps_a)),
+            "per_page": {
+                a_name: _figures_per_page(figs_a),
+                b_name: _figures_per_page(figs_b),
+            },
+        }
+
         return {
             "comparison_id": comparison_id,
             "document_id": info["document_id"],
             "engines": {a_name: a_name, b_name: b_name},
             "pages": pages,
+            "structure": {
+                a_name: struct_a or a.get("structure") or {},
+                b_name: struct_b or b.get("structure") or {},
+            },
+            "figures": figures_diff,
             "sequences": {
                 "matched": matched,
                 "only_a": only_a,
@@ -1662,11 +1858,73 @@ def _domain_pass_spec(
                 }
             )
 
+    #: Structure + figure inventory. A comparison that only reports
+    #: sequences/measurements hides the most visible engine difference on
+    #: non-patent documents (text blocks, table detection, figure/caption
+    #: recovery) — the 12-page paper run showed MinerU at 0 figures while
+    #: the payload carried 42 visual regions, and nothing in the UI could
+    #: show it.
+    block_count = sum(len(page.blocks) for page in document.pages)
+    table_count = sum(len(page.tables) for page in document.pages)
+    figure_list: list[dict[str, Any]] = []
+    for page in document.pages:
+        for figure in page.figures:
+            figure_list.append(
+                {
+                    "figure_id": figure.figure_id,
+                    "page_number": page.page_number,
+                    "kind": figure.kind,
+                    "caption": figure.caption,
+                    "bbox_verified": getattr(figure, "bbox_verified", None),
+                }
+            )
+    word_count = sum(
+        len(str(block.text_raw or "").split())
+        for page in document.pages
+        for block in page.blocks
+    )
+    #: Captions that live in the TEXT layer. MinerU attaches a figure
+    #: title to ONE sub-panel; when that panel is below the exportable
+    #: figure floor the figure is dropped but the caption text remains a
+    #: page-level block. Counting both layers keeps the comparison honest:
+    #: "figure caption recovered" is true when either place carries it.
+    import re as _caption_re
+
+    caption_blocks: list[dict[str, Any]] = []
+    for page in document.pages:
+        for block in page.blocks:
+            text = str(block.text_raw or "").strip()
+            if not text:
+                continue
+            match = _caption_re.match(
+                r"^[A-Z]?\s*[|:]?\s*(?:FIGURE|FIG\.?)\s*([0-9]+|[IVX]+)",
+                text,
+                _caption_re.IGNORECASE,
+            )
+            if match is None:
+                continue
+            caption_blocks.append(
+                {
+                    "page_number": page.page_number,
+                    "text": text[:400],
+                    "number": match.group(1),
+                }
+            )
+
     return {
         "engine": engine,
         "pages_produced": sorted(p.page_number for p in document.pages),
         "page_count": len(document.pages),
         "errors": list(document.errors),
+        "structure": {
+            "blocks": block_count,
+            "tables": table_count,
+            "figures": len(figure_list),
+            "caption_blocks": len(caption_blocks),
+            "words": word_count,
+        },
+        "figures": figure_list,
+        "caption_blocks": caption_blocks,
         "sequences": [
             {
                 "seq_id_no": record.seq_id_no,
