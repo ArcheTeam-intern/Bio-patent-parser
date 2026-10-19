@@ -47,6 +47,22 @@ def _reset_runtime_cache():
     set_runtime_config(RuntimeConfig())
 
 
+@pytest.fixture(autouse=True)
+def _isolated_backend_env(monkeypatch):
+    """Hide any backend variable another test leaked into ``os.environ``.
+
+    ``create_app`` mirrors the resolved config into the real process
+    environment (children inherit it), so a full-suite run leaves those
+    keys behind. These tests assert on the write/merge behaviour itself
+    and must start from a known-empty baseline, or they pass alone and
+    fail after the API tests.
+    """
+
+    for var in BACKEND_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    yield
+
+
 def _write_env(path: Path, body: str) -> Path:
     path.write_text(body, encoding="utf-8")
     return path

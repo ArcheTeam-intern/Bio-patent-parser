@@ -809,7 +809,7 @@ def _merge_ocr_page_lines(
     *,
     origin: str = "rapidocr_region",
     origin_aliases: dict[int, list[dict[str, str]]] | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Interleave OCR'd lines into each page by vertical position (C03/D02).
 
     Reading order: every OCR line is placed at its real y position among the
@@ -839,7 +839,14 @@ def _merge_ocr_page_lines(
 
     Records carry a ``kind`` of ``content_conflict`` or ``coverage_supersede``.
 
-    Returns ``(merged_blocks, records)``.
+    Returns ``(merged_blocks, records, declaration_merges)``:
+
+    - ``records`` — per-mention merge decisions for the audit pipeline
+      (content conflicts, coverage supersedes, declaration merges);
+    - ``declaration_merges`` — K06 only: LOGICAL declaration merges
+      (``verdict`` other than ``incomparable``) with per-field provenance,
+      persisted into the ``region-ocr.json`` sidecar. Untagged text is
+      never listed here.
     """
 
     import re as _re
