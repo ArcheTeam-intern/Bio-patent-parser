@@ -568,7 +568,11 @@ class LayoutParseStage(_FileStage):
         merged_doc = {
             "schema_version": "1.1.0",
             "document_id": context.document_id,
-            "parser_run_id": f"{context.job_id}:docling",
+            # The ACTUAL engine that produced these runs — the old literal
+            # ":docling" made a MinerU run look like a Docling run in every
+            # artifact, which sent this session's diagnosis down the wrong
+            # path twice.
+            "parser_run_id": f"{context.job_id}:{engine}",
             "pages": [merged_pages[n] for n in sorted(merged_pages)],
             "errors": [],
         }
@@ -577,7 +581,7 @@ class LayoutParseStage(_FileStage):
         ref = atomic_write_json(out_dir, "normalized.json", merged_doc)
         manifest = {
             "schema_version": "1.1.0",
-            "engine": "docling",
+            "engine": engine,
             "runs": run_summaries,
             "planned_vs_actual": planned_vs_actual,
             "parser_options": dict(workflow_cfg.get("parser_options") or {}),
