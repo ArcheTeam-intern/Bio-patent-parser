@@ -139,10 +139,17 @@ def test_budget_terminates_descendants_alive_at_deadline(tmp_path: Path) -> None
         assert root_pid != unrelated_mp.pid
         # Wait for the descendant to write the READY sentinel —
         # THAT'S the proof the grandchild is alive in the held state.
-        ready_deadline = time.time() + 90.0
+        # Cold model loading can take ~65 s on this machine, so the wall
+        # clock cap is 180 s; a dead execution root fails immediately
+        # instead of burning the cap.
+        ready_deadline = time.time() + 180.0
         while time.time() < ready_deadline:
             if paths["ready"].exists():
                 break
+            if not proc_tree.pid_alive(root_pid):
+                raise AssertionError(
+                    "the execution root died before the descendant reached the held state"
+                )
             time.sleep(0.2)
         assert paths["ready"].exists(), "descendant never reached the held state"
         # Now advance the injected clock past the deadline.
@@ -207,8 +214,8 @@ def test_normal_docling_completion_still_publishes_done(tmp_path: Path) -> None:
         root_pid = _wait_registered_root(cid, timeout=30.0)
         if root_pid is None:
             pytest.skip("the docling inference descendant never appeared in this environment")
-        # Wait for completion.
-        deadline = time.time() + 120
+        # Wait for completion (cold model load + parse can take ~100 s).
+        deadline = time.time() + 240
         while time.time() < deadline:
             side = svc.get(cid)["sides"][0]
             if side["status"] in ("done", "failed"):

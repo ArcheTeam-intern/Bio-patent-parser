@@ -142,11 +142,18 @@ def test_budget_timeout_terminates_only_the_registered_tree(tmp_path: Path) -> N
         assert root_pid is not None, "the service never registered its execution root"
         assert root_pid != unrelated_mp.pid
         # K08: wait for the docling grandchild to reach the held state.
-        ready_deadline = time.time() + 60.0
+        # Cold model loading can take ~65 s on this machine, so the wall
+        # clock cap is 180 s; a dead execution root fails immediately
+        # instead of burning the cap.
+        ready_deadline = time.time() + 180.0
         while time.time() < ready_deadline:
             if paths["ready"].exists():
                 break
-            time.sleep(0.1)
+            if not proc_tree.pid_alive(root_pid):
+                raise AssertionError(
+                    "the execution root died before the descendant reached the held state"
+                )
+            time.sleep(0.2)
         assert paths["ready"].exists(), "descendant never reached the held state"
         # Now advance the injected clock past the deadline. The
         # watchdog will see ``now > deadline`` and terminate the tree.
