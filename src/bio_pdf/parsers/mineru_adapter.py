@@ -2306,17 +2306,60 @@ def _project_content_list(
         )
 
         label = item.get("type") or item.get("label") or "text"
-        page["texts"].append(
-            {
-                "self_ref": f"mineru:p{page_no}:{len(page['texts'])}",
-                "label": label,
-                "bbox": bbox_out,
-                "bbox_verified": (bbox_out or {}).get("bbox_verified"),
-                "text": str(text),
-            }
-        )
+        # MinerU merges paragraph-style pages (the Chinese patent layout)
+        # into ONE giant block whose lines are prefixed with the patent's
+        # paragraph numbers ("[0009] <210> 1 [0010] <211> 100 ..."). The
+        # ST.25 parser requires one tag per line starting at the line
+        # head, so the merged block yielded ZERO declarations while the
+        # same payload split by paragraph number yields 4 complete
+        # sequences. Split here, at the projection boundary, so the
+        # normalized view keeps one logical line per tag.
+        for piece in _split_paragraph_numbered(str(text)):
+            page["texts"].append(
+                {
+                    "self_ref": f"mineru:p{page_no}:{len(page['texts'])}",
+                    "label": label,
+                    "bbox": bbox_out,
+                    "bbox_verified": (bbox_out or {}).get("bbox_verified"),
+                    "text": piece,
+                }
+            )
 
     return {"pages": [pages[k] for k in sorted(pages.keys())]}
+
+
+#: Chinese patents number every paragraph ("[0009]"); a merged MinerU block
+#: carries dozens of them. Two or more paragraphs means the block spans
+#: multiple logical lines.
+_PARAGRAPH_MARK_RE = re.compile(r"\[\d{4}\]")
+_PARAGRAPH_PREFIX_RE = re.compile(r"^\[\d{4}\]\s*")
+
+
+def _split_paragraph_numbered(text: str) -> list[str]:
+    """Split a merged block at patent paragraph numbers and strip the marks.
+
+    Only applies when the block carries TWO OR MORE paragraph marks — a
+    normal sentence that happens to contain one bracket group is left
+    untouched. Every returned piece keeps the ORIGINAL block's bbox (the
+    payload gives one box for the whole block), so position precision
+    stays block-level rather than fabricated per line.
+    """
+
+    if len(_PARAGRAPH_MARK_RE.findall(text)) < 2:
+        stripped = _PARAGRAPH_PREFIX_RE.sub("", text).strip()
+        return [stripped] if stripped else []
+    # ``split`` keeps the text BEFORE the first mark as element 0 — it must
+    # survive too (a block may start with prose, not with "[0001]").
+    parts = _PARAGRAPH_MARK_RE.split(text)
+    out: list[str] = []
+    head = parts[0].strip()
+    if head:
+        out.append(head)
+    for piece in parts[1:]:
+        cleaned = piece.strip()
+        if cleaned:
+            out.append(cleaned)
+    return out
 
 
 __all__ = ["MinerUAdapter", "DEFAULT_BASE_URL", "DEFAULT_MODEL_VERSION"]

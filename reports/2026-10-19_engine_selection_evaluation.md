@@ -57,16 +57,42 @@
 |---|---|---|---|
 | EP3027649B1（195 页） | 英 | **0 条** | **8 条，全部 complete，恢复率 1.0** |
 | EP3423477B1（68 页） | 英 | **0 条** | 1 条 partial（293/549） |
-| CN114144196B（57 页） | 中 | **2 条 partial（恢复率 0.497）** | **0 条** |
+| CN114144196B（57 页） | 中 | **2 条 partial（恢复率 0.497）** | **5 条，4 complete，1 partial（恢复率 0.818）** |
 | US20240026005A1（142 页） | 英 | 无序列 | 无序列 |
 
-**结论：英文专利 MinerU 完胜（9 条 vs 0），中文专利 Docling 更好（2 vs 0）。**
+**结论：修复后 MinerU 在两个语种上都优于 Docling。**
 
-中文侧根因已定位（`cmp-46ad5f7ec23a`）：
+中文侧最初测得 MinerU **0 条**，看起来像中文能力缺陷。逐层定位后发现不是引擎问题：
 
-- Docling 保留行级结构：`<210> 3`、`<210> 4` 各自独立 block，12 个残基块；
-- MinerU 把整段合并：`[0084] <400> 4 [0085] atgaacg...` 变成一个大 block，只剩 2 个残基块，声明行被吞进段落。
-- 即 MinerU 在中文段落式排版下**过度合并**，行级结构丢失。
+1. `language=ch` 与 `language=en` 的 MinerU 输出**完全一致**（14 blocks、2 tag blocks、同样的 2669/1861 字符长块），语言参数不是原因；
+2. 真正原因是**布局合并**：MinerU 把整页合并成一个 block，且中文专利用 `[0009]` 这样的段落号前缀每一行；
+3. ST.25 解析器要求标签出现在**行首**（`^\s*<\d{3}>`），合并块中 `<210>` 被吞进段落，解析结果为 0。
+
+修复（`_split_paragraph_numbered`，投影层）：块内出现 **2 个及以上**段落号时，按段落号切分并去掉前缀；每个子块沿用原块 bbox（保持 block 级位置精度，不伪造逐行坐标）。
+
+同一份缓存 payload，经修复后：
+
+| 阶段 | 声明数 | located | complete | partial | missing |
+|---|---:|---:|---:|---:|---:|
+| 修复前 | 1 | 0 | 0 | 0 | 1 |
+| 修复后 | **5** | **5** | **4** | 1 | 0 |
+
+真实链路复跑（`cmp-cd79887edbf5`，页 1/25/26/27）：
+
+| 侧 | 序列 | complete | partial | missing |
+|---|---:|---:|---:|---:|
+| Docling | 2 | 0 | 2 | 2 |
+| MinerU | **5** | **4** | 1 | **0** |
+
+```
+mineru seq1 declared=100 observed=100 protein
+mineru seq2 declared=303 observed=303 DNA
+mineru seq3 declared=153 observed=153 protein
+mineru seq4 declared=462 observed=462 DNA
+mineru seq5 declared=462 observed=192 protein   (partial)
+docling seq2 declared=None observed=60 unknown  (声明值丢失)
+docling seq3 declared=153 observed=16 protein
+```
 
 ### 2.2 表格
 
@@ -93,27 +119,26 @@
 
 ## 3. 选型建议
 
-### 3.1 推荐：按语言路由，MinerU 为主
+### 3.1 推荐：MinerU 为主，Docling 降级（不做语言路由）
 
-理由：语料 7 英 2 中；英文专利序列恢复 MinerU 9:0，这是产品核心能力。Docling 在英文专利上一条序列都解析不出，不能做主力。
+中文问题修复后，"按语言路由"的前提消失：MinerU 在英文（9 条，8 complete）和中文（5 条，4 complete）上都明显领先 Docling（0 条 / 2 partial）。
 
 ```
-主引擎   = mineru_http      （英文文档）
-降级引擎 = docling_sdk      （MinerU 不可用 / 中文文档 / 需要表格交叉验证）
-路由规则 = 文档语言检测 → 中文走 Docling，其余走 MinerU
+主引擎   = mineru_http   （英文 + 中文）
+降级引擎 = docling_sdk   （MinerU 不可用，或需要表格交叉验证）
 ```
 
 ### 3.2 降级触发条件
 
 1. MinerU 未配置（`configured=false`，capability 已支持）；
-2. MinerU 连续失败（网络/额度）；
-3. 文档语言为中文（MinerU 行级结构丢失）；
-4. 结构化闸门拦下 MinerU 的表格，且该表是本次任务的目标 → 用 Docling 重跑该页做交叉验证。
+2. MinerU 连续失败（网络 / 额度）；
+3. 结构化闸门拦下 MinerU 的表格，且该表是本次任务目标 → 用 Docling 重跑该页交叉验证。
 
-### 3.3 不建议的方向
+### 3.3 为什么仍然保留 Docling
 
-- **不要二选一后删掉另一个**：两侧的失败模式不同（MinerU 中文合并、Docling 英文序列丢失），保留降级路径的成本低于丢失核心能力的成本。
-- **不要用品格数量直观判断**：MinerU 检出 20 个 figure 不等于更好（子图级别 + caption 归属混乱）；Docling 检出 9 个整图，caption 归属更清晰。
+- 本地运行，不依赖网络与额度；MinerU 已因 VPN/DNS 失败 2 次；
+- 表格结构更准确（检出少但不崩坏），可作为表格交叉验证的第二意见；
+- 中文段落号形态在少数排版下可能不一致，Docling 的行级结构是兜底。
 
 ## 4. 下一步（要把结论钉死还需要什么）
 
