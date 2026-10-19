@@ -173,9 +173,33 @@ def _build_converter_from_request(request_payload: dict[str, Any]) -> Any:
         else:
             options.ocr_options = TesseractCliOcrOptions(**ocr_kwargs)
 
-    return DocumentConverter(
+    converter = DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
     )
+    # K08: when the budget test sets BIO_PDF_K08_HOLD_DIR the
+    # grandchild wraps ``convert`` so the outer scenario can observe
+    # the descendant in a held state while the watchdog fires. Only
+    # active under that env var; production paths are untouched.
+    if os.environ.get("BIO_PDF_K08_HOLD_DIR"):
+        import importlib
+        import sys
+
+        # The docling grandchild does NOT inherit the parent's
+        # sys.path additions — ensure the test helper is reachable.
+        repo_root = Path(__file__).resolve().parents[3]
+        tests_dir = repo_root / "tests"
+        for entry in (str(tests_dir), str(repo_root)):
+            if entry not in sys.path:
+                sys.path.insert(0, entry)
+        try:
+            from tests.helpers.docling_hold_bootstrap import (
+                apply_hold_if_configured,
+            )
+        except ImportError:  # pragma: no cover — only test scenarios
+            apply_hold_if_configured = None  # type: ignore[assignment]
+        if apply_hold_if_configured is not None:
+            apply_hold_if_configured(converter, request_payload)
+    return converter
 
 
 class DoclingAdapter:

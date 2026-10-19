@@ -427,6 +427,12 @@ class ComparisonService:
     #: the same watchdog: the parent owns the completion write, so a late
     #: unit can never publish.
     run_mode: str = "process"
+    #: K08: monotonic clock used by the budget watchdog. The default is
+    #: ``time.monotonic``; the budget test injects a frozen/advanced clock
+    #: so the test can prove the budget expires WHILE the test's own
+    #: child tree is still alive (and not just after a 30 s wait).
+    #: Production code MUST leave this at the default.
+    clock: Callable[[], float] | None = None
 
     @classmethod
     def from_service(cls, service):
@@ -1021,10 +1027,21 @@ class ComparisonService:
             # the tree mid-flight instead of running to the budget.
             import time as _time
 
-            deadline = _time.monotonic() + max(0.1, float(budget))
+            _clock = self.clock or _time.monotonic
+            deadline = _clock() + max(0.1, float(budget))
             completed = False
-            while _time.monotonic() < deadline:
-                if parent_conn.poll(timeout=min(0.5, max(0.05, deadline - _time.monotonic()))):
+            while _clock() < deadline:
+                remaining = deadline - _clock()
+                # K08: when a clock is injected the test advances it
+                # faster than wall-clock — ``poll(timeout=...)`` must
+                # stay anchored to wall-clock so the Pipe actually
+                # delivers; cap it at a small slice.
+                poll_slices = (
+                    min(0.5, max(0.05, remaining))
+                    if remaining > 0
+                    else 0.05
+                )
+                if parent_conn.poll(timeout=poll_slices):
                     completed = True
                     break
                 if lease_lost is not None and lease_lost.is_set():
