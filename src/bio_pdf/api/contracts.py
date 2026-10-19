@@ -128,7 +128,9 @@ class DocumentResponse(ApiEnvelope):
 
 class JobCreateRequest(BaseModel):
     document_id: str
-    parser: str = "native"
+    #: auto walks the engine preference chain (MinerU -> Docling ->
+    #: native) at creation time and persists the resolved engine.
+    parser: str = "auto"
     page_numbers: list[int] | None = None
     targets: list[Literal["sequences", "activities"]] = ["sequences", "activities"]
     ocr_policy: Literal["auto", "force", "disabled"] = "auto"

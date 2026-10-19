@@ -68,6 +68,14 @@ def _require_engine_available(config: WorkflowConfig) -> None:
     from bio_pdf.errors import EngineUnavailableError
 
     parser = config.parser
+    if parser == "auto":
+        # Already resolved by resolve_engine(); reaching here means the
+        # caller skipped resolution — that is a programming error, not a
+        # deployment state.
+        raise EngineUnavailableError(
+            "parser 'auto' must be resolved before validating availability",
+            details={"parser": parser, "code": "PARSE_ENGINE_UNRESOLVED"},
+        )
     if parser in ("native",):
         return
     if parser in ("docling", "docling_sdk"):
@@ -88,7 +96,9 @@ def _require_engine_available(config: WorkflowConfig) -> None:
             )
         return
     if parser == "mineru_http":
-        if not os.environ.get("MINERU_TOKEN"):
+        from bio_pdf.runtime_config import get_runtime_config
+
+        if not get_runtime_config().mineru_configured():
             raise EngineUnavailableError(
                 "mineru_http requires MINERU_TOKEN to be configured",
                 details={"parser": parser, "code": "ENGINE_UNAVAILABLE"},
@@ -97,6 +107,48 @@ def _require_engine_available(config: WorkflowConfig) -> None:
     raise EngineUnavailableError(
         f"unknown parser: {parser}", details={"parser": parser}
     )
+
+
+def resolve_engine(requested: str) -> tuple[str, list[str]]:
+    """Resolve ``auto`` through the engine preference chain.
+
+    The evaluation (2026-10-19, 4 documents) put MinerU ahead of Docling
+    on sequence recovery in BOTH languages once the paragraph-split fix
+    landed (English 9:0, Chinese 5:2), so the chain is:
+
+        1. ``mineru_http``   — configured token present
+        2. ``docling_sdk``   — SDK importable (offline fallback)
+        3. ``native``        — always available last resort
+
+    Returns ``(resolved, chain)`` where ``chain`` records what was tried
+    and why each candidate was rejected — the job view shows it so an
+    operator can see WHICH engine actually ran instead of guessing.
+    """
+
+    if requested != "auto":
+        return requested, [f"explicit:{requested}"]
+
+    chain: list[str] = []
+    from bio_pdf.runtime_config import get_runtime_config
+
+    runtime = get_runtime_config()
+    if runtime.mineru_configured():
+        chain.append("mineru_http:configured")
+        return "mineru_http", chain
+    chain.append("mineru_http:missing MINERU_TOKEN")
+
+    try:
+        from bio_pdf.parsers.docling_adapter import docling_is_available
+
+        if docling_is_available():
+            chain.append("docling_sdk:available")
+            return "docling_sdk", chain
+    except Exception:  # noqa: BLE001 — an unavailable SDK is a fallback step
+        pass
+    chain.append("docling_sdk:unavailable")
+
+    chain.append("native:always-available")
+    return "native", chain
 
 
 def validate_page_selection(
@@ -166,6 +218,10 @@ class JobService:
         self,
         source_path: Path,
         *,
+        #: Library default stays ``native``: internal callers and tests
+        #: must never be pushed onto a cloud engine implicitly. The API /
+        #: UI layer passes ``auto`` explicitly, which resolves through the
+        #: preference chain.
         engine: str = "native",
         page_numbers: tuple[int, ...] = (),
         targets: tuple[str, ...] = ("sequences", "activities"),
@@ -204,6 +260,12 @@ class JobService:
         if workflow_config is None:
             workflow_config = load_workflow_config(config_path)
         cfg = workflow_config.model_copy(update={"parser": engine})
+        # Engine preference chain: ``auto`` resolves ONCE, here, and the
+        # concrete engine is what gets persisted — a run never switches
+        # parser mid-flight, and the job view reports which engine ran
+        # plus the candidates that were rejected and why.
+        resolved_engine, engine_chain = resolve_engine(str(cfg.parser))
+        cfg = cfg.model_copy(update={"parser": resolved_engine})  # type: ignore[arg-type]
         if ocr_policy != "auto":
             cfg = cfg.model_copy(update={"ocr_policy": ocr_policy})  # type: ignore[arg-type]
         if document_type_hint:

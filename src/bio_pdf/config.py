@@ -81,7 +81,13 @@ class WorkflowConfig(_StrictModel):
     """The complete effective configuration of one job."""
 
     config_version: str = CONFIG_VERSION
-    parser: Literal["native", "docling_sdk", "docling_serve", "mineru_http"] = "native"
+    #: ``auto`` resolves at job creation through the engine preference
+    #: chain (MinerU → Docling → native, see
+    #: ``job_service.resolve_engine``); the resolved engine is persisted,
+    #: so a run never silently switches parser mid-flight.
+    parser: Literal[
+        "auto", "native", "docling_sdk", "docling_serve", "mineru_http"
+    ] = "auto"
     ocr_policy: OcrPolicy = "auto"
     pages: list[int] | None = None  # None = all pages
     targets: tuple[Literal["sequences", "activities"], ...] = (

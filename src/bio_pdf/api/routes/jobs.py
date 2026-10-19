@@ -21,6 +21,9 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 #: "docling_sdk" must pass through — the old mapping to the legacy name
 #: "docling" made every UI "结构增强" job fail config validation).
 _PARSERS = {
+    #: Walk the preference chain (MinerU -> Docling -> native) at creation
+    #: time; the resolved engine is persisted so the run is reproducible.
+    "auto": "auto",
     "native": "native",
     "docling_sdk": "docling_sdk",
     "docling": "docling_sdk",  # legacy alias

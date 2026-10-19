@@ -472,11 +472,14 @@ class LayoutParseStage(_FileStage):
             # time AND here); it is never silently substituted with Docling
             # while the manifest claims "mineru".
             if engine == "mineru_http":
-                import os as _os
-
                 from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+                from bio_pdf.runtime_config import get_runtime_config
 
-                token = _os.environ.get("MINERU_TOKEN", "")
+                # K01: the token comes from the unified runtime config
+                # (installed by the API/worker --env-file), not a raw
+                # os.environ probe — otherwise a worker started with
+                # --env-file would miss it while the API has it.
+                token = get_runtime_config().mineru_token or ""
                 if not token:
                     raise WorkflowError(
                         "mineru_http requires MINERU_TOKEN; refusing to substitute another engine",

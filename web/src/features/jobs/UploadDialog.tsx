@@ -11,7 +11,7 @@ interface Props {
 
 export function UploadDialog({ open, onClose, onCreated }: Props) {
   const [file, setFile] = useState<File | null>(null);
-  const [parser, setParser] = useState("native");
+  const [parser, setParser] = useState("auto");
   const [pages, setPages] = useState("");
   const [docType, setDocType] = useState("auto");
   const [ocrPolicy, setOcrPolicy] = useState("auto");
@@ -87,8 +87,10 @@ export function UploadDialog({ open, onClose, onCreated }: Props) {
           <label>
             <div className="dim">解析引擎</div>
             <select value={parser} onChange={(e) => setParser(e.target.value)}>
+              <option value="auto">自动（推荐：MinerU → Docling → 原生）</option>
+              <option value="mineru_http">MinerU 云 API（序列恢复最佳，需 token）</option>
+              <option value="docling_sdk">结构增强（Docling，本地）</option>
               <option value="native">原生快速（仅文本）</option>
-              <option value="docling_sdk">结构增强（Docling，含表格与坐标）</option>
             </select>
           </label>
 
