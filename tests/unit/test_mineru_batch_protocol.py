@@ -1500,3 +1500,184 @@ def test_concurrent_retries_produce_at_most_one_new_generation(tmp_path: Path) -
     assert posts["post"] == 1, "concurrent retries must allocate at most one new batch"
     assert ident["batch_id"] == "bg1"
     assert ident["phase"] == "completed"
+
+
+# ---- K04: generation / owner fence on every identity write-back ---------------
+
+
+def test_stale_late_response_cannot_rollback_new_generation(tmp_path: Path) -> None:
+    """J01 recheck reproduction: a late failure response from an old
+    generation's poll must NOT overwrite a retry's new generation +
+    completed state. The fenced transition rejects the writeback."""
+
+    from bio_pdf.parsers.remote_identity_store import IdentityVersion, transition
+
+    target = tmp_path / "remote_identity.json"
+    # Step 1: simulate an explicit retry that already wrote a new
+    # generation + completed phase.
+    target.write_text(
+        json.dumps(
+            {
+                "fingerprint": "fp-x",
+                "generation": 2,
+                "owner_token": "lease-new",
+                "revision": 1,
+                "phase": "completed",
+                "completed_at": "2026-10-19T10:00:00+00:00",
+                "batch_id": "bg2",
+                "history": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    # Step 2: an old generation's late failure response arrives, still
+    # carrying its old generation + owner_token. The fenced transition
+    # MUST reject it.
+    stale = IdentityVersion(
+        fingerprint="fp-x",
+        generation=1,
+        owner_token="lease-old",
+        revision=1,
+    )
+    with pytest.raises(Exception) as excinfo:
+        transition(
+            target,
+            expected_version=stale,
+            patch={"phase": "terminal_failed", "generation": 1},
+            history_label="late_poll_failure",
+        )
+    assert "fence" in str(excinfo.value).lower()
+    # The persisted state is untouched.
+    persisted = json.loads(target.read_text(encoding="utf-8"))
+    assert persisted["generation"] == 2
+    assert persisted["phase"] == "completed"
+    assert persisted["owner_token"] == "lease-new"
+
+
+def test_owner_change_rejects_a_non_owner_writeback(tmp_path: Path) -> None:
+    """A new attempt's writeback that does NOT carry the current
+    owner_token is rejected — the takeover must rebuild the identity."""
+
+    from bio_pdf.parsers.remote_identity_store import IdentityVersion, transition
+
+    target = tmp_path / "remote_identity.json"
+    target.write_text(
+        json.dumps(
+            {
+                "fingerprint": "fp-y",
+                "generation": 1,
+                "owner_token": "lease-A",
+                "revision": 0,
+                "phase": "uploaded",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    # lease-B (a takeover attempt) tries to mark completion.
+    takeover = IdentityVersion(
+        fingerprint="fp-y", generation=1, owner_token="lease-B", revision=0
+    )
+    with pytest.raises(Exception):
+        transition(
+            target,
+            expected_version=takeover,
+            patch={"phase": "completed"},
+            history_label="takeover_attempt",
+        )
+    persisted = json.loads(target.read_text(encoding="utf-8"))
+    assert persisted["owner_token"] == "lease-A"
+    assert persisted["phase"] == "uploaded"
+
+
+def test_revision_must_match_inside_same_generation(tmp_path: Path) -> None:
+    """Two callers reading the same revision and both trying to write
+    back: only one wins, the other is rejected. The history entry
+    records the labels."""
+
+    from bio_pdf.parsers.remote_identity_store import IdentityVersion, transition
+
+    target = tmp_path / "remote_identity.json"
+    target.write_text(
+        json.dumps(
+            {
+                "fingerprint": "fp-z",
+                "generation": 1,
+                "owner_token": "lease-X",
+                "revision": 0,
+                "phase": "polling",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    initial = IdentityVersion(
+        fingerprint="fp-z", generation=1, owner_token="lease-X", revision=0
+    )
+    state = transition(
+        target,
+        expected_version=initial,
+        patch={"phase": "completed"},
+        history_label="first_completion",
+    )
+    assert state["revision"] == 1
+    # A second writer that still holds the OLD version cannot publish.
+    with pytest.raises(Exception):
+        transition(
+            target,
+            expected_version=initial,
+            patch={"phase": "terminal_failed"},
+            history_label="late_failure",
+        )
+    # Final state still belongs to the first writer.
+    final = json.loads(target.read_text(encoding="utf-8"))
+    assert final["phase"] == "completed"
+    assert final["revision"] == 1
+    labels = [h["label"] for h in final["history"]]
+    assert labels[-1] == "first_completion"
+
+
+def test_identity_history_is_capped_at_64_entries(tmp_path: Path) -> None:
+    """Old history entries are pruned so the persisted file stays small.
+    Forensics still keeps the last 64 labels — anything older is lost
+    deliberately."""
+
+    from bio_pdf.parsers.remote_identity_store import IdentityVersion, transition
+
+    target = tmp_path / "remote_identity.json"
+    target.write_text(
+        json.dumps(
+            {
+                "fingerprint": "fp-h",
+                "generation": 1,
+                "owner_token": "lease",
+                "revision": 0,
+                "phase": "polling",
+                "history": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    state = IdentityVersion(
+        fingerprint="fp-h", generation=1, owner_token="lease", revision=0
+    )
+    for i in range(80):
+        new = transition(
+            target,
+            expected_version=state,
+            patch={"tick": i},
+            history_label=f"step-{i}",
+        )
+        state = IdentityVersion(
+            fingerprint="fp-h",
+            generation=1,
+            owner_token="lease",
+            revision=new["revision"],
+        )
+    persisted = json.loads(target.read_text(encoding="utf-8"))
+    assert len(persisted["history"]) == 64
+    # The OLDEST 16 entries are pruned; the newest 64 survive.
+    assert persisted["history"][0]["label"] == "step-16"
+    assert persisted["history"][-1]["label"] == "step-79"

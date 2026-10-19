@@ -63,13 +63,12 @@ DEFAULT_MAX_POLLS = 600  # ~30 min at the default interval
 
 
 def _identity_lock(path: Path, *, timeout: float = 30.0):
-    """J01: exclusive lock around identity read-modify-write decisions.
+    """J01/K04: exclusive lock around identity read-modify-write decisions.
 
-    Two concurrent retries racing on the same side identity could each
-    allocate a new remote generation. The lock file is created with O_EXCL;
-    a stale lock (crashed process) older than 120 s is removed. Yields after
-    acquisition; the caller MUST do its decision + allocation + write inside
-    the context.
+    The lock is created with O_EXCL; a stale lock (crashed process) older
+    than 120 s is removed. The K04 ``transition`` API wraps this internally
+    so adapter code rarely needs the lock directly; this helper exists for
+    the all-or-nothing allocation pass.
     """
 
     import contextlib
@@ -113,8 +112,13 @@ def _identity_lock(path: Path, *, timeout: float = 30.0):
 
 
 def _write_identity(path: Path, identity: dict[str, Any]) -> None:
-    """Atomic-ish identity write (completes in one call; readers tolerate
-    a partial file by treating a JSON error as "no usable identity")."""
+    """Atomic-ish identity write for the all-or-nothing allocation pass.
+
+    Subsequent transitions go through ``remote_identity_store.transition``
+    which fences on (fingerprint, generation, owner_token, revision). The
+    allocation is a CREATE — there is no prior version to fence against —
+    so a plain atomic write is the correct primitive here.
+    """
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -123,6 +127,43 @@ def _write_identity(path: Path, identity: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     tmp.replace(path)
+
+
+def _apply_identity_transition(
+    identity_path: Path,
+    *,
+    identity_now: dict[str, Any],
+    patch: dict[str, Any],
+    label: str,
+) -> dict[str, Any]:
+    """K04: every post-allocation identity change goes through the fenced
+    store. The expected version is built from the read snapshot; a stale
+    write raises :class:`TransitionRejected` and the caller MUST re-read
+    and decide whether the new state supersedes the patch.
+    """
+
+    from bio_pdf.parsers.remote_identity_store import (
+        IdentityVersion,
+        TransitionRejected,
+        transition,
+    )
+
+    expected = IdentityVersion(
+        fingerprint=str(identity_now.get("fingerprint") or ""),
+        generation=int(identity_now.get("generation") or 0),
+        owner_token=str(identity_now.get("owner_token") or ""),
+        revision=int(identity_now.get("revision") or 0),
+    )
+    try:
+        return transition(
+            identity_path,
+            expected_version=expected,
+            patch=patch,
+            history_label=label,
+        )
+    except TransitionRejected as exc:
+        # The store's reason is the forensic record; the caller decides.
+        return exc.current
 
 
 
@@ -1317,6 +1358,12 @@ class MinerUAdapter:
                         "batch_history": history,
                         # J01: which attempt/lease owns this generation.
                         "last_attempt_token": request.attempt_token,
+                        # K04: the fenced store keys ``owner_token`` for
+                        # compare-and-swap. We pin it to the attempt's
+                        # lease token so a takeover or a non-owner write
+                        # is rejected at the persistence layer.
+                        "owner_token": request.attempt_token or f"alloc-{generation}",
+                        "revision": 0,
                         "terminal_failures": list((previous or {}).get("terminal_failures") or []),
                         "submitted_at": datetime.now(tz=timezone.utc).isoformat(),
                     }
@@ -1329,9 +1376,15 @@ class MinerUAdapter:
                 # A persisted allocation without a usable slot cannot be
                 # uploaded — mark it expired so the NEXT attempt reallocates
                 # instead of polling a batch that never received bytes.
-                identity["phase"] = "slot_expired"
-                identity["slot_expired_reason"] = "persisted identity has no usable slot URL"
-                _write_identity(identity_path, identity)
+                identity = _apply_identity_transition(
+                    identity_path,
+                    identity_now=identity,
+                    patch={
+                        "phase": "slot_expired",
+                        "slot_expired_reason": "persisted identity has no usable slot URL",
+                    },
+                    label="slot_expired_no_url",
+                )
                 raise UploadSlotExpiredError(
                     "stored upload slot is unusable; reallocation required",
                     details={"code": "UPLOAD_SLOT_EXPIRED", "batch_id": identity.get("batch_id")},
@@ -1342,38 +1395,63 @@ class MinerUAdapter:
                 # Confirmed expiry: persist the state BEFORE raising; the
                 # next attempt's dispatch reallocates. If that allocation
                 # fails too, the identity STAYS slot_expired — never polling.
-                identity["phase"] = "slot_expired"
-                identity["slot_expired_reason"] = "PUT returned 401/403/404 (slot invalid)"
-                _write_identity(identity_path, identity)
+                identity = _apply_identity_transition(
+                    identity_path,
+                    identity_now=identity,
+                    patch={
+                        "phase": "slot_expired",
+                        "slot_expired_reason": "PUT returned 401/403/404 (slot invalid)",
+                    },
+                    label="slot_expired_put",
+                )
                 raise
             except NetworkTransientError:
                 # 500/429/network: keep phase=allocated → the retry re-PUTs
                 # the SAME slot (no second batch allocation).
-                identity["last_upload_error"] = {
-                    "code": "UPLOAD_RETRYABLE",
-                    "at": datetime.now(tz=timezone.utc).isoformat(),
-                }
-                _write_identity(identity_path, identity)
+                identity = _apply_identity_transition(
+                    identity_path,
+                    identity_now=identity,
+                    patch={
+                        "last_upload_error": {
+                            "code": "UPLOAD_RETRYABLE",
+                            "at": datetime.now(tz=timezone.utc).isoformat(),
+                        },
+                    },
+                    label="upload_transient",
+                )
                 raise
-            identity["phase"] = "uploaded"
-            _write_identity(identity_path, identity)
+            identity = _apply_identity_transition(
+                identity_path,
+                identity_now=identity,
+                patch={"phase": "uploaded"},
+                label="uploaded",
+            )
             phase = "uploaded"
 
         if phase not in ("uploaded", "polling", "completed"):
             # Unknown persisted state: never fall through to polling a
             # batch whose upload status is unknown — require reallocation.
-            identity["phase"] = "slot_expired"
-            identity["slot_expired_reason"] = f"unknown persisted phase {phase!r}"
-            _write_identity(identity_path, identity)
+            identity = _apply_identity_transition(
+                identity_path,
+                identity_now=identity,
+                patch={
+                    "phase": "slot_expired",
+                    "slot_expired_reason": f"unknown persisted phase {phase!r}",
+                },
+                label="slot_expired_unknown_phase",
+            )
             raise EngineProtocolUnsupportedError(
                 f"MinerU identity has an unknown phase {phase!r}; reallocation required",
                 details={"code": "REMOTE_IDENTITY_PHASE_UNKNOWN", "phase": phase},
             )
 
-        identity["phase"] = "polling"
-        # J01: record the polling attempt's owner for auditability.
-        identity["last_attempt_token"] = request.attempt_token
-        _write_identity(identity_path, identity)
+        identity = _apply_identity_transition(
+            identity_path,
+            identity_now=identity,
+            # J01: record the polling attempt's owner for auditability.
+            patch={"phase": "polling", "last_attempt_token": request.attempt_token},
+            label="polling",
+        )
 
         try:
             with self._client() as client:
@@ -1386,7 +1464,8 @@ class MinerUAdapter:
         except RemoteBatchFailedError as exc:
             # J01: persist the terminal failure (append-only history) so the
             # retry's dispatch allocates a NEW generation instead of polling
-            # this dead batch forever.
+            # this dead batch forever. K04: fenced by (fingerprint,
+            # generation, owner_token, revision); a stale write is rejected.
             failures = list(identity.get("terminal_failures") or [])
             failures.append(
                 {
@@ -1398,14 +1477,23 @@ class MinerUAdapter:
                     "at": datetime.now(tz=timezone.utc).isoformat(),
                 }
             )
-            identity["terminal_failures"] = failures
-            identity["phase"] = "terminal_failed"
-            _write_identity(identity_path, identity)
+            identity = _apply_identity_transition(
+                identity_path,
+                identity_now=identity,
+                patch={"terminal_failures": failures, "phase": "terminal_failed"},
+                label="terminal_failed",
+            )
             raise
 
-        identity["phase"] = "completed"
-        identity["completed_at"] = datetime.now(tz=timezone.utc).isoformat()
-        _write_identity(identity_path, identity)
+        identity = _apply_identity_transition(
+            identity_path,
+            identity_now=identity,
+            patch={
+                "phase": "completed",
+                "completed_at": datetime.now(tz=timezone.utc).isoformat(),
+            },
+            label="completed",
+        )
 
         # Also keep a copy next to this attempt's artifacts for audithers.
         (request.output_dir / "remote_identity.json").write_text(
