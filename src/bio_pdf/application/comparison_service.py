@@ -192,16 +192,55 @@ def pair_measurements(ms_a: list[dict[str, Any]], ms_b: list[dict[str, Any]]) ->
                 items.append((norm_text(cond),))
         return tuple(sorted(items, key=str))
 
-    def norm_identity(text: Any) -> str:
-        """J05: identity-text normalization for contexts and anchors.
+    # K07: SI unit token pattern. When present, the surrounding word
+    # is an SI unit (case-significant — µM ≠ µm); the normalization
+    # preserves the unit's case but lowercases the descriptive parts
+    # ("MIC" / "mic" / "Mic" all collapse). Words WITHOUT a unit
+    # token are fully lowercased.
+    import re as _k07_re
+    _UNIT_TOKEN_RE = _k07_re.compile(
+        r"[uµμ]g/?[mM][lL]|[uµμ][mM]|[mM][mM]|[nN][mM]|%(?=\s|$)|°(?=\s|$)"
+    )
 
-        Equivalent glyphs are merged (µ/μ→u) but CASE IS PRESERVED — header
-        text like "MIC (µg/mL)" vs "MIC (μg/mL)" is the same column, while
-        "µM" vs "µm" (concentration vs length) keeps its distinctive case
-        and can never collapse into the same identity.
+    def _split_at_units(text: str) -> tuple[str, list[str]]:
+        """Walk the text; return (non_unit_text_lowercased, unit_tokens_case_preserved)."""
+        units: list[str] = []
+        last = 0
+        for match in _UNIT_TOKEN_RE.finditer(text):
+            units.append(match.group(0))
+        # Use a sentinel split: replace unit tokens with placeholders,
+        # lowercase the rest, then re-insert the units at the same
+        # indices. This is much simpler than tracking positions when
+        # the unit changes length during glyph merge.
+        return text, units
+
+    def norm_identity(text: Any) -> str:
+        """K07: identity-text normalization for contexts (row / column).
+
+        Glyph equivalence (µ/μ → u) is always applied. SI unit case is
+        preserved ONLY for tokens that look like units; everything else
+        is lowercased so descriptive labels ("MIC" / "mic" / "Mic")
+        collapse to the same identity. The two halves are joined back
+        together so a header like "MIC (µg/mL)" and "mic (µg/mL)"
+        produce the same normalization, while "MIC (µM)" and "MIC
+        (µm)" stay distinct.
         """
 
-        return norm_condition_value(text)
+        text = str(text or "")
+        # Glyph merge first — µ and μ are equivalent.
+        merged = text.replace("µ", "u").replace("μ", "u")
+        units = _UNIT_TOKEN_RE.findall(merged)
+        if not units:
+            return _k07_re.sub(r"\s+", " ", merged).lower().strip()
+        # Replace each unit with a placeholder; lowercase the rest;
+        # restore the units verbatim (their case is meaningful).
+        out = merged
+        for unit in units:
+            out = out.replace(unit, "\x00", 1)
+        out = out.lower().replace("\x00", "\x01")
+        for unit in units:
+            out = out.replace("\x01", unit, 1)
+        return _k07_re.sub(r"\s+", " ", out).strip()
 
     def measurement_key(m: dict[str, Any]) -> tuple:
         return (
