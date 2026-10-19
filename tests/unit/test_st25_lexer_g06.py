@@ -34,7 +34,7 @@ def _native(text: str, box: list[float]) -> dict:
 
 def test_declaration_number_mismatch_is_a_recorded_conflict_not_a_merge() -> None:
     blocks = [_native("<210> 1", [10.0, 100.0, 60.0, 110.0])]
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 60.0, 110.0, "<210> 2")]}
     )
     assert [str(b.get("text")) for b in merged] == ["<210> 1"], "native stays"
@@ -46,7 +46,7 @@ def test_declaration_number_mismatch_is_a_recorded_conflict_not_a_merge() -> Non
 
 def test_declared_length_mismatch_is_not_merged() -> None:
     blocks = [_native("<211> 10", [10.0, 100.0, 60.0, 110.0])]
-    _merged, records = _merge_ocr_page_lines(
+    _merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 60.0, 110.0, "<211> 20")]}
     )
     assert [r for r in records if r.get("kind") == "content_conflict"]
@@ -54,7 +54,7 @@ def test_declared_length_mismatch_is_not_merged() -> None:
 
 def test_identical_declarations_still_merge() -> None:
     blocks = [_native("<210> 1", [10.0, 100.0, 60.0, 110.0])]
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 60.0, 110.0, "<210> 1")]}
     )
     assert [str(b.get("text")) for b in merged] == ["<210> 1"]
@@ -67,7 +67,7 @@ def test_residue_row_count_marker_difference_is_tolerated() -> None:
     recheck asked for instead of "delete every digit"."""
 
     blocks = [_native("Ser Tyr Gly Val His 1 5", [10.0, 100.0, 200.0, 110.0])]
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 200.0, 110.0, "Ser Tyr Gly Val His 1 10")]}
     )
     assert [str(b.get("text")) for b in merged] == ["Ser Tyr Gly Val His 1 5"]
@@ -79,7 +79,7 @@ def test_tag_lines_never_get_count_tolerance() -> None:
     rule is disabled whenever a tag is present)."""
 
     blocks = [_native("<210> 12", [10.0, 100.0, 60.0, 110.0])]
-    _merged, records = _merge_ocr_page_lines(
+    _merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 60.0, 110.0, "<210> 13")]}
     )
     assert [r for r in records if r.get("kind") == "content_conflict"]

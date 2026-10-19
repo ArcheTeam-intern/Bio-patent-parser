@@ -939,8 +939,22 @@ def _merge_ocr_page_lines(
             n_y0, n_y1, o_y0, o_y1
         )
 
+    def _n_tagged_for(natives_list, idx) -> bool:
+        """Whether the native at ``idx`` is itself a tagged declaration
+        (textual co-location evidence for the page-level fallback)."""
+
+        for ent in natives_list:
+            if ent[0] != idx:
+                continue
+            _ni, _nbox, _nfp, _nl, n_tagged, _nt, _b = ent
+            return bool(n_tagged)
+        return False
+
     output: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
+    # K06: declaration_merge records collected across every page so the
+    # caller (region-ocr.json sidecar) can carry per-field provenance.
+    declaration_merges: list[dict[str, Any]] = []
     # Uniform item shape: (y, order, kind, payload) where kind is
     # "block" (payload = block dict) or "ocr" (payload = 5-tuple).
     page_items: dict[int, list[tuple[float, int, str, Any]]] = {}
@@ -994,10 +1008,25 @@ def _merge_ocr_page_lines(
             fp = fingerprint(text)
             if letter_len(fp) < 2:
                 continue
+            # K06: a native with no bbox cannot prove the OCR line
+            # belongs to the same physical mention. We fall back to
+            # PAGE-level grouping ONLY when BOTH sides carry tagged
+            # ST.25 declarations (textual evidence of co-location);
+            # the no-bbox native's origin records
+            # bbox_verified=False / location_precision="page" so a UI
+            # never claims character precision it cannot prove.
             overlapping_indexes = [
                 item_index
                 for item_index, n_box, n_fp, _nl, _nt, _t, _b in natives
-                if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
+                if n_fp
+                and (
+                    (n_box is not None and _same_mention(n_box, (x0, y0, x1, y1)))
+                    or (
+                        n_box is None
+                        and tag_declarations(text) is not None
+                        and _n_tagged_for(natives, item_index)
+                    )
+                )
             ]
             if overlapping_indexes:
                 key = overlapping_indexes[0]
@@ -1033,6 +1062,48 @@ def _merge_ocr_page_lines(
                 group_lines[0][4],
                 group_lines[0][5],
             )
+            # K06: enrich each field origin with the immutable artifact
+            # identity (source_parser / source_artifact_id) and the
+            # native block bbox so the sidecar can carry field-level
+            # provenance that survives a re-open of the artifact.
+            enriched_fields = [
+                {
+                    "field": f.tag,
+                    "value": f.value,
+                    "origin": f.origin,
+                    "block_id": f.block_id,
+                    "source_parser": "native" if f.origin == "native" else "rapidocr_region",
+                    "source_artifact_id": (
+                        "blocks" if f.origin == "native" else "region-ocr.json"
+                    ),
+                    "page_number": page,
+                    "bbox": (
+                        list(_nbox)
+                        if f.origin == "native" and _nbox is not None
+                        else None
+                    ),
+                    # K06: bbox_verified is True ONLY when the field
+                    # came from a native block with a real bbox — an
+                    # OCR origin or a no-bbox native falls back to
+                    # page-level granularity (location_precision="page").
+                    "bbox_verified": bool(
+                        f.origin == "native" and _nbox is not None
+                    ),
+                    "location_precision": (
+                        "block"
+                        if f.origin == "native" and _nbox is not None
+                        else "page"
+                    ),
+                    "raw_text": n_text if f.origin == "native" else None,
+                }
+                for f in group.fields
+            ]
+            group_record = group.to_record(
+                page_number=page, bbox=(ox0, oy0, ox1, oy1)
+            )
+            group_record["fields"] = enriched_fields
+            group_record["native_block_id"] = n_block_id
+            declaration_merges.append(group_record)
             # Tag-free text (no ST.25 tags on either side): fall
             # through to the legacy containment / equality / conflict
             # paths via the ungrouped loop. ``merge_group`` only models
@@ -1368,7 +1439,7 @@ def _merge_ocr_page_lines(
                         "source_artifact_id": None,
                     }
                 )
-    return output, records
+    return output, records, declaration_merges
 
 
 def _page_blocks(
@@ -1539,6 +1610,11 @@ class ExtractStage(_FileStage):
         # F09: what adopted candidates contributed to this extraction (the
         # audit chain candidate → feed blocks → evidence).
         adopted_records_out: list[dict[str, Any]] = []
+        #: K06: declaration_merge records from the adopted-candidate
+        #: pass; declared outside the ``if adopted_lines`` block so the
+        #: region-ocr.json writer (which always reads it) can build
+        #: without a NameError when no candidate was consumed.
+        adopted_declaration_merges: list[dict[str, Any]] = []
 
         # ---- sequences ----------------------------------------------------
         sequences: list[SequenceRecord] = []
@@ -1592,6 +1668,9 @@ class ExtractStage(_FileStage):
             ocr_text: dict[int, list[tuple[float, float, float, float, str]]] = {}
             ocr_conflicts: list[dict[str, Any]] = []
             coverage_supersedes: list[dict[str, Any]] = []
+            #: K06: pre-declared so the sidecar builder (which always
+            #: reads it) doesn't NameError when no OCR ran.
+            declaration_merge_records: list[dict[str, Any]] = []
             if ocr_candidates:
                 from bio_pdf.extract.sequences.region_ocr import ocr_residue_pages
                 from pathlib import Path as _Path
@@ -1609,7 +1688,9 @@ class ExtractStage(_FileStage):
                     )
                     ocr_text = {}
                 if ocr_text:
-                    feed_blocks, merge_records = _merge_ocr_page_lines(blocks, ocr_text)
+                    feed_blocks, merge_records, declaration_merge_records = _merge_ocr_page_lines(
+                        blocks, ocr_text
+                    )
                     ocr_pages_used = sorted(ocr_text)
                     # F05/P01: split the merge records — content conflicts are
                     # recorded as SOURCE_CONFLICT issues; coverage supersedes
@@ -1866,12 +1947,13 @@ class ExtractStage(_FileStage):
                         }
                     )
                 if adopted_lines:
-                    feed_blocks, adopted_merge_records = _merge_ocr_page_lines(
+                    feed_blocks, adopted_merge_records, _adopted_decl = _merge_ocr_page_lines(
                         feed_blocks,
                         adopted_lines,
                         origin="adopted_candidate",
                         origin_aliases=adopted_aliases,
                     )
+                    adopted_declaration_merges.extend(_adopted_decl)
                     # Records from consuming a candidate: coverage supersedes
                     # and content conflicts are explicit (full payload below).
                     used_by_page: dict[int, list[str]] = {}
@@ -1914,6 +1996,14 @@ class ExtractStage(_FileStage):
             if ocr_text or adopted_sidecar:
                 from bio_pdf.storage.artifacts import atomic_write_json as _awj
 
+                # K06: union of the per-call declaration_merge records
+                # for the region-OCR pass + the adopted-candidate pass.
+                # Each entry carries per-field provenance so the sidecar
+                # can resolve a field back to its raw page block / OCR
+                # line WITHOUT re-running the handler.
+                region_declaration_merges = list(declaration_merge_records) + list(
+                    adopted_declaration_merges
+                )
                 region_payload = {
                     "schema_version": "1.0",
                     "engine": "rapidocr_region",
@@ -1928,6 +2018,13 @@ class ExtractStage(_FileStage):
                     },
                     "content_conflicts": ocr_conflicts,
                     "native_superseded": coverage_supersedes,
+                    # K06: per-field provenance for the logical
+                    # declarations formed by ``merge_group``. Each
+                    # entry carries the source channel and source
+                    # artifact id so an external consumer can resolve
+                    # a field back to its raw page block / region OCR
+                    # line WITHOUT re-running the handler.
+                    "declaration_merges": region_declaration_merges,
                     "adopted_candidates": {
                         str(page): lines for page, lines in sorted(adopted_sidecar.items())
                     },

@@ -33,7 +33,7 @@ def _native(text: str, box: list[float], page: int = 1) -> dict:
 def test_same_content_at_different_positions_is_kept_twice() -> None:
     """Recheck repro: OCR [(100,110,'ACGT'), (200,210,'ACGT')] → both kept."""
 
-    merged, conflicts = _merge_ocr_page_lines(
+    merged, conflicts, _ = _merge_ocr_page_lines(
         [], {1: [(40.0, 100.0, 120.0, 110.0, "ACGT"), (40.0, 200.0, 120.0, 210.0, "ACGT")]}
     )
     texts = [str(b.get("text")) for b in merged]
@@ -46,7 +46,7 @@ def test_same_y_different_column_is_not_a_conflict() -> None:
     column: keep both, no conflict."""
 
     blocks = [_native("ACGT", [40.0, 100.0, 200.0, 110.0])]
-    merged, conflicts = _merge_ocr_page_lines(blocks, {1: [(380.0, 100.0, 500.0, 110.0, "AGGT")]})
+    merged, conflicts, _ = _merge_ocr_page_lines(blocks, {1: [(380.0, 100.0, 500.0, 110.0, "AGGT")]})
     texts = [str(b.get("text")) for b in merged]
     assert "ACGT" in texts and "AGGT" in texts
     assert conflicts == []
@@ -58,14 +58,14 @@ def test_paragraph_and_its_line_merge_instead_of_conflicting() -> None:
 
     paragraph = "ACGT ACGT ACGT ACGT ACGT ACGT ACGT ACGT"
     blocks = [_native(paragraph, [40.0, 100.0, 500.0, 130.0])]
-    merged, conflicts = _merge_ocr_page_lines(blocks, {1: [(40.0, 102.0, 120.0, 112.0, "ACGT")]})
+    merged, conflicts, _ = _merge_ocr_page_lines(blocks, {1: [(40.0, 102.0, 120.0, 112.0, "ACGT")]})
     assert conflicts == []
     assert [str(b.get("text")) for b in merged] == [paragraph]
 
 
 def test_same_mention_different_content_is_a_recorded_conflict() -> None:
     blocks = [_native("ACGT", [40.0, 100.0, 120.0, 112.0])]
-    merged, conflicts = _merge_ocr_page_lines(blocks, {1: [(41.0, 101.0, 119.0, 111.0, "AGGT")]})
+    merged, conflicts, _ = _merge_ocr_page_lines(blocks, {1: [(41.0, 101.0, 119.0, 111.0, "AGGT")]})
     assert [str(b.get("text")) for b in merged] == ["ACGT"]
     assert len(conflicts) == 1
     conflict = conflicts[0]
@@ -84,7 +84,7 @@ def test_different_position_similar_residues_are_both_kept() -> None:
          "source_artifact_id": None},
         _native("ACGT", [40.0, 100.0, 500.0, 110.0]),
     ]
-    merged, conflicts = _merge_ocr_page_lines(blocks, {1: [(40.0, 300.0, 120.0, 310.0, "AGGT")]})
+    merged, conflicts, _ = _merge_ocr_page_lines(blocks, {1: [(40.0, 300.0, 120.0, 310.0, "AGGT")]})
     texts = [str(b.get("text")) for b in merged]
     assert "ACGT" in texts and "AGGT" in texts
     assert conflicts == []
@@ -92,7 +92,7 @@ def test_different_position_similar_residues_are_both_kept() -> None:
 
 def test_same_region_same_content_is_merged_not_duplicated() -> None:
     blocks = [_native("Ala Gly Leu Lys", [40.0, 100.0, 300.0, 112.0])]
-    merged, conflicts = _merge_ocr_page_lines(blocks, {1: [(41.0, 101.0, 299.0, 111.0, "ALAGLYLEULYS")]})
+    merged, conflicts, _ = _merge_ocr_page_lines(blocks, {1: [(41.0, 101.0, 299.0, 111.0, "ALAGLYLEULYS")]})
     assert len(merged) == 1
     assert conflicts == []
 
@@ -117,7 +117,7 @@ def test_conflict_payload_is_json_serializable() -> None:
     ]
     # region_ocr yields numpy-scaled floats: reproduce the real type here.
     ocr = {32: [(np.float32(90.0), np.float32(101.0), np.float32(110.0), np.float32(111.0), "AGGT")]}
-    _merged, conflicts = _merge_ocr_page_lines(blocks, ocr)
+    _merged, conflicts, _ = _merge_ocr_page_lines(blocks, ocr)
     assert conflicts
     dumped = json.dumps(conflicts)
     assert "AGGT" in dumped
@@ -161,7 +161,7 @@ def test_short_native_fragment_no_longer_swallows_a_longer_ocr_line() -> None:
 
     tokens_tag = _native("<210> 1\n<211> 2\n<212> PRT\n<400> 1", [10.0, 10.0, 500.0, 20.0])
     native_short = _native("Ala", [10.0, 80.0, 40.0, 90.0])
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         [tokens_tag, native_short], {1: [(10.0, 80.0, 90.0, 90.0, "Ala Cys")]}
     )
 
@@ -193,7 +193,7 @@ def test_native_covering_the_ocr_text_still_consumes_it() -> None:
     OCR text — consuming it cannot lose anything (character check)."""
 
     blocks = [_native("Ala Cys Gly", [10.0, 100.0, 200.0, 110.0])]
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 90.0, 110.0, "Cys")]}
     )
     assert [str(b.get("text")) for b in merged] == ["Ala Cys Gly"]
@@ -205,7 +205,7 @@ def test_partial_overlap_with_incomparable_granularity_keeps_both() -> None:
     both texts stay in the feed, no record is fabricated."""
 
     blocks = [_native("Ala", [10.0, 100.0, 40.0, 110.0])]
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 90.0, 110.0, "Cys Leu Pro")]}
     )
     texts = [str(b.get("text")) for b in merged]

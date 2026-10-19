@@ -65,7 +65,7 @@ def _merged_domain(native_decl: str, ocr_decl: str, residues: str):
         _native("<400> 1", [10.0, 120.0, 110.0, 130.0]),
         _native(residues, [10.0, 140.0, 300.0, 150.0]),
     ]
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         blocks, {1: [(10.0, 100.0, 110.0, 110.0, ocr_decl)]}
     )
     normalized = {
@@ -300,7 +300,7 @@ def test_multi_ocr_lines_with_real_conflict_record_one_conflict_per_line() -> No
         _native("<210> 1 <211> 5", _BOX),
     ]
     # Single OCR pass — two OCR lines that share the same mention.
-    merged, records = _merge_ocr_page_lines(
+    merged, records, _ = _merge_ocr_page_lines(
         blocks,
         {
             1: [

@@ -225,10 +225,14 @@ def merge_group(
         for tag, val in n_map.items():
             union[tag] = (val, "native")
         for tag, val in o_map.items():
-            if tag in union and union[tag][0] != val:
-                # Value conflict: keep the native value as the merged
-                # text but mark this pair as conflict; the per-pair
-                # verdict already captures the disagreement.
+            if tag in union:
+                # Field is shared by both channels: native owns it
+                # (K06 contract — the native artifact is authoritative;
+                # OCR is treated as confirmation, not as a fresh
+                # source, when values agree). When values disagree
+                # ``this_pair_conflicts`` was already set above so the
+                # audit trail records the disagreement; the native
+                # value stays in the union.
                 continue
             union[tag] = (val, "ocr")
         per_pair_unions.append(union)

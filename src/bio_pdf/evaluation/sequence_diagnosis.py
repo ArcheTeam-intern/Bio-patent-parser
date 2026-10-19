@@ -134,7 +134,7 @@ def diagnose_sequences(
                 )
                 for ln in lines
             ]
-        merged, records = _merge_ocr_page_lines(_feed_blocks(), ocr_input)
+        merged, records, _declaration_merges = _merge_ocr_page_lines(_feed_blocks(), ocr_input)
         by_source: dict[str, dict[str, Any]] = {}
         kept_ocr: list[str] = []
         for block in merged:
