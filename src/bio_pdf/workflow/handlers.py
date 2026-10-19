@@ -40,7 +40,7 @@ from bio_pdf.contracts import (
 )
 from bio_pdf.errors import PageCoverageMismatchError, WorkflowError
 from bio_pdf.extract.activities.prose import extract_prose_measurements
-from bio_pdf.extract.activities.tables import extract_table_measurements
+from bio_pdf.extract.activities.tables import _caption_metric, extract_table_measurements
 from bio_pdf.extract.entities import (
     entities_from_measurement_labels,
     entities_from_sequence_notes,
@@ -2272,6 +2272,9 @@ class ExtractStage(_FileStage):
                         # G07/P02: caption/note-referenced conditions resolved
                         # against THIS document's blocks (evidence preserved).
                         context_conditions=_table_context_conditions(table, document),
+                        # Patent layout: the metric is declared in the table
+                        # TITLE while headers carry strain/peptide names.
+                        caption_metric=_caption_metric(table),
                     )
                 )
 

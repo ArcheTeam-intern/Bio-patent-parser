@@ -68,6 +68,12 @@ _CONDITION_WORDS = re.compile(
 _SRI_VALUE = re.compile(r"^\s*(?:S|R|I|SDD)\s*$")
 
 _NUMERIC_VALUE = re.compile(r"^\s*(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*$")
+#: A numeric cell that carries its unit inline (">64 μg/ml", "0.25 mg/L") —
+#: the patent layout puts the unit on every value instead of the header.
+_VALUE_WITH_UNIT = re.compile(
+    r"^\s*(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*"
+    r"(?:[a-zA-Zμµ]+(?:\s*/\s*[a-zA-Zμµ]+)?|[%°])\s*$"
+)
 
 
 def _header_texts(table: Table) -> list[str]:
@@ -136,6 +142,23 @@ def classify_table(table: Table, *, caption: str | None = None) -> TableKind:
             if _NUMERIC_VALUE.match(v) or v.upper() in ("ND", "NA", "N/A", "-")
         )
         if not values or numericish / len(values) >= 0.5:
+            return TableKind.ACTIVITY_NUMERIC
+
+    # 5b) CAPTION-declared metric. Patent tables put "Minimum inhibitory
+    #     concentration (MICs)" in the TITLE and use strain/peptide names
+    #     as column headers ("Bacteria | Strains | Chain201 | Chain204").
+    #     Without this branch the table is UNCLASSIFIED and every MIC
+    #     value in it is dropped — the live EP3423477B1 run hit exactly
+    #     this (3 tables, 0 measurements).
+    if lookup_metric(caption_text) is not None:
+        numericish = sum(
+            1
+            for v in values
+            if _NUMERIC_VALUE.match(v)
+            or _VALUE_WITH_UNIT.match(v)
+            or v.upper() in ("ND", "NA", "N/A", "-")
+        )
+        if values and numericish / len(values) >= 0.5:
             return TableKind.ACTIVITY_NUMERIC
 
     # 6) Assay conditions.

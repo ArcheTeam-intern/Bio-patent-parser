@@ -39,6 +39,21 @@ _ROW_LABEL_HEADERS = {"peptide", "compound", "antibody", "entity", "variant", "c
 _SRI_VALUE = re.compile(r"^\s*(S|R|I|SDD)\s*$")
 _NUMERICISH = re.compile(r"^\s*(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*$")
 
+#: A numeric cell carrying its unit inline (">64 μg/ml"). Patent tables
+#: repeat the unit on every value instead of declaring it in the header.
+_VALUE_WITH_UNIT = re.compile(
+    r"^\s*((?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?)\s*"
+    r"((?:[a-zA-Zμµ]+(?:\s*/\s*[a-zA-Zμµ]+)?)|[%°])\s*$"
+)
+
+#: A serial-number COLUMN header ("Strains", "Isolate number", "#"). Its
+#: values are row indices, never measurements.
+_ROW_NUMBER_HEADER = re.compile(
+    r"^\s*(?:strains?|isolates?(?:\s*(?:no\.?|number|id))?|no\.?|#|"
+    r"number|id|序号|编号)\s*$",
+    re.IGNORECASE,
+)
+
 #: G07/P02: experiment-condition patterns (time / temperature / dose /
 #: method / atmosphere) for header cells, captions and table notes.
 #: Deliberately small and auditable — no speculative parsing; every match
@@ -227,6 +242,23 @@ def _resolve_column_context(
     )
 
 
+def _caption_metric(table: Table) -> tuple[str, str] | None:
+    """The metric a table DECLARES in its caption, if any.
+
+    Patents write "Table 6. Minimum inhibitory concentration (MICs) of
+    peptide variants…" and put strain/peptide names in the headers. This
+    helper is what the extraction call sites pass as ``caption_metric``
+    so those tables yield measurements instead of being dropped.
+    """
+
+    caption = str(getattr(table, "caption", "") or "").strip()
+    if not caption:
+        return None
+    from bio_pdf.extract.activities.metrics import lookup_metric
+
+    return lookup_metric(caption)
+
+
 def extract_table_measurements(
     table: Table,
     *,
@@ -235,6 +267,7 @@ def extract_table_measurements(
     evidence_kind: str = "undetermined",
     metric: str | None = None,  # accepted for compatibility; NOT an override
     context_conditions: list[dict[str, str]] | None = None,
+    caption_metric: tuple[str, str] | None = None,
 ) -> list[Measurement]:
     """Extract measurements from a :class:`Table` by classified kind.
 
@@ -252,6 +285,12 @@ def extract_table_measurements(
             caption / referenced notes by the caller (which owns the
             document blocks). Header-cell conditions are added HERE from
             the measurement's own header path.
+        caption_metric: ``(canonical, raw)`` parsed from the table CAPTION
+            ("Table 6. Minimum inhibitory concentration (MICs)…"). Used
+            ONLY when the column headers carry no metric of their own —
+            the patent layout puts the metric in the title and the strain
+            or peptide name in the header. A header metric always wins, so
+            a multi-metric table is never flattened by this fallback.
     """
 
     del metric  # B06: no table-level metric override, ever.
@@ -295,6 +334,14 @@ def extract_table_measurements(
         value_text = data_cell.text_raw.strip()
         if not value_text:
             continue
+        # Patent values carry their unit inline (">64 μg/ml"): peel it off
+        # so the numeric parser sees the bare value and the unit travels
+        # separately (it is evidence on the VALUE cell, not the header).
+        cell_unit: str | None = None
+        inline = _VALUE_WITH_UNIT.match(value_text)
+        if inline is not None:
+            value_text = inline.group(1).strip()
+            cell_unit = inline.group(2).strip()
         if not (_NUMERICISH.match(value_text) or value_text.upper() in ("ND", "NA", "N/A", "-")):
             # A non-numeric cell in a numeric panel (comment/unit noise):
             # skip — never turn text into a fabricated value.
@@ -310,7 +357,22 @@ def extract_table_measurements(
             target_raw,
         ) = _resolve_column_context(path.column_headers)
         if canonical is None:
-            continue  # no registered metric on this column → no measurement
+            if caption_metric is None:
+                continue  # no registered metric anywhere → no measurement
+            # Caption-declared metric fallback (patent layout): the metric
+            # lives in the title, so the deepest column header names the
+            # other axis (strain / peptide) and the row label names the
+            # first one.
+            canonical, metric_raw = caption_metric
+            if path.column_headers:
+                target_cell = path.column_headers[-1]
+                target_raw = target_cell.text_raw.strip() or None
+            # A serial-number column ("Strains: 1, 2, 3…") is a row index,
+            # not a data column — its integers are isolate numbers, never
+            # MIC values. Dropping it here keeps the fabricated records out
+            # (the live EP3423477B1 table produced 45 of them).
+            if target_raw and _ROW_NUMBER_HEADER.match(target_raw):
+                continue
         # A trailing target inside the metric header ("MIC (µM), E. coli").
         if not target_raw and metric_cell is not None:
             target_raw = parse_table_header(metric_cell.text_raw.strip()).get("target")
@@ -319,7 +381,25 @@ def extract_table_measurements(
         entity_cell = path.row_headers[-1] if path.row_headers else None
         entity_raw = entity_cell.text_raw.strip() if entity_cell is not None else None
 
+        # Axis orientation. A MIC matrix can be laid out either way:
+        #   row = compound, column = strain   (Table 6)  → correct as-is
+        #   row = strain,   column = peptide  (Table 4b) → flipped
+        # The organism vocabulary decides: when the ROW label is an
+        # organism and the column label is not, the peptide/compound is the
+        # entity and the organism is the target. No organism on either side
+        # → leave the natural reading untouched.
+        if (
+            entity_raw
+            and _STRAIN_HINT.search(entity_raw)
+            and not (target_raw and _STRAIN_HINT.search(target_raw))
+        ):
+            entity_raw, target_raw = target_raw, entity_raw
+            entity_cell, target_cell = target_cell, entity_cell
+
         value = parse_activity_value(value_text)
+        if unit_raw is None and cell_unit is not None:
+            unit_raw = cell_unit
+            unit_cell = data_cell
         unit_normalized = normalize_unit(unit_raw) if unit_raw else None
 
         field_evidence: dict[str, list[str]] = {"value": _ev(data_cell)}

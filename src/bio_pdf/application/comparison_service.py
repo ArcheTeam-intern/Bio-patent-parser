@@ -1718,7 +1718,7 @@ def _domain_pass_spec(
 
     from bio_pdf.contracts import NormalizedDocument
     from bio_pdf.extract.activities.table_classifier import TableKind, classify_table
-    from bio_pdf.extract.activities.tables import extract_table_measurements
+    from bio_pdf.extract.activities.tables import _caption_metric, extract_table_measurements
     from bio_pdf.extract.evidence import EvidenceIndex, span_from_cell
     from bio_pdf.extract.sequences.inventory import build_sequence_inventory
     from bio_pdf.extract.sequences.st25 import parse_st25_blocks_with_scan
@@ -1810,6 +1810,8 @@ def _domain_pass_spec(
             # here too — the diff must see the REAL conditions of the table,
             # not a hand-filled field.
             context_conditions=table_context_conditions(table, document),
+            # Patent layout: metric in the table TITLE, headers are strains.
+            caption_metric=_caption_metric(table),
         ):
             anchor_row: int | None = None
             anchor_col: int | None = None

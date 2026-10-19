@@ -182,6 +182,18 @@ _PHRASE_ALIASES: list[tuple[str, str]] = [
     ("s/r/i", "antimicrobial_susceptibility"),
     ("susceptibility testing", "antimicrobial_susceptibility"),
     ("antibiogram", "antimicrobial_susceptibility"),
+    # Patent tables declare the metric in the CAPTION ("Table 6. Minimum
+    # inhibitory concentration (MICs) of peptide variants...") and use
+    # strain/peptide names as column headers. Without these phrases the
+    # caption carries no metric and every MIC value in the table is
+    # dropped as "unclassified".
+    ("minimum inhibitory concentration", "MIC"),
+    ("minimum bactericidal concentration", "MBC"),
+    ("minimum fungicidal concentration", "MFC"),
+    ("half maximal inhibitory concentration", "IC50"),
+    ("half-maximal inhibitory concentration", "IC50"),
+    ("half maximal effective concentration", "EC50"),
+    ("half-maximal effective concentration", "EC50"),
 ]
 
 
