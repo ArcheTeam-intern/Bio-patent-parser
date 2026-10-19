@@ -374,6 +374,17 @@ def serve_api(
     web_dist: Optional[Path] = typer.Option(
         None, "--web-dist", help="Directory of the built frontend (web/dist)."
     ),
+    env_file: Optional[Path] = typer.Option(
+        None,
+        "--env-file",
+        help=(
+            "Explicit path to a KEY=VALUE env file. Resolved to an absolute path "
+            "before reading; the file is parsed with a strict, minimal syntax "
+            "(unknown keys rejected). Values written into the process env so any "
+            "supervised child (comparison side, queue worker, docling inference) "
+            "inherits them."
+        ),
+    ),
 ) -> None:
     """Run the HTTP API (and optional static frontend) server."""
 
@@ -381,6 +392,14 @@ def serve_api(
 
     from bio_pdf.api.app import create_app
     from bio_pdf.api.settings import ApiSettings
+    from bio_pdf.runtime_config import apply_to_environ, load_runtime_config
+
+    # K01: resolve the runtime config BEFORE importing adapters so the
+    # comparison child (which is spawned AFTER this returns) sees the
+    # same MinerU token. ``apply_to_environ`` only fills in keys the
+    # process env already has set — the process env still wins.
+    runtime_config = load_runtime_config(env_file=env_file)
+    apply_to_environ(runtime_config)
 
     settings = ApiSettings(
         data_dir=data_dir,

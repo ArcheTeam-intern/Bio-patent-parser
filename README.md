@@ -29,14 +29,22 @@ npm install
 npm run build
 cd ..
 
-# 3. 启动 API + 静态前端（127.0.0.1:8420）
-.venv\Scripts\python.exe -m bio_pdf.cli serve --data-dir data\demo --web-dist web\dist
+# 3. 配置后端运行时（K01）：复制模板到本地文件并填入凭据
+copy .env.example .env.local
+#    编辑 .env.local：MINERU_TOKEN=...（可选；不填则 MinerU 侧会明确返回未配置）
 
-# 4. 另开一个终端，启动持久解析 worker（并发 1）
-.venv\Scripts\python.exe -m bio_pdf.workflow.queue_worker --data-dir data\demo
+# 4. 启动 API + 静态前端（127.0.0.1:8420），通过 --env-file 加载配置
+.venv\Scripts\python.exe -m bio_pdf.cli serve --env-file .env.local --data-dir data\demo --web-dist web\dist
 
-# 5. 打开 http://127.0.0.1:8420/ → 任务 → 添加 PDF
+# 5. 另开一个终端，启动持久解析 worker（并发 1），加载同一份配置
+.venv\Scripts\python.exe -m bio_pdf.workflow.queue_worker --env-file .env.local --data-dir data\demo
+
+# 6. 打开 http://127.0.0.1:8420/ → 任务 → 添加 PDF
 ```
+
+配置契约（K01）：进程环境 > `--env-file` 指定文件 > 内置默认值；未知键被拒收，
+不静默失败。`.env.local` 已在 `.gitignore` 中，**永远不要提交实际凭据**。
+公开接口（如 `/api/v1/capabilities`）只报告 `configured` 状态，不返回密钥值。
 
 开发模式（前端热更新）：
 

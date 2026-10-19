@@ -206,7 +206,24 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--data-dir", type=Path, default=Path("data/demo"))
     parser.add_argument("--poll-interval", type=float, default=1.5)
     parser.add_argument("--once", action="store_true", help="Exit when no queued job remains")
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit KEY=VALUE env file (K01). Resolved to an absolute path "
+            "before parsing; values are written into os.environ so the worker "
+            "and any subprocess it spawns share the same configuration."
+        ),
+    )
     args = parser.parse_args(argv)
+    # K01: load the same runtime config the API uses so both processes see
+    # one resolved view. ``apply_to_environ`` only fills in MISSING keys,
+    # so a process env override still wins (matches the documented rule).
+    from bio_pdf.runtime_config import apply_to_environ, load_runtime_config
+
+    runtime_config = load_runtime_config(env_file=args.env_file)
+    apply_to_environ(runtime_config)
     sys.exit(run_worker(args.data_dir, poll_interval=args.poll_interval, once=args.once))
 
 

@@ -35,22 +35,33 @@ def _now() -> str:
 
 
 def _side_engine(engine: str, source_path: Path, request: Any) -> Any:
-    """Resolve the adapter for one side (patchable in tests)."""
+    """Resolve the adapter for one side (patchable in tests).
+
+    K01: the MinerU token is read through the unified runtime config
+    (installed at API startup; falls back to ``os.environ`` for tests
+    that never went through ``load_runtime_config``). The fallback path
+    is intentional — it keeps the existing test contract where a fixture
+    monkeypatches ``MONKEYPATCH_MINERU_TOKEN`` directly.
+    """
 
     if engine in ("docling", "docling_sdk"):
         from bio_pdf.parsers.docling_adapter import DoclingAdapter
 
         return DoclingAdapter()
     if engine == "mineru_http":
-        import os
-
         from bio_pdf.parsers.mineru_adapter import MinerUAdapter
+        from bio_pdf.runtime_config import get_runtime_config
 
-        token = os.environ.get("MINERU_TOKEN", "")
+        token = get_runtime_config().mineru_token or ""
         if not token:
             raise WorkflowError(
                 "mineru_http requires MINERU_TOKEN; the cloud side is not runnable here",
-                details={"engine": engine, "code": "ENGINE_UNAVAILABLE"},
+                details={
+                    "engine": engine,
+                    "code": "ENGINE_NOT_CONFIGURED",
+                    "stage": "configure",
+                    "missing": ["MINERU_TOKEN"],
+                },
             )
         return MinerUAdapter(token=token)
     raise WorkflowError(f"unknown comparison engine: {engine}", details={"engine": engine})

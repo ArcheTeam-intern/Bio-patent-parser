@@ -57,3 +57,6 @@ models/
 *.key
 *.pem
 secrets/
+
+# ---- K01: keep the env-file template tracked, never the actual override ----
+!.env.example
