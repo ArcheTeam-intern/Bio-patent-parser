@@ -12,6 +12,12 @@ test binds exactly ITS OWN tree.
   it.
 - Every scenario runs beside unrelated processes (a multiprocessing child
   of the pytest process AND a subprocess) that must survive.
+
+K08 added a deterministic ready/release handshake so the budget test
+does not depend on Docling inference being slow enough to exceed the
+budget. The handshake is enabled by ``BIO_PDF_K08_HOLD_DIR``; without
+it the test falls back to the old behaviour (which is still useful as
+a smoke test for the process tree plumbing).
 """
 
 from __future__ import annotations
@@ -34,6 +40,11 @@ REPO = TESTS_DIR.parent
 sys.path.insert(0, str(TESTS_DIR))
 
 from helpers import proc_tree  # noqa: E402
+from helpers.docling_hold_bootstrap import (  # noqa: E402
+    install_hold_for_subprocess,
+    release_hold,
+    uninstall_hold,
+)
 
 ENGINE_ENTRY = "bio_pdf.parsers.docling_child"
 
@@ -97,6 +108,18 @@ def test_budget_timeout_terminates_only_the_registered_tree(tmp_path: Path) -> N
     from bio_pdf.application.comparison_service import ComparisonService
     from bio_pdf.storage.repository import Repository
 
+    # K08: enable the deterministic ready/release handshake so the
+    # budget test no longer depends on real Docling inference taking
+    # longer than the budget. The descendant writes READY when its
+    # real ``convert`` finishes and blocks on RELEASE; we advance the
+    # injected clock past the deadline while the descendant is held.
+    hold_dir = tmp_path / "h01_hold"
+    paths = install_hold_for_subprocess(hold_dir=hold_dir)
+    base = {"now": 1000.0}
+
+    def _clock() -> float:
+        return base["now"]
+
     unrelated_proc = _spawn_unrelated_subprocess()
     unrelated_mp = _own_mp_child_sleeping()
     pdf = _sample_pdf(tmp_path / "cmp.pdf")
@@ -107,6 +130,7 @@ def test_budget_timeout_terminates_only_the_registered_tree(tmp_path: Path) -> N
         lease_seconds=600.0,
         execution_budget_seconds=30.0,
         run_mode="process",
+        clock=_clock,
     )
     cid = svc.create(document_id="doc-j02", source_path=pdf, pages=[1], engines=["docling"])
     root_pid: int | None = None
@@ -117,11 +141,18 @@ def test_budget_timeout_terminates_only_the_registered_tree(tmp_path: Path) -> N
         root_pid = _wait_registered_root(cid, timeout=30.0)
         assert root_pid is not None, "the service never registered its execution root"
         assert root_pid != unrelated_mp.pid
-        matches = proc_tree.wait_for_engine_descendant(root_pid, ENGINE_ENTRY, timeout=60.0)
-        if not matches:
-            pytest.skip("the docling inference descendant never appeared in this environment")
-        grand_ids = [m.pid for m in matches]
-        assert unrelated_mp.pid not in grand_ids
+        # K08: wait for the docling grandchild to reach the held state.
+        ready_deadline = time.time() + 60.0
+        while time.time() < ready_deadline:
+            if paths["ready"].exists():
+                break
+            time.sleep(0.1)
+        assert paths["ready"].exists(), "descendant never reached the held state"
+        # Now advance the injected clock past the deadline. The
+        # watchdog will see ``now > deadline`` and terminate the tree.
+        base["now"] += 60.0
+        # Release the held grandchild so the orphan Pipe closes.
+        release_hold(hold_dir)
 
         deadline = time.time() + 90
         while time.time() < deadline:
@@ -137,6 +168,7 @@ def test_budget_timeout_terminates_only_the_registered_tree(tmp_path: Path) -> N
         assert proc_tree.pid_alive(unrelated_proc.pid), "the unrelated subprocess must survive"
         assert unrelated_mp.is_alive(), "the unrelated multiprocessing child must survive"
     finally:
+        uninstall_hold()
         if root_pid is not None and proc_tree.pid_alive(root_pid):
             proc_tree.kill_tree(root_pid)  # only OUR recorded root
         unrelated_proc.kill()

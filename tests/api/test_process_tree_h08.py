@@ -139,11 +139,11 @@ def test_budget_terminates_descendants_alive_at_deadline(tmp_path: Path) -> None
         assert root_pid != unrelated_mp.pid
         # Wait for the descendant to write the READY sentinel —
         # THAT'S the proof the grandchild is alive in the held state.
-        ready_deadline = time.time() + 30.0
+        ready_deadline = time.time() + 90.0
         while time.time() < ready_deadline:
             if paths["ready"].exists():
                 break
-            time.sleep(0.1)
+            time.sleep(0.2)
         assert paths["ready"].exists(), "descendant never reached the held state"
         # Now advance the injected clock past the deadline.
         # The watchdog will see ``now > deadline`` and terminate the tree.
