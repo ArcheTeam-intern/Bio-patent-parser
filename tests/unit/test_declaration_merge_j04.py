@@ -199,3 +199,119 @@ def test_multi_sequence_addendum_merges_per_declaration() -> None:
     assert (entries["1"]["declared_length"], entries["1"]["molecule_type"]) == (5, "protein"), entries
     assert (entries["2"]["declared_length"], entries["2"]["molecule_type"]) == (3, "DNA"), entries
     assert inventory["summary"]["observed_declarations"] == 2, inventory["summary"]
+
+
+# ---- K05: many OCR lines at the same mention form ONE logical declaration ---
+
+
+def test_multi_ocr_lines_at_one_mention_merge_into_single_declaration() -> None:
+    """Two OCR lines that BOTH share the same native mention must form
+    ONE logical declaration, not two — the second <210> in a feed
+    otherwise restarts the ST.25 parser and the first line's fields
+    (e.g. <211>) are dropped, leaving a pseudo-conflict and a missing
+    declaration length."""
+
+    # Native block has only <210> 1 <211> 5; OCR adds <212> PRT and
+    # <213> Homo sapiens on the same mention in TWO separate OCR lines.
+    blocks = [
+        _native("<210> 1 <211> 5", _BOX),
+        _native("<400> 1", [10.0, 120.0, 110.0, 130.0]),
+        _native("Ala Gly Leu Lys Val", [10.0, 140.0, 300.0, 150.0]),
+    ]
+    merged, records, summary = (
+        _merge_ocr_page_lines(
+            blocks,
+            {
+                1: [
+                    (10.0, 100.0, 110.0, 110.0, "<210> 1 <212> PRT"),
+                    (10.0, 100.0, 110.0, 110.0, "<213> Homo sapiens"),
+                ],
+            },
+        )[0],
+        None,
+        None,
+    )
+    # K05 re-check: re-run the full domain chain through the merged feed.
+    blocks_for_feed = [
+        {
+            "text": str(b.get("text") or ""),
+            "kind": "text",
+            "semantic_role": "unknown",
+            "page_number": 1,
+            "bbox": b.get("bbox"),
+            "block_id": str(b.get("block_id") or "b"),
+            "source_refs": [],
+            "source_aliases": [],
+            "source_parser": str(b.get("source_parser") or "native"),
+            "source_artifact_id": None,
+        }
+        for b in merged
+    ]
+    normalized = {
+        "schema_version": "1.0",
+        "document_id": "sha256:k05",
+        "parser_run_id": "stub:engine",
+        "pages": [
+            {
+                "page_number": 1,
+                "width_pt": 595.0,
+                "height_pt": 842.0,
+                "route": "native",
+                "blocks": [
+                    {
+                        "block_id": str(b.get("block_id")),
+                        "kind": "text",
+                        "semantic_role": "unknown",
+                        "text_raw": str(b.get("text") or ""),
+                        "bbox": b.get("bbox"),
+                    }
+                    for b in blocks_for_feed
+                ],
+                "tables": [],
+                "figures": [],
+            }
+        ],
+        "errors": [],
+    }
+    summary = _domain_pass_spec(
+        normalized, document_id="sha256:k05", engine="docling"
+    )
+    sequences = summary["sequences"]
+    # Exactly ONE declaration — not two pseudo-declarations with the
+    # second restarting the parser.
+    assert len(sequences) == 1, sequences
+    record = sequences[0]
+    assert record["declared_length"] == 5, record
+    assert record["molecule_type"] == "protein", record
+    assert record["observed_length"] == 5, record
+    # Inventory must report a single complete declaration, not two with
+    # a fake conflict.
+    inv = summary["inventory_summary"]
+    assert inv["observed_declarations"] == 1, inv
+    assert inv["conflict"] == 0, inv
+
+
+def test_multi_ocr_lines_with_real_conflict_record_one_conflict_per_line() -> None:
+    """Two OCR lines at the same mention, ONE conflicts with the native
+    value: exactly one ``content_conflict`` record per OCR line that
+    disagrees (no silent supersede, no false merge)."""
+
+    blocks = [
+        _native("<210> 1 <211> 5", _BOX),
+    ]
+    # Single OCR pass — two OCR lines that share the same mention.
+    merged, records = _merge_ocr_page_lines(
+        blocks,
+        {
+            1: [
+                (10.0, 100.0, 110.0, 110.0, "<210> 1 <211> 5"),  # equal
+                (10.0, 100.0, 110.0, 110.0, "<210> 1 <211> 50"),  # conflict
+            ],
+        },
+    )
+    conflicts = [r for r in records if r.get("kind") == "content_conflict"]
+    assert len(conflicts) == 1, records
+    assert "50" in conflicts[0]["ocr_text"]
+    # Native stays in the feed — never silently consumed.
+    texts = [str(b.get("text") or "") for b in merged]
+    assert "<210> 1 <211> 5" in texts

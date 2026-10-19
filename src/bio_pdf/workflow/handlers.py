@@ -955,6 +955,8 @@ def _merge_ocr_page_lines(
     #: the native artifact keeps every byte).
     superseded: set[int] = set()
 
+    from bio_pdf.extract.sequences.declaration_merge import merge_group
+
     for page, lines in ocr_lines.items():
         natives = [
             (
@@ -979,18 +981,151 @@ def _merge_ocr_page_lines(
             if kind == "block"
         ]
         kept: list[tuple[float, int, str, Any]] = []
+        # K05: pre-group OCR lines by the native mention they overlap.
+        # Two OCR lines that fall on the same native block now form a
+        # SINGLE declaration instead of restarting the ST.25 parser
+        # twice and producing duplicate <210> entries.
+        #: item_index (or -1 for no-overlap) -> list of (order, x0,y0,x1,y1, text)
+        ocr_groups: dict[int, list[tuple[int, float, float, float, float, str]]] = {}
+        #: also keep order index -> bbox/text for the loose-fingerprint
+        #: path (tag-free OCR lines that don't share a native mention).
+        ungrouped_ocr: list[tuple[int, float, float, float, float, str]] = []
         for order, (x0, y0, x1, y1, text) in enumerate(lines):
+            fp = fingerprint(text)
+            if letter_len(fp) < 2:
+                continue
+            overlapping_indexes = [
+                item_index
+                for item_index, n_box, n_fp, _nl, _nt, _t, _b in natives
+                if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
+            ]
+            if overlapping_indexes:
+                key = overlapping_indexes[0]
+                ocr_groups.setdefault(key, []).append((order, x0, y0, x1, y1, text))
+            else:
+                ungrouped_ocr.append((order, x0, y0, x1, y1, text))
+        # Process each group once: a single declaration merge drives
+        # BOTH the kept line and the audit record.
+        for item_index, group_lines in ocr_groups.items():
+            # Resolve the native block: first entry of natives with that index.
+            native_match = next(
+                (n for n in natives if n[0] == item_index), None
+            )
+            if native_match is None:
+                continue
+            _ni, _nbox, _nfp, _nl, _ntagged, n_text, n_block_id = native_match
+            ocr_texts = [t for _o, _x0, _y0, _x1, _y1, t in group_lines]
+            # K05: collate native + ALL OCR lines for this mention into
+            # ONE logical declaration. Verdict / conflict flag / field
+            # provenance come from the same module — never duplicated.
+            group = merge_group(
+                native_text=n_text,
+                native_block_id=n_block_id,
+                ocr_texts=ocr_texts,
+            )
+            # x/y bbox = union of the native box and the OCR boxes (we
+            # keep the FIRST OCR bbox for the audit; subsequent OCR
+            # lines are documented in ``ocr_texts``).
+            ox0, oy0, ox1, oy1, _t = (
+                group_lines[0][1],
+                group_lines[0][2],
+                group_lines[0][3],
+                group_lines[0][4],
+                group_lines[0][5],
+            )
+            # Tag-free text (no ST.25 tags on either side): fall
+            # through to the legacy containment / equality / conflict
+            # paths via the ungrouped loop. ``merge_group`` only models
+            # tagged declarations; ordinary paragraph containment is
+            # still decided by the legacy fingerprint rules below.
+            if group.verdict == "incomparable":
+                ungrouped_ocr.extend(group_lines)
+                continue
+            # First OCR line's fingerprint drives the early-out below.
+            if group.verdict in ("equal", "native_superset"):
+                continue  # retained native already carries every field
+            if group.verdict == "ocr_superset" and len(ocr_texts) == 1:
+                # Single-line case keeps the old coverage_supersede path
+                # so downstream record consumers see the same shape.
+                superseded.add(item_index)
+                records.append(
+                    {
+                        "kind": "coverage_supersede",
+                        "page_number": page,
+                        "x0": float(round(ox0, 1)),
+                        "y_top": float(round(oy0, 1)),
+                        "x1": float(round(ox1, 1)),
+                        "y_bottom": float(round(oy1, 1)),
+                        "native_text": n_text,
+                        "ocr_text": ocr_texts[0],
+                        "native_block_id": n_block_id,
+                        "reason": (
+                            "OCR superset: the OCR line carries every native "
+                            "tag plus additional fields; the complete line "
+                            "replaces the short fragment in the feed"
+                        ),
+                    }
+                )
+                kept.append(
+                    (oy0, group_lines[0][0], "ocr",
+                     (ox0, oy0, ox1, oy1, ocr_texts[0],
+                      [{"text": n_text, "block_id": n_block_id,
+                        "fingerprint": fingerprint(n_text)}]))
+                )
+                continue
+            if group.conflict:
+                # K05: a conflict inside the group keeps the native line
+                # in the feed (no false supersede) and emits ONE
+                # content_conflict record per OCR line that disagrees
+                # on a shared tag value — the SOURCE_CONFLICT pipeline
+                # depends on this exact kind so existing audits keep
+                # working unchanged. ``conflicting_ocr`` lists only the
+                # offending OCR lines (not the equal ones).
+                for ocr_line in group.conflicting_ocr:
+                    records.append(
+                        {
+                            "kind": "content_conflict",
+                            "page_number": page,
+                            "x0": float(round(ox0, 1)),
+                            "y_top": float(round(oy0, 1)),
+                            "x1": float(round(ox1, 1)),
+                            "y_bottom": float(round(oy1, 1)),
+                            "native_text": n_text,
+                            "ocr_text": ocr_line,
+                        }
+                    )
+                continue
+            # Addendum / mixed verdict with no conflict: ONE merged
+            # declaration line replaces the native + all OCR lines.
+            superseded.add(item_index)
+            records.append(
+                group.to_record(page_number=page, bbox=(ox0, oy0, ox1, oy1))
+            )
+            merge_aliases = (
+                [{"kind": "declaration_merge_native", "text": n_text}]
+                + [
+                    {"kind": "declaration_merge_ocr", "text": t}
+                    for t in ocr_texts
+                ]
+            )
+            kept.append(
+                (oy0, group_lines[0][0], "ocr",
+                 (ox0, oy0, ox1, oy1, group.merged_text, merge_aliases))
+            )
+        # Process the ungrouped (no-overlap) OCR lines through the
+        # legacy paths so tag-free prose + equals + conflicts still
+        # work for lines that have no native mention.
+        for order, x0, y0, x1, y1, text in ungrouped_ocr:
             fp = fingerprint(text)
             ocr_loose = loose_fingerprint(text)
             ocr_tagged = tag_declarations(text) is not None
             if letter_len(fp) < 2:
                 continue
             overlapping = [
-                (item_index, n_fp, n_loose, n_tagged, n_text, n_block_id)
-                for item_index, n_box, n_fp, n_loose, n_tagged, n_text, n_block_id in natives
+                (n_item_index, n_fp, n_loose, n_tagged, n_text, n_block_id)
+                for n_item_index, n_box, n_fp, n_loose, n_tagged, n_text, n_block_id in natives
                 if n_fp and n_box is not None and _same_mention(n_box, (x0, y0, x1, y1))
             ]
-            # Exact (digit-preserving) equality merges — tags included.
             merge_equal = any(n_fp == fp for _i, n_fp, _nl, _nt, _t, _b in overlapping)
             if ocr_tagged:
                 # I05/P01: declaration lines are compared FIELD BY FIELD.
