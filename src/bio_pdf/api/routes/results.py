@@ -108,6 +108,7 @@ def get_records(
         },
         table_pages=_table_pages(service, job_id),
         sequence_inventory=_sequence_inventory(service, job_id),
+        sequence_links=_sequence_links(service, job_id),
         entities=entities,
         relations=relations,
         relation_summary=relation_summary,
@@ -161,6 +162,21 @@ def _sequence_inventory(service, job_id: str) -> dict[str, Any] | None:
         return None
     value = data.get("sequence_inventory")
     return value if isinstance(value, dict) else None
+
+
+def _sequence_links(service, job_id: str) -> dict[str, Any]:
+    """Candidate entity → SEQ ID links from the extract artifact.
+
+    Empty for jobs extracted before the links existed, and empty when the
+    document never states a relation — the UI must not imply coverage it
+    does not have.
+    """
+
+    data = _read_result_or_409(service, job_id, "extract")
+    if data is None:
+        return {}
+    value = data.get("sequence_links")
+    return value if isinstance(value, dict) else {}
 
 
 

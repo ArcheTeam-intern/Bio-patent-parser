@@ -126,6 +126,30 @@ export interface RecordsResponse {
   record_pages: Record<string, number[]>;
   table_pages: Record<string, number>;
   sequence_inventory?: SequenceInventory | null;
+  /** 候选的「活性实体 → SEQ ID」关联（来自正文，需人工确认）。 */
+  sequence_links?: {
+    candidates?: {
+      entity_raw: string;
+      entity_token: string;
+      seq_id_no: string;
+      match_kind: "family" | "exact";
+      matched_chain: string;
+      page_number: number | null;
+      block_id: string;
+      source_text: string;
+      status: "candidate";
+    }[];
+    statements?: {
+      chain: string;
+      seq_id_no: string;
+      match_kind: "family" | "exact";
+      page_number: number | null;
+      block_id: string;
+      source_text: string;
+    }[];
+    note?: string;
+    error?: string;
+  };
   /** C04 实体与关系（证据 id 可经 /evidence 解析）。 */
   entities?: EntityData[];
   relations?: RelationData[];

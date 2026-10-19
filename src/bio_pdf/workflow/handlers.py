@@ -1500,6 +1500,28 @@ def _page_blocks(
     return blocks
 
 
+def _sequence_links_for(
+    blocks: list[dict[str, Any]], measurements: list[Any]
+) -> dict[str, Any]:
+    """Candidate entity → SEQ ID links from the document prose.
+
+    Wrapped so a parser problem can never break the extract stage: a
+    missing link set is reported as empty, not as a failed job.
+    """
+
+    try:
+        from bio_pdf.extract.sequences.links import extract_sequence_links
+
+        return extract_sequence_links(blocks, measurements)
+    except Exception as exc:  # noqa: BLE001 — links are advisory
+        return {
+            "candidates": [],
+            "statements": [],
+            "error": f"{type(exc).__name__}: {exc}"[:200],
+            "note": "candidate-link extraction failed; activity records are unaffected",
+        }
+
+
 def _table_rows(document: NormalizedDocument) -> list[tuple[Any, dict[str, str]]]:
     """Yield (table, cell_id→evidence_id) pairs for every table."""
 
@@ -2435,6 +2457,10 @@ class ExtractStage(_FileStage):
             "schema_version": "1.1.0",
             "document_id": doc_id,
             "parser_run_id": parser_run_id,
+            # Sequence ↔ activity CANDIDATES parsed from the prose
+            # ("Chain 100 defined by SEQ ID NO: 4"). Never written into
+            # Measurement.sequence_ids: a wrong link is worse than none.
+            "sequence_links": _sequence_links_for(blocks, measurements),
             "sequences": [json.loads(s.model_dump_json()) for s in sequences],
             "measurements": [json.loads(m.model_dump_json()) for m in measurements],
             "entities": [json.loads(e.model_dump_json()) for e in entities],

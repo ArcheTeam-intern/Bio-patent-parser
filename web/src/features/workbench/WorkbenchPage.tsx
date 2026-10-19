@@ -354,13 +354,35 @@ export function WorkbenchPage() {
               </>
             )}
             {tab === "activities" && records.data && (
-              <ActivityTab
-                records={visibleMeasurements}
-                emptyMessage={scope === "page" ? `第 ${currentPage} 页没有活性候选。可切换“全部文档”查看其他页。` : "全文尚未提取到活性候选。"}
-                selectedId={recordId}
-                onSelect={(m: MeasurementData) => selectRecord(m.measurement_id)}
-                loading={records.isLoading}
-              />
+              <>
+                {(records.data.sequence_links?.candidates?.length ?? 0) > 0 && (
+                  <div className="wb-hint" style={{ padding: "4px 14px" }}>
+                    <strong>序列关联候选（待人工确认）</strong>
+                    ：
+                    {records.data.sequence_links!.candidates!.slice(0, 8).map((c) => (
+                      <span key={`${c.entity_raw}-${c.seq_id_no}`} className="pd-chip meas" style={{ marginLeft: 4 }}
+                        title={c.source_text ?? ""}>
+                        {c.entity_raw} → SEQ {c.seq_id_no}
+                        {c.match_kind === "family" ? `（Chain ${c.matched_chain} 家族）` : ""}
+                      </span>
+                    ))}
+                    {(records.data.sequence_links!.candidates!.length ?? 0) > 8 && (
+                      <span className="dim"> 等 {records.data.sequence_links!.candidates!.length} 条</span>
+                    )}
+                    <div className="dim" style={{ marginTop: 4 }}>
+                      {records.data.sequence_links!.note ??
+                        "来自正文陈述的候选关联，尚未写入记录；需人工确认后才视为对应关系。"}
+                    </div>
+                  </div>
+                )}
+                <ActivityTab
+                  records={visibleMeasurements}
+                  emptyMessage={scope === "page" ? `第 ${currentPage} 页没有活性候选。可切换“全部文档”查看其他页。` : "全文尚未提取到活性候选。"}
+                  selectedId={recordId}
+                  onSelect={(m: MeasurementData) => selectRecord(m.measurement_id)}
+                  loading={records.isLoading}
+                />
+              </>
             )}
             {tab === "tables" && (
               <TablesTab jobId={jobId} pageNumber={currentPage} />
