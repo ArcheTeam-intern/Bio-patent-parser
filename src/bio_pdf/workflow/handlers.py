@@ -1098,12 +1098,6 @@ def _merge_ocr_page_lines(
                 }
                 for f in group.fields
             ]
-            group_record = group.to_record(
-                page_number=page, bbox=(ox0, oy0, ox1, oy1)
-            )
-            group_record["fields"] = enriched_fields
-            group_record["native_block_id"] = n_block_id
-            declaration_merges.append(group_record)
             # Tag-free text (no ST.25 tags on either side): fall
             # through to the legacy containment / equality / conflict
             # paths via the ungrouped loop. ``merge_group`` only models
@@ -1112,6 +1106,16 @@ def _merge_ocr_page_lines(
             if group.verdict == "incomparable":
                 ungrouped_ocr.extend(group_lines)
                 continue
+            # K06: the sidecar lists LOGICAL DECLARATION merges only. An
+            # untagged mention is ordinary merged text (the legacy paths
+            # below decide it) and must not masquerade as a declaration
+            # with zero fields.
+            group_record = group.to_record(
+                page_number=page, bbox=(ox0, oy0, ox1, oy1)
+            )
+            group_record["fields"] = enriched_fields
+            group_record["native_block_id"] = n_block_id
+            declaration_merges.append(group_record)
             # First OCR line's fingerprint drives the early-out below.
             if group.verdict in ("equal", "native_superset"):
                 continue  # retained native already carries every field

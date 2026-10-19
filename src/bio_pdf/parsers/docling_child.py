@@ -16,6 +16,86 @@ from bio_pdf.parsers.docling_adapter import _DOCLING_CHILD_REQUEST_ENV, _build_c
 from bio_pdf.parsers.normalize_docling import normalize_docling_document
 
 
+#: Docling item collections that carry a ``self_ref``.
+_REF_KEYS = ("texts", "tables", "pictures")
+
+
+def _merge_run_documents(
+    run_documents: list[dict],
+    *,
+    requested: set[int],
+) -> dict:
+    """Merge per-run Docling 2.x documents into ONE document.
+
+    Why the renumbering: every per-run export numbers its items from
+    ``#/texts/0``. Concatenating three runs produced three items with the
+    SAME ``self_ref`` but different provenance/content, which the
+    normalizer correctly refuses with ``NORMALIZATION_ID_COLLISION``
+    (the sparse-page patent run hit exactly this). Each merged item gets a
+    fresh global ``self_ref`` and every ``captions``/``footnotes`` reference
+    is rewritten through the SAME run's map — a ref never points across
+    runs.
+    """
+
+    merged: dict[str, list[dict]] = {key: [] for key in _REF_KEYS}
+    sizes: dict[str, dict] = {}
+    for raw_document in run_documents:
+        pages_field = raw_document.get("pages") or {}
+        if isinstance(pages_field, dict):
+            for key, value in pages_field.items():
+                sizes[key] = value
+
+        #: old self_ref → new self_ref, scoped to THIS run (Docling refs
+        #: are document-local, so two runs legitimately reuse the names).
+        run_refs: dict[str, str] = {}
+        run_items: dict[str, list[dict]] = {key: [] for key in _REF_KEYS}
+        for key in _REF_KEYS:
+            for item in raw_document.get(key, []) or []:
+                if not isinstance(item, dict):
+                    continue
+                # Keep only items whose provenance points at a requested page.
+                prov_pages = {
+                    int(p.get("page_no"))
+                    for p in (item.get("prov") or [])
+                    if isinstance(p, dict) and p.get("page_no") is not None
+                }
+                if prov_pages and not (prov_pages & requested):
+                    continue
+                old_ref = str(item.get("self_ref") or "")
+                # ``merged`` only grows at the END of the run, so the
+                # post-run offset is the current merged length PLUS the
+                # items already staged for THIS run.
+                new_ref = f"#/{key}/{len(merged[key]) + len(run_items[key])}"
+                if old_ref:
+                    run_refs[old_ref] = new_ref
+                run_items[key].append({**item, "self_ref": new_ref})
+
+        # Rewrite intra-run references AFTER the whole run is indexed.
+        for key in _REF_KEYS:
+            for item in run_items[key]:
+                for field in ("captions", "footnotes"):
+                    refs = item.get(field)
+                    if not isinstance(refs, list):
+                        continue
+                    rewritten: list = []
+                    for ref in refs:
+                        if isinstance(ref, dict) and ref.get("$ref"):
+                            rewritten.append(
+                                {**ref, "$ref": run_refs.get(str(ref["$ref"]), str(ref["$ref"]))}
+                            )
+                        else:
+                            rewritten.append(ref)
+                    item[field] = rewritten
+            merged[key].extend(run_items[key])
+
+    return {
+        "pages": sizes,
+        "texts": merged["texts"],
+        "tables": merged["tables"],
+        "pictures": merged["pictures"],
+    }
+
+
 def main() -> None:
     payload_path = os.environ.get(_DOCLING_CHILD_REQUEST_ENV)
     if not payload_path:
@@ -32,10 +112,7 @@ def main() -> None:
 
     requested = sorted(set(request["page_numbers"]))
     runs = contiguous_runs(requested)
-    merged_texts: list[dict] = []
-    merged_tables: list[dict] = []
-    merged_pictures: list[dict] = []
-    sizes: dict[str, dict] = {}
+    run_documents: list[dict] = []
 
     for start, end in runs:
         result = converter.convert(
@@ -51,35 +128,9 @@ def main() -> None:
             legacy_path = Path(request["raw_path"]).with_suffix(f".r{start}-{end}.docling.json")
             result.document.save_as_json(str(legacy_path))
             raw_document = json.loads(legacy_path.read_text(encoding="utf-8"))
+        run_documents.append(raw_document)
 
-        pages_field = raw_document.get("pages") or {}
-        if isinstance(pages_field, dict):
-            for key, value in pages_field.items():
-                sizes[key] = value
-        for key in ("texts", "tables", "pictures"):
-            for item in raw_document.get(key, []) or []:
-                # Keep only items whose provenance points at a requested page.
-                prov_pages = {
-                    int(p.get("page_no"))
-                    for p in (item.get("prov") or [])
-                    if p.get("page_no") is not None
-                }
-                if prov_pages and not (prov_pages & set(requested)):
-                    continue
-                if key == "texts":
-                    merged_texts.append(item)
-                elif key == "tables":
-                    merged_tables.append(item)
-                else:
-                    merged_pictures.append(item)
-
-    combined = {
-        "pages": sizes,
-        "texts": merged_texts,
-        "tables": merged_tables,
-        "pictures": merged_pictures,
-    }
-    raw_document = combined
+    raw_document = _merge_run_documents(run_documents, requested=set(requested))
 
     # The upstream Docling document JSON is the *raw* artifact; it must not
     # be presented to consumers as our normalised contract.

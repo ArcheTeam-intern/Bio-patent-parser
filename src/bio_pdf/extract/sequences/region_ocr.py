@@ -18,15 +18,24 @@ the first pass, and at most the configured region budget.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 #: Render DPI for the OCR pass — small listing fonts need the detail.
 _REGION_DPI = 300
 
-#: ST.25 tag lines are already in the native text layer; OCR copies would
-#: duplicate declarations. Dropped from the OCR feed.
-_TAG_LINE_RE = re.compile(r"^\s*<\s*\d{3}\s*>")
+#: ST.25 tag lines are KEPT in the OCR feed (K05 fix).
+#:
+#: The old rule dropped them because "they are already in the native text
+#: layer" — but a listing page can carry a PARTIAL declaration (``<210> 1``
+#: and ``<211> 549`` present, ``<212>`` missing) while the OCR pass reads
+#: the complete line. Dropping the tag line made that recovery impossible:
+#: the multi-line declaration merge (K05) could never fire in production,
+#: only in tests that injected OCR lines directly.
+#:
+#: Duplicate safety lives DOWNSTREAM in ``_merge_ocr_page_lines``: an OCR
+#: line whose fingerprint equals the native one is dropped, complementary
+#: fields merge into ONE logical declaration, and a value disagreement is
+#: recorded as ``content_conflict`` instead of silently picking a side.
 
 #: Bounded guard against a runaway OCR page (the listing pages in the corpus
 #: produce a few hundred lines at most).
@@ -43,7 +52,8 @@ def ocr_residue_pages(
     the FULL 2D box of each line in PDF points with a top-left origin — the
     same space the block bboxes use, so callers can (a) interleave OCR lines
     into reading order and (b) decide SAME-PHYSICAL-MENTION overlap on both
-    axes (E5: a y-overlap alone confuses columns). Tag-like lines dropped.
+    axes (E5: a y-overlap alone confuses columns). ST.25 tag lines are KEPT
+    so a partial native declaration can be completed (K05).
     """
 
     import numpy as np
@@ -65,7 +75,7 @@ def ocr_residue_pages(
             boxes = result.boxes if result.boxes is not None else []
             lines: list[tuple[float, float, float, float, str]] = []
             for box, text in zip(boxes, result.txts or ()):
-                if not text or not text.strip() or _TAG_LINE_RE.match(text):
+                if not text or not text.strip():
                     continue
                 xs = [float(point[0]) / scale for point in box]
                 ys = [float(point[1]) / scale for point in box]
