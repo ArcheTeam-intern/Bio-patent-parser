@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from bio_pdf.api.contracts import API_VERSION, CapabilitiesResponse, EngineCapability
+from bio_pdf.api.contracts import API_VERSION, CapabilitiesResponse, EngineCapability, EngineUnavailableReason
 from bio_pdf.api.routes import comparisons, documents, exports, jobs, queue, results, reviews
 from bio_pdf.api.settings import ApiSettings
 from bio_pdf.application.job_service import JobPaths, JobService
@@ -76,9 +76,36 @@ async def _lifespan(app: FastAPI):
 
 
 def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:
+    """K02: capability surface reports the SAME view the API will use at
+    create / retry time — never hints that the cloud has been contacted.
+
+    The MinerU entry is built from the resolved :class:`RuntimeConfig`
+    (K01): ``configured`` reflects whether the token is present in
+    process env, ``available`` collapses runtime reachability (always
+    False when not configured; the cloud is never pinged from here).
+    """
+
     from bio_pdf.parsers.docling_adapter import docling_is_available
     from bio_pdf.parsers.ocr import ocr_availability
+    from bio_pdf.runtime_config import get_runtime_config
     from bio_pdf.validation.acceptance import POLICY_VERSION
+
+    runtime = get_runtime_config()
+    mineru_configured = runtime.mineru_configured()
+    mineru_reason = (
+        None
+        if mineru_configured
+        else EngineUnavailableReason(
+            code="ENGINE_NOT_CONFIGURED",
+            stage="configure",
+            retryable=False,
+            missing=["MINERU_TOKEN"],
+            message=(
+                "API 服务尚未配置 MinerU 凭据；"
+                "通过 --env-file 或 MINERU_TOKEN 环境变量提供后重启服务即可启用"
+            ),
+        )
+    )
 
     engines = [
         EngineCapability(
@@ -88,6 +115,7 @@ def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:
             supports_ocr=False,
             supports_page_range=True,
             sends_bytes_offsite=False,
+            configured=True,
         ),
         EngineCapability(
             name="docling_sdk",
@@ -98,14 +126,25 @@ def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:
             sends_bytes_offsite=False,
             ocr_available=any(ocr_availability().values()),
             ocr_engines=ocr_availability(),
+            configured=docling_is_available(),
         ),
+        # K02: the canonical name is ``mineru_http``; ``mineru`` is kept
+        # as an alias so older UI strings still resolve. The engine is
+        # ``comparison-only`` here (no standalone job role) and the
+        # configured state is the only signal a UI needs to gate the
+        # create/retry buttons.
         EngineCapability(
-            name="mineru",
-            available=False,  # comparison experiments only; requires token
+            name="mineru_http",
+            aliases=["mineru"],
+            usage=["comparison"],
+            available=mineru_configured,
+            configured=mineru_configured,
             supports_tables=True,
             supports_ocr=True,
             supports_page_range=False,
             sends_bytes_offsite=True,
+            credential_validation="not_checked",
+            unavailable_reason=mineru_reason,
         ),
     ]
     return CapabilitiesResponse(
@@ -119,6 +158,19 @@ def _capabilities(settings: ApiSettings) -> CapabilitiesResponse:
 
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
     settings = settings or ApiSettings.from_env()
+
+    # K01+K02: resolve the runtime config at app construction so every
+    # capability read, create and retry path sees the same configured
+    # view. ``apply_to_environ`` mirrors resolved defaults into the
+    # process env without overwriting a process-env override, so a
+    # supervised comparison child inherits the same MinerU token (or
+    # the same absence of it). The CLI ``serve`` command already runs
+    # the same loader with an explicit ``--env-file``; we still call it
+    # here so programmatic API construction (tests, scripts) picks up
+    # whatever the process env already has.
+    from bio_pdf.runtime_config import apply_to_environ, load_runtime_config
+
+    apply_to_environ(load_runtime_config(env_file=getattr(settings, "env_file", None)))
 
     app = FastAPI(
         title="Bio PDF Workbench API",

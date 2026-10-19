@@ -572,6 +572,13 @@ class ComparisonService:
                     # E2: execution lifecycle visibility for the UI/tests.
                     "attempt": int(sr["attempt"]) if "attempt" in sr.keys() else 0,
                     "lease_until": (sr["lease_until"] if "lease_until" in sr.keys() else None),
+                    # K02: structured failure info; absent for legacy rows
+                    # and for successful / running sides.
+                    "error_info": (
+                        json.loads(sr["error_info"])
+                        if sr["error_info"]
+                        else None
+                    ) if "error_info" in sr.keys() else None,
                 }
                 for sr in side_rows
             ]
@@ -672,22 +679,45 @@ class ComparisonService:
         summary_json: str = "{}",
         artifact_dir: str | None = None,
         error: str | None = None,
+        error_info: dict[str, Any] | None = None,
     ) -> bool:
         """Fenced completion write (E2): succeeds only while this attempt
         still owns the lease. A stale attempt (its lease was taken over by
         a recovering worker) MUST NOT publish — returns False and its
-        artifacts remain as forensic records under its own attempt dir."""
+        artifacts remain as forensic records under its own attempt dir.
+
+        K02: ``error_info`` is a JSON-serialisable structured failure
+        (engine/code/stage/retryable/message/attempt + batch_id /
+        generation when a remote identity is known). It travels alongside
+        the legacy human-readable ``error`` string so old UIs and the
+        new capability-aware UI both render the same row.
+        """
 
         conn = self._connect()
         try:
+            error_info_json = (
+                json.dumps(error_info, ensure_ascii=False, sort_keys=True)
+                if error_info
+                else None
+            )
             cur = conn.execute(
                 """
                 UPDATE comparison_sides
                 SET status = ?, summary_json = ?, artifact_dir = COALESCE(?, artifact_dir),
-                    error = ?, ended_at = ?, lease_until = NULL
+                    error = ?, error_info = ?, ended_at = ?, lease_until = NULL
                 WHERE comparison_id = ? AND side = ? AND lease_token = ?
                 """,
-                (status, summary_json, artifact_dir, error, _now(), comparison_id, side, lease_token),
+                (
+                    status,
+                    summary_json,
+                    artifact_dir,
+                    error,
+                    error_info_json,
+                    _now(),
+                    comparison_id,
+                    side,
+                    lease_token,
+                ),
             )
             conn.commit()
             return cur.rowcount == 1
@@ -823,7 +853,9 @@ class ComparisonService:
             if kind == "timeout":
                 # Budget expiry: renewals have stopped (heartbeat is off)
                 # and the unit is gone/fenced; the completion write makes
-                # the terminal state explicit exactly once.
+                # the terminal state explicit exactly once. K02: also
+                # persist a structured error_info so the UI can label
+                # this as ``stage=budget``, ``retryable=false``.
                 self._publish_side_result(
                     comparison_id,
                     engine,
@@ -834,10 +866,32 @@ class ComparisonService:
                         f"within {self.execution_budget_seconds:.0f}s; execution unit "
                         "terminated, remote identity kept for a later attempt"
                     )[:500],
+                    error_info={
+                        "engine": engine,
+                        "code": "EXECUTION_BUDGET_EXCEEDED",
+                        "stage": "budget",
+                        "retryable": False,
+                        "message": (
+                            f"side did not finish within "
+                            f"{self.execution_budget_seconds:.0f}s; "
+                            "execution unit terminated"
+                        ),
+                        "attempt": attempt,
+                    },
                 )
             elif error is not None:
                 self._publish_side_result(
-                    comparison_id, engine, lease_token, status="failed", error=error[:500]
+                    comparison_id,
+                    engine,
+                    lease_token,
+                    status="failed",
+                    error=error[:500],
+                    error_info=_structured_error_info(
+                        engine=engine,
+                        error_text=error,
+                        attempt=attempt,
+                        identity_path=remote_state_dir / "identity.json",
+                    ),
                 )
             else:
                 published = self._publish_side_result(
@@ -1236,7 +1290,101 @@ def _side_error_text(exc: BaseException) -> str:
         code = details.get("code")
         if code and code not in text:
             text = f"{text} [code={code}]"
+        stage = details.get("stage")
+        if stage and f"[stage={stage}]" not in text:
+            text = f"{text} [stage={stage}]"
     return text
+
+
+def _stage_from_error_text(error_text: str) -> str:
+    """Map a textual side error to one of the K02 stages.
+
+    No evidence → ``"unknown"``; the value is best-effort and never used
+    as proof that the engine actually reached the named step. The
+    explicit ``[stage=STAGE]`` suffix wins; otherwise the stage is
+    inferred from a priority-ordered substring scan.
+    """
+
+    if not error_text:
+        return "unknown"
+    if "[stage=" in error_text:
+        try:
+            tail = error_text.rsplit("[stage=", 1)[-1]
+            return tail.rsplit("]", 1)[0].strip() or "unknown"
+        except Exception:  # noqa: BLE001
+            pass
+    haystack = error_text.lower()
+    priority = (
+        "configure",
+        "allocate",
+        "upload",
+        "poll",
+        "download",
+        "normalize",
+        "domain",
+    )
+    for stage in priority:
+        if stage in haystack:
+            return stage
+    return "unknown"
+
+
+def _structured_error_info(
+    *,
+    engine: str,
+    error_text: str,
+    attempt: int,
+    identity_path: Path | None,
+) -> dict[str, Any]:
+    """Build the K02 ``error_info`` payload for a failed side.
+
+    ``error_text`` is the same human-readable string we persist in the
+    legacy ``error`` column; this helper lifts the structured fields
+    (engine/code/stage/retryable/message/attempt + batch_id/generation
+    when an identity file is present) without inventing them when there
+    is no evidence.
+    """
+
+    details: dict[str, Any] = {}
+    stage = _stage_from_error_text(error_text)
+    # Recover the structured fields emitted by the adapter's WorkflowError.
+    # The error text format is ``"Type: message [code=CODE] [stage=STAGE]"``;
+    # we lift the bracketed code and message back into the payload.
+    code = "ENGINE_UNAVAILABLE"
+    if "[code=" in (error_text or ""):
+        try:
+            tail = error_text.rsplit("[code=", 1)[-1]
+            # Split on the FIRST ``]`` after the bracket so the ``[stage=...]``
+            # suffix that follows is excluded.
+            code = tail.split("]", 1)[0].strip() or code
+        except Exception:  # noqa: BLE001 — never raise from error serialization
+            code = "ENGINE_UNAVAILABLE"
+    info: dict[str, Any] = {
+        "engine": engine,
+        "code": code,
+        "stage": stage,
+        # A side failure is retryable by default; the only non-retryable
+        # case in our domain is the configure-time "not configured"
+        # error, which the API pre-check rejects before any attempt is
+        # written. A timeout / network error / remote batch failure is
+        # retryable.
+        "retryable": code != "ENGINE_NOT_CONFIGURED",
+        "message": error_text[:300],
+        "attempt": attempt,
+    }
+    # Surface batch_id / generation when a remote identity exists.
+    if identity_path is not None and identity_path.is_file():
+        try:
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            if identity.get("batch_id"):
+                info["batch_id"] = str(identity["batch_id"])
+            if identity.get("generation") is not None:
+                info["generation"] = int(identity["generation"])
+        except Exception:  # noqa: BLE001 — identity file may be malformed
+            details["identity_read_failed"] = True
+    if details:
+        info["details"] = details
+    return info
 
 
 def _execute_side_spec(spec: dict[str, Any]) -> dict[str, Any]:

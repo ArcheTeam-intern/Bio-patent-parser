@@ -38,6 +38,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ---- types -------------------------------------------------------------
 
+export interface EngineUnavailableReason {
+  code: string;
+  stage: "configure" | "allocate" | "upload" | "poll" | "download" | "normalize" | "domain" | "unknown";
+  retryable: boolean;
+  message: string;
+  missing: string[];
+  batch_id?: string | null;
+  generation?: number | null;
+  attempt?: number | null;
+}
+
 export interface EngineCapability {
   name: string;
   available: boolean;
@@ -45,6 +56,14 @@ export interface EngineCapability {
   supports_ocr: boolean;
   supports_page_range: boolean;
   sends_bytes_offsite: boolean;
+  /** K02: alternative names callers may use. */
+  aliases: string[];
+  /** K02: lifecycle slots this engine can fill. */
+  usage: Array<"comparison" | "primary" | "adopt">;
+  /** K02: explicit configured state — credentials / settings present. */
+  configured: boolean;
+  credential_validation: "not_checked" | "valid" | "invalid";
+  unavailable_reason: EngineUnavailableReason | null;
 }
 
 export interface Capabilities {
@@ -402,6 +421,17 @@ export function submitBatchDecisions(
 
 // ---- C11/D07 comparisons -------------------------------------------------
 
+export interface ComparisonSideErrorInfo {
+  engine: string;
+  code: string;
+  stage: "configure" | "allocate" | "upload" | "poll" | "download" | "normalize" | "domain" | "budget" | "unknown";
+  retryable: boolean;
+  message: string;
+  attempt: number;
+  batch_id?: string | null;
+  generation?: number | null;
+}
+
 export interface ComparisonSide {
   side: string;
   status: "queued" | "running" | "done" | "failed";
@@ -410,6 +440,10 @@ export interface ComparisonSide {
   summary: Record<string, unknown>;
   started_at: string | null;
   ended_at: string | null;
+  attempt: number;
+  lease_until: string | null;
+  /** K02: structured failure info (engine/code/stage/retryable/...). */
+  error_info: ComparisonSideErrorInfo | null;
 }
 
 export interface ComparisonInfo {

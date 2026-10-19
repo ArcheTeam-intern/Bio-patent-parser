@@ -34,6 +34,36 @@ class ErrorResponse(ApiEnvelope):
     error: ErrorBody
 
 
+class EngineUnavailableReason(BaseModel):
+    """K02: structured explanation of why an engine is not runnable here.
+
+    The previous surface only returned ``available: bool`` — callers had
+    no actionable difference between "engine does not exist", "engine
+    not configured" and "engine failed the last call". The reason keeps
+    its contract small: a stable ``code`` (one of ENGINE_NOT_CONFIGURED,
+    ENGINE_UNAVAILABLE, ENGINE_PROTOCOL_UNSUPPORTED, ENGINE_TIMEOUT,
+    REMOTE_BATCH_FAILED, NETWORK_TRANSIENT, UPLOAD_SLOT_EXPIRED, …),
+    a ``stage`` (configure / allocate / upload / poll / download /
+    normalize / domain / unknown), a ``missing`` list of variables, and
+    a human ``message``.
+    """
+
+    code: str
+    stage: Literal[
+        "configure", "allocate", "upload", "poll",
+        "download", "normalize", "domain", "unknown",
+    ] = "unknown"
+    retryable: bool = False
+    message: str
+    missing: list[str] = Field(default_factory=list)
+    #: When the failure has an associated remote identity, carry the
+    #: batch / generation / attempt so the UI can show which cloud slot
+    #: the failure belongs to. Never the token.
+    batch_id: str | None = None
+    generation: int | None = None
+    attempt: int | None = None
+
+
 class EngineCapability(BaseModel):
     name: str
     available: bool
@@ -43,6 +73,27 @@ class EngineCapability(BaseModel):
     sends_bytes_offsite: bool
     ocr_available: bool = False
     ocr_engines: dict[str, bool] = Field(default_factory=dict)
+    #: K02: alternative engine names callers may use. ``mineru`` is kept
+    #: as an alias for ``mineru_http`` so existing UI strings do not
+    #: silently mis-target the wrong adapter.
+    aliases: list[str] = Field(default_factory=list)
+    #: K02: lifecycle slots this engine can fill.
+    usage: list[Literal["comparison", "primary", "adopt"]] = Field(
+        default_factory=lambda: ["primary"]
+    )
+    #: K02: explicit configured state — different from ``available``:
+    #  ``configured`` means "credentials / settings present in the
+    #  process environment", which is the only signal a UI can act on
+    #  without contacting the cloud. ``available`` folds in the runtime
+    #  reachability and is also computed without ever calling the cloud.
+    configured: bool = False
+    #: K02: "not_checked" because the capability endpoint NEVER probes
+    #: the cloud; "invalid" if a previous run returned 401/403 (cached
+    #: only, expires after restart).
+    credential_validation: Literal["not_checked", "valid", "invalid"] = "not_checked"
+    #: K02: structured unavailability reason, only set when ``available``
+    #: is False; ``None`` when the engine is fully runnable.
+    unavailable_reason: EngineUnavailableReason | None = None
 
 
 class CapabilitiesResponse(ApiEnvelope):
@@ -253,6 +304,7 @@ __all__ = [
     "ErrorResponse",
     "CapabilitiesResponse",
     "EngineCapability",
+    "EngineUnavailableReason",
     "SampleInfo",
     "SamplesResponse",
     "DocumentResponse",

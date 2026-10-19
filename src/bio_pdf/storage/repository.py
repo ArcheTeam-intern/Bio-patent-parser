@@ -265,6 +265,10 @@ CREATE TABLE IF NOT EXISTS comparison_sides (
     attempt       INTEGER NOT NULL DEFAULT 0,
     lease_token   TEXT,
     lease_until   TEXT,
+    -- K02: structured failure info; ``error`` remains the human
+    -- string. error_info is JSON; absent for legacy rows or for
+    -- an unrelated success.
+    error_info    TEXT,
     PRIMARY KEY (comparison_id, side)
 );
 """
@@ -369,6 +373,12 @@ def init_repository(
                 conn.execute("ALTER TABLE comparison_sides ADD COLUMN lease_token TEXT")
             if "lease_until" not in side_cols:
                 conn.execute("ALTER TABLE comparison_sides ADD COLUMN lease_until TEXT")
+            # K02: structured failure info — engine/code/stage/retryable/
+            # message/attempt (+ batch_id / generation when remote
+            # identity exists). The legacy ``error`` column stays as the
+            # human-readable string so existing UIs keep working.
+            if "error_info" not in side_cols:
+                conn.execute("ALTER TABLE comparison_sides ADD COLUMN error_info TEXT")
         # D09: real page/region references on issues (set at creation time).
         issue_cols = {
             row[1]

@@ -405,6 +405,7 @@ def serve_api(
         data_dir=data_dir,
         web_dist_dir=web_dist,
         cors_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        env_file=runtime_config.source.env_file and Path(runtime_config.source.env_file),
     )
     uvicorn.run(create_app(settings), host=host, port=port)
 

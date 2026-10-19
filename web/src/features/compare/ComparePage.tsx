@@ -2,23 +2,41 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   ComparisonInfo,
+  ComparisonSideErrorInfo,
+  EngineCapability,
   createComparison,
+  getCapabilities,
+  getComparison,
   getComparisonDiff,
   listComparisons,
   listJobs,
   retryComparison,
 } from "../../api/client";
+import { ApiError } from "../../api/client";
 
 /**
  * 解析器对比（C11/design §9）：同源同页 + 同一批领域规则才可比；
  * 实验与正式任务完全隔离（不写审核队列、不发基线）。没有人工 gold 时
  * 只显示覆盖与差异，绝不显示准确率或"最优引擎"结论。
+ *
+ * K02: capability is read first and gates create/retry buttons by
+ * ``configured``; ``error_info`` is the structured failure payload and
+ * drives the side-level banner. K03: details are fetched by ID, not
+ * snapshotted into local state — the list, the detail and the diff all
+ * read from the same query so a successful retry refreshes the panel
+ * without a second click.
  */
 
 const SIDE_LABELS: Record<string, string> = {
   docling: "Docling（本地）",
   mineru_http: "MinerU 云 API",
 };
+
+function describeSideError(info: ComparisonSideErrorInfo | null, fallback: string | null): string {
+  if (!info) return fallback ?? "";
+  const head = `[${info.code}] 阶段=${info.stage}` + (info.retryable ? "（可重试）" : "（不可重试）");
+  return info.message ? `${head}\n${info.message}` : head;
+}
 
 function DiffView({ comparisonId }: { comparisonId: string }) {
   const diff = useQuery({
@@ -106,10 +124,16 @@ function DiffView({ comparisonId }: { comparisonId: string }) {
 export function ComparePage() {
   const [documentId, setDocumentId] = useState("");
   const [pagesText, setPagesText] = useState("");
-  const [selected, setSelected] = useState<ComparisonInfo | null>(null);
+  // K03: selection is an ID; the detail is fetched from the same cache
+  // the list uses, so a retry refreshes the panel automatically.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const jobs = useQuery({ queryKey: ["jobs"], queryFn: listJobs });
+  const capabilities = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: getCapabilities,
+  });
   const comparisons = useQuery({
     queryKey: ["comparisons"],
     queryFn: listComparisons,
@@ -120,6 +144,28 @@ export function ComparePage() {
         ? 2000
         : false,
   });
+
+  // K02: every mining status (configured / unavailable reason) comes
+  // from the capability payload — a single round-trip replaces ad-hoc
+  // string matching on the side error text.
+  const mineruCapability: EngineCapability | undefined = capabilities.data?.engines.find(
+    (e) => e.name === "mineru_http",
+  );
+  const mineruConfigured = mineruCapability?.configured ?? false;
+  const mineruReason = mineruCapability?.unavailable_reason ?? null;
+
+  // K03: details come from a per-id query that polls while queued/running.
+  const selected = useQuery({
+    queryKey: ["comparison", selectedId],
+    queryFn: () => (selectedId ? getComparison(selectedId) : Promise.reject()),
+    enabled: Boolean(selectedId),
+    refetchInterval: (q) => {
+      const data = q.state.data as ComparisonInfo | undefined;
+      if (!data) return false;
+      if (data.status === "running" || data.status === "queued") return 2000;
+      return false;
+    },
+  }).data;
 
   const create = useMutation({
     mutationFn: () =>
@@ -132,16 +178,43 @@ export function ComparePage() {
         engines: ["docling", "mineru_http"],
       }),
     onSuccess: (info) => {
-      setSelected(info);
+      setSelectedId(info.comparison_id);
       queryClient.invalidateQueries({ queryKey: ["comparisons"] });
     },
   });
   const retry = useMutation({
     mutationFn: (id: string) => retryComparison(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["comparisons"] }),
+    onSuccess: (info) => {
+      // K03: refresh BOTH the list and the per-id detail so the panel
+      // updates without a second "查看" click.
+      queryClient.invalidateQueries({ queryKey: ["comparisons"] });
+      queryClient.invalidateQueries({ queryKey: ["comparison", info.comparison_id] });
+      queryClient.invalidateQueries({ queryKey: ["comparison-diff", info.comparison_id] });
+    },
   });
 
   const documents = [...new Map((jobs.data ?? []).map((j) => [j.document_id, j])).values()];
+
+  // K02: render the structured failure reason instead of the raw string.
+  const renderCreateError = () => {
+    if (!create.isError) return null;
+    const err = create.error;
+    if (err instanceof ApiError && err.code === "ENGINE_NOT_CONFIGURED") {
+      const detail = (err.details || {}) as { missing?: string[]; engine?: string };
+      return (
+        <div className="banner warn" style={{ marginTop: 8 }}>
+          MinerU 未配置：缺少
+          {(detail.missing ?? ["MINERU_TOKEN"]).join(", ")}；服务启动时需通过
+          <code>--env-file</code> 提供。已拒绝本次创建，未发起任何云端调用。
+        </div>
+      );
+    }
+    return (
+      <div className="banner error" style={{ marginTop: 8 }}>
+        创建失败：{err instanceof ApiError ? `[${err.code}] ${err.message}` : String(err)}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -149,6 +222,28 @@ export function ComparePage() {
       <div className="banner info">
         同源同页 + 同一批领域规则；实验与正式任务隔离（不写审核队列、不发基线）。
         MinerU 需要服务端 MINERU_TOKEN——未配置时该侧会如实标记为失败，不影响 Docling 侧。
+      </div>
+      {/* K02: capability panel — explains why buttons are disabled. */}
+      <div
+        className={`panel ${mineruConfigured ? "ok" : "warn"}`}
+        style={{ padding: 12, marginBottom: 12 }}
+      >
+        <strong>引擎能力</strong>
+        <ul style={{ margin: "6px 0 0 18px" }}>
+          <li>
+            Docling（本地）：{capabilities.data?.engines.find((e) => e.name === "docling_sdk")?.available ? "可用" : "不可用"}
+          </li>
+          <li>
+            MinerU 云 API：
+            {mineruConfigured ? (
+              <span>已配置（base_url = {mineruCapability?.sends_bytes_offsite ? "已就绪" : ""}）</span>
+            ) : (
+              <span className="dim">
+                未配置 — {mineruReason?.message ?? "缺少 MINERU_TOKEN"}
+              </span>
+            )}
+          </li>
+        </ul>
       </div>
 
       <div className="panel" style={{ padding: 12, marginBottom: 12 }}>
@@ -180,17 +275,21 @@ export function ComparePage() {
           </label>
           <button
             className="primary"
-            disabled={!documentId || create.isPending}
+            // K02: pre-check at the UI layer mirrors the server's
+            // ENGINE_NOT_CONFIGURED guard — no spinner, no error toast,
+            // just a disabled button + the reason in the banner.
+            disabled={
+              !documentId ||
+              create.isPending ||
+              !mineruConfigured
+            }
+            title={!mineruConfigured ? "MinerU 未配置，无法创建对比" : ""}
             onClick={() => create.mutate()}
           >
             {create.isPending ? "创建中…" : "创建对比（Docling vs MinerU）"}
           </button>
         </div>
-        {create.isError && (
-          <div className="banner error" style={{ marginTop: 8 }}>
-            创建失败：{String(create.error)}
-          </div>
-        )}
+        {renderCreateError()}
       </div>
 
       <div className="panel">
@@ -209,7 +308,7 @@ export function ComparePage() {
             {(comparisons.data?.comparisons ?? []).map((c) => (
               <tr
                 key={c.comparison_id}
-                className={selected?.comparison_id === c.comparison_id ? "selected" : ""}
+                className={selectedId === c.comparison_id ? "selected" : ""}
               >
                 <td className="mono dim">{c.comparison_id}</td>
                 <td className="mono dim">{c.document_id.slice(7, 19)}…</td>
@@ -222,7 +321,7 @@ export function ComparePage() {
                   </span>
                 </td>
                 <td className="dim">
-                  {c.sides.map((s) => (
+                  {c.sides.map((s: { side: string; status: string; error: string | null }) => (
                     <span key={s.side} style={{ marginRight: 6 }} title={s.error ?? ""}>
                       {SIDE_LABELS[s.side] ?? s.side}：
                       {s.status === "done" ? "✓" : s.status === "failed" ? "✗" : "…"}
@@ -230,9 +329,16 @@ export function ComparePage() {
                   ))}
                 </td>
                 <td>
-                  <button onClick={() => setSelected(c)}>查看</button>
+                  <button onClick={() => setSelectedId(c.comparison_id)}>查看</button>
                   {c.sides.some((s) => s.status === "failed") && (
-                    <button style={{ marginLeft: 6 }} onClick={() => retry.mutate(c.comparison_id)}>
+                    <button
+                      style={{ marginLeft: 6 }}
+                      // K02: a retry that would push a not-configured
+                      // engine is disabled; the per-side error_info tells
+                      // the user which one is non-retryable.
+                      disabled={retry.isPending || !mineruConfigured}
+                      onClick={() => retry.mutate(c.comparison_id)}
+                    >
                       重试失败侧
                     </button>
                   )}
@@ -264,9 +370,22 @@ export function ComparePage() {
               key={s.side}
               className={s.status === "failed" ? "banner warn" : "dim"}
               style={{ marginTop: 6 }}
+              title={describeSideError(s.error_info, s.error)}
             >
               {SIDE_LABELS[s.side] ?? s.side}：{s.status}
-              {s.error ? ` — ${s.error}` : ""}
+              {s.error_info ? (
+                <span className="dim">
+                  {" "}
+                  — [{s.error_info.code}] 阶段 {s.error_info.stage}
+                  {s.error_info.retryable ? "（可重试）" : "（不可重试）"}
+                  {s.error_info.batch_id ? ` · batch=${s.error_info.batch_id}` : ""}
+                  {s.error_info.generation != null
+                    ? ` · generation=${s.error_info.generation}`
+                    : ""}
+                </span>
+              ) : s.error ? (
+                <span className="dim"> — {s.error}</span>
+              ) : null}
             </div>
           ))}
           {selected.status === "done" ? (

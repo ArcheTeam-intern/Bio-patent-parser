@@ -32,6 +32,12 @@ class ApiSettings:
     #: a restart whose old leases are still valid recovers automatically
     #: once they lapse.
     comparison_sweep_seconds: float = 15.0
+    #: K01: optional --env-file path. When set, ``create_app`` runs the
+    #: runtime config loader with this file BEFORE the app starts so the
+    #: first capability read already reflects the local file. The CLI
+    #: ``serve`` command always passes it; programmatic construction
+    #: (tests) leaves it ``None`` and falls back to process env.
+    env_file: Path | None = None
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
@@ -47,6 +53,7 @@ class ApiSettings:
             web_dist_dir=Path(web_dist) if web_dist else None,
             max_upload_bytes=_env_int("BIO_PDF_MAX_UPLOAD_BYTES", 100 * 1024 * 1024),
             cors_origins=origins,
+            env_file=None,
         )
 
 

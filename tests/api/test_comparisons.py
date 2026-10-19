@@ -97,6 +97,11 @@ def client(tmp_path: Path, monkeypatch):
     # could not see the patch — so the API fixture pins the thread mode.
     # The process mode itself is covered by dedicated G03 tests below.
     monkeypatch.setenv("BIO_PDF_COMPARISON_RUN_MODE", "thread")
+    # K02: pre-check at create time requires a configured token for the
+    # mineru side. Tests that intentionally exercise the not-configured
+    # path set ``MONKEYPATCH_NO_MINERU`` themselves; everything else
+    # installs a fake token so the factory's stub adapter stays in charge.
+    monkeypatch.setenv("MINERU_TOKEN", "test-fixture-token")
     settings = ApiSettings(
         data_dir=tmp_path / "data",
         samples_dir=tmp_path / "samples",
@@ -215,21 +220,133 @@ def test_failed_side_is_data_and_retry_requeues_it(client, monkeypatch) -> None:
     assert calls["mineru"] == before + 1
 
 
-def test_mineru_without_token_fails_honestly(client) -> None:
-    """No MINERU_TOKEN → the cloud side fails with ENGINE_UNAVAILABLE while
-    the local side still completes (deployment status, not a hidden error)."""
+def test_mineru_without_token_fails_honestly(client, monkeypatch) -> None:
+    """No MINERU_TOKEN → K02 pre-check rejects the create with 422
+    ENGINE_NOT_CONFIGURED before any DB write or remote call."""
 
     c, tmp_path = client
+    monkeypatch.delenv("MINERU_TOKEN", raising=False)
+    # Clear the cached runtime config so the now-empty process env is
+    # picked up by the next request.
+    from bio_pdf.runtime_config import set_runtime_config, RuntimeConfig
+
+    set_runtime_config(RuntimeConfig())
     document_id = _upload_doc(c, tmp_path)
     res = c.post(
         "/api/v1/comparisons",
         json={"document_id": document_id, "pages": [1], "engines": ["docling", "mineru_http"]},
     )
+    assert res.status_code == 422, res.text
+    body = res.json()
+    err = body.get("error", {})
+    assert err.get("code") == "ENGINE_NOT_CONFIGURED"
+    detail = err.get("details", {})
+    assert "MINERU_TOKEN" in detail.get("missing", [])
+    # No comparison row was created.
+    listing = c.get("/api/v1/comparisons").json()["comparisons"]
+    assert listing == []
+
+
+# ---- K02: structured capability + error_info persistence ---------------------
+
+
+def test_capability_reports_mineru_http_alias_and_unavailable_reason(
+    client, monkeypatch
+) -> None:
+    """The capability endpoint must surface ``mineru_http`` as the
+    canonical name (with ``mineru`` kept as an alias) and an explicit
+    unavailable reason when the token is missing — without ever
+    contacting the cloud.
+    """
+
+    c, _tmp_path = client
+    monkeypatch.delenv("MINERU_TOKEN", raising=False)
+    from bio_pdf.runtime_config import RuntimeConfig, set_runtime_config
+
+    set_runtime_config(RuntimeConfig())
+    caps = c.get("/api/v1/capabilities").json()
+    engines = {e["name"]: e for e in caps["engines"]}
+    assert "mineru_http" in engines
+    assert "mineru" in engines["mineru_http"]["aliases"]
+    assert engines["mineru_http"]["configured"] is False
+    assert engines["mineru_http"]["available"] is False
+    reason = engines["mineru_http"]["unavailable_reason"]
+    assert reason is not None
+    assert reason["code"] == "ENGINE_NOT_CONFIGURED"
+    assert reason["stage"] == "configure"
+    assert "MINERU_TOKEN" in reason["missing"]
+    assert reason["retryable"] is False
+
+
+def test_capability_reflects_configured_token(client) -> None:
+    """A configured token flips configured / available to True; the
+    capability endpoint still does NOT contact the cloud."""
+
+    c, _tmp_path = client
+    caps = c.get("/api/v1/capabilities").json()
+    engines = {e["name"]: e for e in caps["engines"]}
+    mineru = engines["mineru_http"]
+    assert mineru["configured"] is True
+    assert mineru["available"] is True
+    assert mineru["unavailable_reason"] is None
+    assert mineru["credential_validation"] == "not_checked"
+
+
+def test_retry_without_token_does_not_create_new_attempt(client, monkeypatch) -> None:
+    """A retry that would push a not-configured engine must be rejected
+    with 422 BEFORE the failed side is re-armed. The Docling side keeps
+    its done status — no attempt increment."""
+
+    c, tmp_path = client
+    monkeypatch.setenv("MINERU_TOKEN", "initial")
+    document_id = _upload_doc(c, tmp_path)
+
+    def factory_mineru_fails(engine, source_path, request):  # noqa: ANN001
+        from bio_pdf.application import comparison_service as cs
+
+        if engine == "mineru_http":
+            from bio_pdf.errors import WorkflowError
+
+            raise WorkflowError(
+                "NetworkTransientError: 503 from mineru",
+                details={"code": "NETWORK_TRANSIENT", "stage": "poll"},
+            )
+        # Docling side: success
+        return _StubAdapter("Ala Gly Leu Lys", document_id)
+
+    import bio_pdf.application.comparison_service as cs
+    monkeypatch.setattr(cs, "_side_engine", factory_mineru_fails)
+    res = c.post(
+        "/api/v1/comparisons",
+        json={"document_id": document_id, "pages": [1], "engines": ["docling", "mineru_http"]},
+    )
     comparison_id = res.json()["comparison_id"]
-    body = _wait_done(c, comparison_id, timeout=60.0)
+    body = _wait_done(c, comparison_id)
     sides = {s["side"]: s for s in body["sides"]}
+    assert sides["docling"]["status"] == "done"
     assert sides["mineru_http"]["status"] == "failed"
-    assert "MINERU_TOKEN" in (sides["mineru_http"]["error"] or "")
+    # K02: error_info is now a structured payload with stage + retryable.
+    info = sides["mineru_http"]["error_info"]
+    assert info is not None
+    assert info["code"] == "NETWORK_TRANSIENT"
+    assert info["stage"] == "poll"
+    assert info["retryable"] is True
+    assert info["engine"] == "mineru_http"
+    assert info["attempt"] == 1
+    # Now drop the token and retry — must be rejected before any increment.
+    monkeypatch.delenv("MINERU_TOKEN", raising=False)
+    from bio_pdf.runtime_config import RuntimeConfig, set_runtime_config
+
+    set_runtime_config(RuntimeConfig())
+    retry = c.post(f"/api/v1/comparisons/{comparison_id}/retry")
+    assert retry.status_code == 422, retry.text
+    err = retry.json()["error"]
+    assert err["code"] == "ENGINE_NOT_CONFIGURED"
+    body2 = c.get(f"/api/v1/comparisons/{comparison_id}").json()
+    sides2 = {s["side"]: s for s in body2["sides"]}
+    assert sides2["docling"]["status"] == "done"  # docling unchanged
+    assert sides2["mineru_http"]["status"] == "failed"  # NOT re-armed
+    assert sides2["mineru_http"]["attempt"] == 1  # NOT incremented
 
 # ---- E2/S02+S05: lease-claimed execution, fenced publish, recovery --------
 
