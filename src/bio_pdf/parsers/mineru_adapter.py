@@ -1893,6 +1893,83 @@ _PAGE_HEADER_RE = re.compile(r"^\s*<!--\s*page\s+(\d+)\s*-->", re.IGNORECASE)
 #: MinerU block types that carry an HTML ``table_body``.
 _TABLE_TYPES = {"table", "table_body"}
 
+#: MinerU block types that are VISUAL regions. Their text lives in
+#: ``image_caption`` / ``chart_caption`` and they carry a bbox — dropping
+#: them loses every figure (and every FIGURE n caption) from the
+#: normalized view.
+_FIGURE_TYPES = {"image", "chart"}
+
+
+def _project_figure_item(
+    item: dict[str, Any],
+    page_no: int,
+    seq: int,
+    *,
+    declared_origin: str | None,
+    warnings: list[str],
+    basis_unit: str | None,
+    page_size: tuple[float, float] | None,
+    rotation_ok: bool,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Project one MinerU ``image`` / ``chart`` item into a Docling-shaped
+    ``pictures`` entry, plus its caption text.
+
+    MinerU keeps a visual region's title in ``image_caption`` /
+    ``chart_caption`` (a list of strings; sub-figure labels such as ``"A"``
+    share the field with the real ``FIGURE n | ...`` caption). The old
+    projection dropped these items entirely because their ``content`` is
+    empty, which removed every figure AND every figure caption from the
+    normalized view.
+
+    Returns ``(picture_dict, caption_text)``. ``picture_dict`` is ``None``
+    when the region has no usable bbox (it cannot be cropped, so it is not
+    exportable). ``caption_text`` is the joined caption regardless of
+    whether a bbox was resolvable, so the caller can keep the title in the
+    text layer even for an un-croppable region.
+    """
+
+    caption_list = (
+        item.get("image_caption")
+        or item.get("chart_caption")
+        or item.get("table_caption")
+        or []
+    )
+    if isinstance(caption_list, str):
+        caption_parts = [caption_list]
+    else:
+        caption_parts = [str(c) for c in caption_list if str(c).strip()]
+    caption_text = " ".join(caption_parts).strip() or None
+
+    bbox = item.get("bbox") or item.get("position")
+    if bbox is None:
+        return None, caption_text
+    bbox_out = _project_bbox(
+        bbox,
+        declared_origin=declared_origin,
+        page_no=page_no,
+        item_ref=f"figure {seq}",
+        warnings=warnings,
+        basis_unit=basis_unit,
+        page_size=page_size,
+        rotation_ok=rotation_ok,
+    )
+    if bbox_out is None:
+        return None, caption_text
+
+    label = "chart" if str(item.get("type") or "").lower() == "chart" else "picture"
+    picture: dict[str, Any] = {
+        "self_ref": f"mineru:figure:{page_no}:{seq}",
+        "label": label,
+        "prov": [{"page_no": page_no, "bbox": bbox_out}],
+        # Docling's normalize reads ``captions`` as refs into the page's
+        # text items; the caller appends the caption text item and passes
+        # its self_ref back through ``captions`` below.
+        "captions": [],
+    }
+    if bbox_out.get("bbox_verified") is not None:
+        picture["bbox_verified"] = bbox_out.get("bbox_verified")
+    return picture, caption_text
+
 
 def _project_table_item(
     item: dict[str, Any],
@@ -2150,6 +2227,7 @@ def _project_content_list(
                 "rotation": rotation,
                 "texts": [],
                 "tables": [],
+                "pictures": [],
             },
         )
 
@@ -2169,6 +2247,43 @@ def _project_content_list(
             if table_payload is not None:
                 page["tables"].append(table_payload)
                 continue
+
+        # Visual regions: ``image`` / ``chart`` items carry their title in
+        # ``image_caption`` / ``chart_caption`` and a bbox, but no text —
+        # skipping them (the ``if not text`` branch below) removed every
+        # figure and every FIGURE n caption from the normalized view.
+        if item_type in _FIGURE_TYPES:
+            picture, caption_text = _project_figure_item(
+                item,
+                page_no,
+                len(page["pictures"]),
+                declared_origin=declared_origin,
+                warnings=warnings,
+                basis_unit=basis_unit,
+                page_size=projection_size,
+                rotation_ok=rotation_ok,
+            )
+            if caption_text:
+                # Keep the caption in the text layer at the region's own
+                # reading position. NO synthetic fine-grained bbox: the
+                # payload gives one box for the whole region, so the text
+                # block stays page-level (bbox=None) and a consumer never
+                # claims character/cell precision it cannot prove.
+                caption_ref = f"mineru:p{page_no}:cap{len(page['texts'])}"
+                page["texts"].append(
+                    {
+                        "self_ref": caption_ref,
+                        "label": "caption",
+                        "bbox": None,
+                        "bbox_verified": False,
+                        "text": str(caption_text),
+                    }
+                )
+                if picture is not None:
+                    picture["captions"] = [{"$ref": caption_ref}]
+            if picture is not None:
+                page["pictures"].append(picture)
+            continue
 
         text = item.get("text") or item.get("content") or ""
         if not text:
