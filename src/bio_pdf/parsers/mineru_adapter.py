@@ -2040,8 +2040,17 @@ def _split_repeated_header_table(table: dict[str, Any]) -> list[dict[str, Any]]:
             for column, label in row_by_column.items()
             if first_by_column.get(column) == label
         )
-        if aligned >= 2:
-            split_rows.append(row_index)
+        if aligned < 2:
+            continue
+        # …and the repeated row must ITSELF read as a header. A susceptibility
+        # matrix whose header already carries S/R/I values (the
+        # HEADER_SEMANTICS_BROKEN case) aligns its data rows column-for-column
+        # on those single-letter values; without this gate the matrix was
+        # split into 2-row fragments and re-classified as an inventory.
+        row_labels = set(row_by_column.values())
+        if not any(header_words.search(label) for label in row_labels):
+            continue
+        split_rows.append(row_index)
     if not split_rows:
         return [table]
 
