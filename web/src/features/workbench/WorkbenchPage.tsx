@@ -121,6 +121,7 @@ export function WorkbenchPage() {
     }, { replace: true });
   }, [evidenceState.target, evidenceState.evidence, selected, selectedEvidenceIds, setParams]);
 
+
   const pagesFor = (id: string) => records.data?.record_pages?.[id] ?? [];
   const kindsById = useMemo(() => {
     const out: Record<string, "sequence" | "measurement"> = {};
@@ -128,6 +129,65 @@ export function WorkbenchPage() {
     for (const m of records.data?.measurements ?? []) out[m.measurement_id] = "measurement";
     return out;
   }, [records.data]);
+  // A job can parse a SUBSET of pages (the reviewer's patent job parsed
+  // 4/23/24/26/29-32 while the document has 68 pages). The URL defaults to
+  // page 1, which is not in the result — every page-scoped tab then showed
+  // an empty panel with a 404, which reads as "the tables disappeared".
+  // Jump ONCE to the first page that actually carries the CURRENT tab's
+  // data (page 4 is in range but has no table, so "first requested page"
+  // alone is not enough). After that the reader is free to page through.
+  const requestedPages = (records.data?.sequence_inventory?.summary?.scope
+    ?.requested_pages ?? []) as number[];
+  const firstDataPage = useMemo(() => {
+    const inRange = (page: number) =>
+      requestedPages.length === 0 || requestedPages.includes(page);
+    if (tab === "tables") {
+      const pages = Object.keys(records.data?.table_pages ?? {})
+        .map(Number)
+        .filter((page) => Number.isFinite(page) && inRange(page))
+        .sort((a, b) => a - b);
+      if (pages.length) return pages[0];
+    }
+    if (tab === "activities" || tab === "sequences") {
+      const key = tab === "activities" ? "measurement" : "sequence";
+      const pages: number[] = [];
+      for (const [recordId, recordPages] of Object.entries(records.data?.record_pages ?? {})) {
+        if (kindsById[recordId] !== key) continue;
+        for (const page of recordPages ?? []) {
+          if (inRange(page)) pages.push(page);
+        }
+      }
+      if (pages.length) return Math.min(...pages);
+    }
+    if (requestedPages.length && !requestedPages.includes(1)) {
+      return requestedPages[0];
+    }
+    return null;
+  }, [tab, requestedPages, records.data, kindsById]);
+  // Jump only when the CURRENT page carries no data for this tab. A
+  // one-shot ref was wrong: switching tabs re-ran the effect with a new
+  // target but the ref had already fired, so the tables tab stayed on a
+  // page without tables.
+  const pageHasTabData = useMemo(() => {
+    if (tab === "tables") {
+      return Boolean(records.data?.table_pages?.[currentPage]);
+    }
+    if (tab === "activities" || tab === "sequences") {
+      const key = tab === "activities" ? "measurement" : "sequence";
+      for (const [recordId, pages] of Object.entries(records.data?.record_pages ?? {})) {
+        if (kindsById[recordId] !== key) continue;
+        if ((pages ?? []).includes(currentPage)) return true;
+      }
+      return false;
+    }
+    return true; // other tabs are not page-scoped
+  }, [tab, currentPage, records.data, kindsById]);
+  useEffect(() => {
+    if (firstDataPage === null) return;
+    if (firstDataPage === currentPage) return;
+    if (pageHasTabData) return;
+    changePage(firstDataPage);
+  }, [firstDataPage, currentPage, pageHasTabData, changePage]);
   const allSequences = records.data?.sequences ?? [];
   const allMeasurements = records.data?.measurements ?? [];
   const visibleSequences = scope === "all" ? allSequences : allSequences.filter(s => pagesFor(s.sequence_id).includes(currentPage));

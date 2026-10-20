@@ -2128,6 +2128,19 @@ def _infer_row_label_spans(cells: list[dict[str, Any]]) -> None:
                 return cell
         return None
 
+    # A COLUMN-HEADER label ("Bacteria*", "Compound", "Strains") is not a
+    # row label: extending it over the rows below turned the header into a
+    # 6-row merged cell and pushed the real first data row out of place
+    # (the reviewer's continued-listing table). Header vocabulary ends the
+    # extension.
+    header_label = re.compile(
+        r"^[\W_]*("
+        r"bacteria\*?|strains?|species|compound|peptide|sequence|isolate|"
+        r"antibiotic|drug|target|parameter|name|id|no\.?|number|#|序号|编号|化合物|菌株"
+        r")[\W_]*$",
+        re.IGNORECASE,
+    )
+
     last_label: dict[str, Any] | None = None
     for row_index in range(row_count):
         cell0 = _label_at(row_index)
@@ -2141,6 +2154,8 @@ def _infer_row_label_spans(cells: list[dict[str, Any]]) -> None:
         label_text = str(last_label.get("text") or "").strip()
         # A numeric "label" is a row index column, not a merged name.
         if not label_text or label_text.isdigit():
+            continue
+        if header_label.match(label_text):
             continue
         # Only attach a row that actually carries data.
         data_cells = [

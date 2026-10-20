@@ -1,0 +1,45 @@
+- generic [ref=f2e2]:
+  - banner [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - heading "生物 PDF 解析" [level=1] [ref=f2e5]
+      - generic [ref=f2e6]: 序列、活性与原文证据
+    - navigation [ref=f2e7]:
+      - link "任务" [ref=f2e8] [cursor=pointer]:
+        - /url: /jobs
+      - link "审核队列" [ref=f2e9] [cursor=pointer]:
+        - /url: /reviews
+      - link "解析器对比" [ref=f2e10] [cursor=pointer]:
+        - /url: /compare
+  - main [ref=f2e11]:
+    - generic [ref=f2e12]:
+      - generic [ref=f2e14]:
+        - generic [ref=f2e15]:
+          - generic [ref=f2e16]: job-690f3d556e51
+          - generic [ref=f2e17]: 未提取
+        - generic [ref=f2e18]:
+          - generic [ref=f2e19]: 尚无人工准确率基线；本页展示真实解析结果与审核状态。
+          - button "导出" [ref=f2e20] [cursor=pointer]
+      - generic [ref=f2e21]:
+        - generic [ref=f2e22]: 原始 PDF
+        - generic [ref=f2e24]:
+          - generic [ref=f2e26]:
+            - button "序列" [ref=f2e27] [cursor=pointer]
+            - button "活性" [ref=f2e28] [cursor=pointer]
+            - button "表格" [ref=f2e29] [cursor=pointer]
+            - button "图表" [ref=f2e30] [cursor=pointer]
+            - button "原文" [ref=f2e31] [cursor=pointer]
+            - button "问题" [ref=f2e32] [cursor=pointer]
+            - button "运行详情" [ref=f2e33] [cursor=pointer]
+          - generic [ref=f2e34]:
+            - generic [ref=f2e35]:
+              - generic [ref=f2e36]:
+                - text: 结果范围：
+                - combobox "结果范围" [ref=f2e37]:
+                  - option "当前页" [selected]
+                  - option "全部文档"
+              - generic [ref=f2e38]: 第 1 页 · 0/0 条序列
+            - generic [ref=f2e39]: 随左侧 PDF 翻页；点击记录可定位证据。跨页记录会在各证据页显示。
+          - generic [ref=f2e40]: 该任务尚未完成，还没有可展示的结果。
+        - generic [ref=f2e43]:
+          - generic [ref=f2e44]: 记录详情与审核
+          - generic [ref=f2e45]: 从中间列选择一条记录查看详情、证据与审核操作。

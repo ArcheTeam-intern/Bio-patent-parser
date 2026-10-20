@@ -1,0 +1,85 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - heading "生物 PDF 解析" [level=1] [ref=e5]
+      - generic [ref=e6]: 序列、活性与原文证据
+    - navigation [ref=e7]:
+      - link "任务" [ref=e8] [cursor=pointer]:
+        - /url: /jobs
+      - link "审核队列" [ref=e9] [cursor=pointer]:
+        - /url: /reviews
+      - link "解析器对比" [ref=e10] [cursor=pointer]:
+        - /url: /compare
+  - main [ref=e11]:
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]:
+            - generic [ref=e16]: job-690f3d556e51
+            - generic [ref=e17]: 处理完成 · 待审核
+            - link "121 条待审核 ›" [ref=e18] [cursor=pointer]:
+              - /url: /reviews?job_id=job-690f3d556e51
+          - generic [ref=e20]:
+            - generic [ref=e21]: 尚无人工准确率基线；本页展示真实解析结果与审核状态。
+            - button "导出" [ref=e22] [cursor=pointer]
+        - generic [ref=e23]:
+          - 'generic "源文件检查: succeeded" [ref=e25]': 源文件检查
+          - generic [ref=e26]:
+            - generic [ref=e27]: →
+            - 'generic "原生解析: succeeded" [ref=e28]': 原生解析
+          - generic [ref=e29]:
+            - generic [ref=e30]: →
+            - 'generic "结构解析: succeeded" [ref=e31]': 结构解析
+          - generic [ref=e32]:
+            - generic [ref=e33]: →
+            - 'generic "归一化: succeeded" [ref=e34]': 归一化
+          - generic [ref=e35]:
+            - generic [ref=e36]: →
+            - 'generic "领域提取: succeeded" [ref=e37]': 领域提取
+          - generic [ref=e38]:
+            - generic [ref=e39]: →
+            - 'generic "校验: succeeded" [ref=e40]': 校验
+          - generic [ref=e41]:
+            - generic [ref=e42]: →
+            - 'generic "导出: succeeded" [ref=e43]': 导出
+      - generic [ref=e44]:
+        - generic [ref=e45]:
+          - generic [ref=e46]: 原始 PDF
+          - generic [ref=e47]:
+            - generic [ref=e48]:
+              - button "上一页" [disabled] [ref=e49]
+              - generic [ref=e50]:
+                - text: 第
+                - spinbutton "PDF 页码" [ref=e51]: "1"
+                - text: / … 页
+              - button "下一页" [disabled] [ref=e52]
+            - generic [ref=e53]:
+              - button "−" [ref=e54] [cursor=pointer]
+              - generic [ref=e55]: 140%
+              - button "+" [ref=e56] [cursor=pointer]
+            - button "适合宽度" [pressed] [ref=e57] [cursor=pointer]
+            - link "查看源文件" [ref=e58] [cursor=pointer]:
+              - /url: /api/v1/documents/sha256%3A2892ff1685f84737a84bc01d39db3f10eb27040d063bff0ce0d156eead0f4302/source
+          - generic [ref=e59]: 正在加载源 PDF…
+        - generic [ref=e62]:
+          - generic [ref=e64]:
+            - button "序列" [ref=e65] [cursor=pointer]
+            - button "活性" [ref=e66] [cursor=pointer]
+            - button "表格" [ref=e67] [cursor=pointer]
+            - button "图表" [ref=e68] [cursor=pointer]
+            - button "原文" [ref=e69] [cursor=pointer]
+            - button "问题" [ref=e70] [cursor=pointer]
+            - button "运行详情" [ref=e71] [cursor=pointer]
+          - generic [ref=e72]:
+            - generic [ref=e73]:
+              - generic [ref=e74]:
+                - text: 结果范围：
+                - combobox "结果范围" [ref=e75]:
+                  - option "当前页" [selected]
+                  - option "全部文档"
+              - generic [ref=e76]: 第 1 页 · 0/0 条序列
+            - generic [ref=e77]: 随左侧 PDF 翻页；点击记录可定位证据。跨页记录会在各证据页显示。
+          - generic [ref=e78]: 该任务尚未完成，还没有可展示的结果。
+        - generic [ref=e81]:
+          - generic [ref=e82]: 记录详情与审核
+          - generic [ref=e83]: 从中间列选择一条记录查看详情、证据与审核操作。
