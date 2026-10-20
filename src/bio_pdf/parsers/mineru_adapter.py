@@ -24,6 +24,7 @@ PDFs must first be uploaded to a reachable bucket / tunnel.
 from __future__ import annotations
 
 import hashlib
+import html as _html_entities
 import json
 import re
 import time
@@ -1971,6 +1972,110 @@ def _project_figure_item(
     return picture, caption_text
 
 
+def _split_repeated_header_table(table: dict[str, Any]) -> list[dict[str, Any]]:
+    """Split a merged table_body that contains MORE THAN ONE header row.
+
+    MinerU sometimes collapses two vertically stacked tables into one
+    ``table_body``. The tell is unambiguous: a header row repeats in the
+    middle of the grid ("Bacteria* | Strains | Chain104…" then, 13 rows
+    later, "Bacteria* | Strains | Chain201…"). Treating that as one grid
+    shifts every row after the second header.
+
+    Only a repeat of the FIRST header's own cells triggers a split (at
+    least two identical non-empty labels). Multi-LEVEL headers (a colspan
+    parent above column names) never contain the first row's labels again,
+    so they stay untouched.
+    """
+
+    data = table.get("data") or {}
+    cells = list(data.get("table_cells") or [])
+    if len(cells) < 4:
+        return [table]
+
+    rows: dict[int, list[dict[str, Any]]] = {}
+    for cell in cells:
+        rows.setdefault(int(cell.get("start_row_offset_idx") or 0), []).append(cell)
+    ordered = sorted(rows)
+    if not ordered:
+        return [table]
+
+    def _labels(row_index: int) -> set[str]:
+        return {
+            str(cell.get("text") or "").strip().lower()
+            for cell in rows[row_index]
+            if str(cell.get("text") or "").strip()
+        }
+
+    def _by_column(row_index: int) -> dict[int, str]:
+        return {
+            int(cell.get("start_col_offset_idx") or 0): str(cell.get("text") or "").strip().lower()
+            for cell in rows[row_index]
+            if str(cell.get("text") or "").strip()
+        }
+
+    first_labels = _labels(ordered[0])
+    if len(first_labels) < 2:
+        return [table]
+    # Header vocabulary gate: a residue listing ("Glu | Leu | Leu | …")
+    # repeats amino-acid names row after row, and a value-only grid repeats
+    # integers. Neither is a header row, so neither may trigger a split.
+    header_words = re.compile(
+        r"(bacteria|strain|compound|peptide|sequence|isolate|species|"
+        r"animal|parameter|target|name|id|no\.?|chain|antibiotic|drug)",
+        re.IGNORECASE,
+    )
+    if not any(header_words.search(label) for label in first_labels):
+        return [table]
+
+    first_by_column = _by_column(ordered[0])
+    split_rows: list[int] = []
+    for row_index in ordered[1:]:
+        row_by_column = _by_column(row_index)
+        # A repeated header re-states the SAME label at the SAME column
+        # ("Bacteria*" under "Bacteria*", "Strains" under "Strains"). Two
+        # aligned matches are required; counting shared tokens across a row
+        # split residue listings (Leu appearing in two different columns).
+        aligned = sum(
+            1
+            for column, label in row_by_column.items()
+            if first_by_column.get(column) == label
+        )
+        if aligned >= 2:
+            split_rows.append(row_index)
+    if not split_rows:
+        return [table]
+
+    bounds = [ordered[0]] + split_rows + [max(ordered) + 1]
+    parts: list[dict[str, Any]] = []
+    for index in range(len(bounds) - 1):
+        start, end = bounds[index], bounds[index + 1]
+        if index + 1 < len(bounds) - 1:
+            end = bounds[index + 1]
+        part_cells = [
+            {**cell, "start_row_offset_idx": int(cell["start_row_offset_idx"]) - start}
+            for cell in cells
+            if start <= int(cell.get("start_row_offset_idx") or 0) < end
+        ]
+        if not part_cells:
+            continue
+        row_count = max(int(c.get("start_row_offset_idx") or 0) for c in part_cells) + 1
+        col_count = max(
+            int(c.get("start_col_offset_idx") or 0) + int(c.get("col_span") or 1)
+            for c in part_cells
+        )
+        part = {**table, "data": {"table_cells": part_cells}}
+        part["row_count"] = row_count
+        part["column_count"] = col_count
+        issues = list(part.get("structure_issues") or [])
+        issues.append(
+            f"TABLE_SPLIT_REPEATED_HEADER: page {table.get('prov', [{}])[0].get('page_no')} "
+            "carried two stacked tables in one detected grid; split into separate tables"
+        )
+        part["structure_issues"] = issues
+        parts.append(part)
+    return parts or [table]
+
+
 def _project_table_item(
     item: dict[str, Any],
     page_no: int,
@@ -2023,6 +2128,12 @@ def _project_table_item(
         for cell_m in re.finditer(r"<(td|th)\b([^>]*)>(.*?)</\1>", tr_m.group(1), re.IGNORECASE | re.DOTALL):
             attrs = cell_m.group(2) or ""
             inner = re.sub(r"<[^>]+>", " ", cell_m.group(3))
+            # HTML entities carry real content: MinerU emits MIC thresholds
+            # as "&gt;128" / "&lt;0.06", and their raw form both reads wrong
+            # in the UI and breaks comparator parsing (">128" and "128"
+            # became the same value).
+            inner = _html_entities.unescape(inner)
+            inner = inner.replace("\xa0", " ")
             inner = re.sub(r"\s+", " ", inner).strip()
 
             def _span(name: str) -> int:
@@ -2245,7 +2356,14 @@ def _project_content_list(
                 rotation_ok=rotation_ok,
             )
             if table_payload is not None:
-                page["tables"].append(table_payload)
+                # A page can carry TWO tables stacked vertically (EP3423477B1
+                # p23: a continued Chain104 listing above, Table 4b below).
+                # MinerU emits them as ONE table_body, so a header row repeats
+                # mid-grid and every row after it reads as misaligned. Split
+                # on the repeated header.
+                for part in _split_repeated_header_table(table_payload):
+                    part["self_ref"] = f"mineru:table:{page_no}:{len(page['tables'])}"
+                    page["tables"].append(part)
                 continue
 
         # Visual regions: ``image`` / ``chart`` items carry their title in
