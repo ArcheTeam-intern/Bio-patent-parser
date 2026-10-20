@@ -378,7 +378,10 @@ class LayoutParseStage(_FileStage):
     # v6: the child now forwards docling `pictures` and the normaliser emits
     # figure regions (bbox + resolved caption) so charts can be exported.
     # v7: figure filter (logos/table-covered/text-covered regions dropped).
-    implementation = "v7-figure-filter"
+    # v8: table fidelity — HTML entities decoded, stacked tables split on a
+    # repeated header, and missing label-column spans re-inferred (MinerU
+    # drops the merged-cell semantics, which shifted continuation rows).
+    implementation = "v8-table-fidelity"
 
     def provider_version(self, context: StageContext) -> str:
         engine = str(context.options.get(OPT_ENGINE, "native"))

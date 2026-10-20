@@ -114,13 +114,38 @@ function TableGrid({ table }: { table: TableData }) {
   for (const cell of table.cells) {
     byPosition.set(`${cell.row_index}:${cell.column_index}`, cell);
   }
+  // Positions covered by a rowspan/colspan from an earlier cell. Only THESE
+  // may be skipped: emitting no <td> for a genuinely absent cell shifted
+  // every following cell one column left (the reviewer's "strainless" rows
+  // under a rowspan). An absent-but-uncovered position gets an empty <td> so
+  // the grid stays aligned.
+  const covered = new Set<string>();
+  for (const cell of table.cells) {
+    const rowSpan = Math.max(1, cell.rowspan ?? 1);
+    const colSpan = Math.max(1, cell.colspan ?? 1);
+    for (let dr = 0; dr < rowSpan; dr++) {
+      for (let dc = 0; dc < colSpan; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        covered.add(`${cell.row_index + dr}:${cell.column_index + dc}`);
+      }
+    }
+  }
   const rows: JSX.Element[] = [];
   for (let r = 0; r < table.row_count; r++) {
     const cells: JSX.Element[] = [];
     for (let c = 0; c < table.column_count; c++) {
       const cell = byPosition.get(`${r}:${c}`);
       if (!cell) {
-        continue; // covered by a rowspan/colspan from above/left
+        if (covered.has(`${r}:${c}`)) continue; // really covered by a span
+        cells.push(
+          <td
+            key={`empty-${r}-${c}`}
+            style={{ border: "1px solid var(--border-soft)", padding: "3px 8px" }}
+          >
+            {"\u00a0"}
+          </td>,
+        );
+        continue;
       }
       const isHeader = cell.header_role !== "data";
       cells.push(

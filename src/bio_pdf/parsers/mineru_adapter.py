@@ -2085,6 +2085,78 @@ def _split_repeated_header_table(table: dict[str, Any]) -> list[dict[str, Any]]:
     return parts or [table]
 
 
+def _infer_row_label_spans(cells: list[dict[str, Any]]) -> None:
+    """Re-attach continuation rows to their strain/compound label.
+
+    MinerU's HTML often DROPS the merged-cell semantics: the label row is
+    written once and the following rows simply carry fewer ``<td>``s —
+    ``<tr><td>Staphylococcus aureus</td><td>1</td>…</tr>`` followed by
+    ``<tr><td>1</td><td>1</td></tr>`` with no ``rowspan`` at all. Rendered
+    literally, every continuation row shifts one column left (the
+    reviewer's "strainless" rows).
+
+    When a row carries NO cell in column 0, no span covers that position,
+    and the nearest label above is textual (a strain/compound name, not a
+    number), the label's row_span is extended over the continuation rows.
+    Mutates ``cells`` in place.
+    """
+
+    if not cells:
+        return
+    by_row: dict[int, list[dict[str, Any]]] = {}
+    for cell in cells:
+        by_row.setdefault(int(cell.get("start_row_offset_idx") or 0), []).append(cell)
+    row_count = max(by_row) + 1
+
+    spanned: set[tuple[int, int]] = set()
+    for cell in cells:
+        row_span = max(1, int(cell.get("row_span") or 1))
+        col_span = max(1, int(cell.get("col_span") or 1))
+        for dr in range(row_span):
+            for dc in range(col_span):
+                if dr or dc:
+                    spanned.add(
+                        (
+                            int(cell.get("start_row_offset_idx") or 0) + dr,
+                            int(cell.get("start_col_offset_idx") or 0) + dc,
+                        )
+                    )
+
+    def _label_at(row_index: int) -> dict[str, Any] | None:
+        for cell in by_row.get(row_index, []):
+            if int(cell.get("start_col_offset_idx") or 0) == 0:
+                return cell
+        return None
+
+    last_label: dict[str, Any] | None = None
+    for row_index in range(row_count):
+        cell0 = _label_at(row_index)
+        if cell0 is not None:
+            last_label = cell0
+            continue
+        if (row_index, 0) in spanned:
+            continue  # already covered by a real span
+        if last_label is None:
+            continue
+        label_text = str(last_label.get("text") or "").strip()
+        # A numeric "label" is a row index column, not a merged name.
+        if not label_text or label_text.isdigit():
+            continue
+        # Only attach a row that actually carries data.
+        data_cells = [
+            cell
+            for cell in by_row.get(row_index, [])
+            if str(cell.get("text") or "").strip()
+        ]
+        if not data_cells:
+            continue
+        start = int(last_label.get("start_row_offset_idx") or 0)
+        new_span = row_index - start + 1
+        if new_span > int(last_label.get("row_span") or 1):
+            last_label["row_span"] = new_span
+        spanned.add((row_index, 0))
+
+
 def _project_table_item(
     item: dict[str, Any],
     page_no: int,
@@ -2185,6 +2257,12 @@ def _project_table_item(
 
     if not cells:
         return None
+
+    # MinerU frequently drops the merged-cell semantics for the label
+    # column: the strain name is written once and the following rows just
+    # carry fewer <td>s. Without this, every continuation row renders one
+    # column to the left.
+    _infer_row_label_spans(cells)
 
     structure_issues: list[str] = []
     if not any(c.get("is_header") for c in cells):
