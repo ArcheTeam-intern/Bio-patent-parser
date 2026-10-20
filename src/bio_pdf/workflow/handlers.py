@@ -2207,6 +2207,16 @@ class ExtractStage(_FileStage):
                             if getattr(table, "bbox_verified", None) is False
                             else cell.bbox
                         ),
+                        # MinerU returns a table box but NO per-cell boxes; the
+                        # span then anchors at the table region (block
+                        # precision) instead of degrading to the whole page,
+                        # so "jump to the activity value" still lands on the
+                        # right table.
+                        table_bbox=(
+                            None
+                            if getattr(table, "bbox_verified", None) is False
+                            else table.bbox
+                        ),
                     )
                     evidence.add(span)
                     cell_evidence[cell.cell_id] = span.evidence_id

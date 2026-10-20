@@ -1779,6 +1779,12 @@ def _domain_pass_spec(
                     if getattr(table, "bbox_verified", None) is False
                     else cell.bbox
                 ),
+                # Table-region anchor when the parser gives no cell boxes.
+                table_bbox=(
+                    None
+                    if getattr(table, "bbox_verified", None) is False
+                    else table.bbox
+                ),
             )
             evidence.add(span)
             cell_evidence[cell.cell_id] = span.evidence_id

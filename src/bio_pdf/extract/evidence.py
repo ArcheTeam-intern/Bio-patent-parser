@@ -177,8 +177,15 @@ def span_from_cell(
     text_raw: str,
     bbox: tuple[float, float, float, float] | None,
     source_artifact_id: str | None = None,
+    table_bbox: tuple[float, float, float, float] | None = None,
 ) -> EvidenceSpan:
-    """Build a cell-precision span (table values)."""
+    """Build a cell-precision span (table values).
+
+    ``table_bbox`` is the FALLBACK anchor for parsers that return a table's
+    own box but no per-cell boxes (MinerU). The span then locates the TABLE
+    region — ``geometry_precision="block"`` — instead of pretending the
+    cell area is known, and instead of degrading all the way to the page.
+    """
 
     evidence_id = make_evidence_id(
         document_id=document_id,
@@ -188,9 +195,19 @@ def span_from_cell(
         char_start=None,
         char_end=None,
     )
+    effective_bbox = bbox if bbox is not None else table_bbox
+    if bbox is not None:
+        geometry_precision = "cell"
+        location_precision = "cell"
+    elif table_bbox is not None:
+        geometry_precision = "block"
+        location_precision = "block"
+    else:
+        geometry_precision = "page"
+        location_precision = "page"
     fragment = EvidenceFragment(
         page_number=page_number,
-        bbox=bbox,
+        bbox=effective_bbox,
         table_id=table_id,
         cell_id=cell_id,
         raw_text=text_raw or None,
@@ -200,14 +217,14 @@ def span_from_cell(
         evidence_id=evidence_id,
         document_id=document_id,
         page_number=page_number,
-        bbox=bbox,
+        bbox=effective_bbox,
         raw_text=text_raw or None,
         source_parser="layout",
         source_locator=f"{table_id}/{cell_id}",
         fragments=[fragment],
-        location_precision="cell" if bbox is not None else "page",
+        location_precision=location_precision,
         text_precision="block" if text_raw else "none",
-        geometry_precision="cell" if bbox is not None else "page",
+        geometry_precision=geometry_precision,
     )
 
 
