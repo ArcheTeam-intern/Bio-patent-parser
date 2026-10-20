@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cancelJob, getJob, getRecords, listFigures, MeasurementData, resumeJob, SequenceRecordData } from "../../api/client";
@@ -168,26 +168,21 @@ export function WorkbenchPage() {
   // one-shot ref was wrong: switching tabs re-ran the effect with a new
   // target but the ref had already fired, so the tables tab stayed on a
   // page without tables.
-  const pageHasTabData = useMemo(() => {
-    if (tab === "tables") {
-      return Boolean(records.data?.table_pages?.[currentPage]);
-    }
-    if (tab === "activities" || tab === "sequences") {
-      const key = tab === "activities" ? "measurement" : "sequence";
-      for (const [recordId, pages] of Object.entries(records.data?.record_pages ?? {})) {
-        if (kindsById[recordId] !== key) continue;
-        if ((pages ?? []).includes(currentPage)) return true;
-      }
-      return false;
-    }
-    return true; // other tabs are not page-scoped
-  }, [tab, currentPage, records.data, kindsById]);
+  // Jump AT MOST ONCE PER TAB. The previous rule re-ran on every page
+  // change, so paging to a page without this tab's data bounced the reader
+  // straight back ("下一页 doesn't work"). After the first landing the
+  // reader owns the page — an empty page just says so.
+  const jumpedTabs = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (firstDataPage === null) return;
-    if (firstDataPage === currentPage) return;
-    if (pageHasTabData) return;
+    if (firstDataPage === currentPage) {
+      jumpedTabs.current.add(tab);
+      return;
+    }
+    if (jumpedTabs.current.has(tab)) return;
+    jumpedTabs.current.add(tab);
     changePage(firstDataPage);
-  }, [firstDataPage, currentPage, pageHasTabData, changePage]);
+  }, [firstDataPage, currentPage, tab, changePage]);
   const allSequences = records.data?.sequences ?? [];
   const allMeasurements = records.data?.measurements ?? [];
   const visibleSequences = scope === "all" ? allSequences : allSequences.filter(s => pagesFor(s.sequence_id).includes(currentPage));
