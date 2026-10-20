@@ -60,3 +60,6 @@ secrets/
 
 # ---- K01: keep the env-file template tracked, never the actual override ----
 !.env.example
+# Playwright and ad-hoc visual inspection artifacts
+.playwright-mcp/
+out/
