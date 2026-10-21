@@ -236,8 +236,14 @@ def span_page_only(
     text_raw: str | None,
     source_locator: str,
     source_parser: str = "unknown",
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> EvidenceSpan:
-    """Page-anchored span (no bbox): honest 'page, no exact area'."""
+    """Page-anchored span.
+
+    With ``bbox`` (the residue region the text was read from) the span is a
+    BLOCK-level anchor — the reader lands on the listing area instead of
+    the whole page. Without it the span stays honestly page-level.
+    """
 
     evidence_id = make_evidence_id(
         document_id=document_id,
@@ -251,6 +257,7 @@ def span_page_only(
         evidence_id=evidence_id,
         document_id=document_id,
         page_number=page_number,
+        bbox=bbox,
         raw_text=text_raw or None,
         source_parser=source_parser,
         source_locator=source_locator,
@@ -259,7 +266,7 @@ def span_page_only(
         ],
         location_precision="page",
         text_precision="block" if text_raw else "none",
-        geometry_precision="page",
+        geometry_precision="block" if bbox is not None else "page",
     )
 
 

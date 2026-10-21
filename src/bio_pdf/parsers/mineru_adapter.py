@@ -2361,6 +2361,21 @@ def _project_table_item(
         "data": {"table_cells": cells},
         "structure_issues": structure_issues,
     }
+    # A table frame that reaches the page bottom usually continues on the
+    # NEXT page, and MinerU folds those rows into THIS table_body (its
+    # content_list carries one item per table, not per page). The rows below
+    # the fold then belong to a page that shows no table at all. Mark the
+    # condition instead of silently presenting the merged grid as one page's
+    # content; a reader can then look at the next page's text.
+    if bbox_out is not None and page_size and float(page_size[1]) > 0:
+        bottom = float(bbox_out.get("b", 0.0))
+        if bottom >= float(page_size[1]) * 0.92:
+            structure_issues.append(
+                "TABLE_CONTINUES_ON_NEXT_PAGE: table frame reaches the page bottom — "
+                "rows below the fold may belong to the next page (MinerU merges them "
+                "into this one table)"
+            )
+            table["continuation_group"] = f"mineru:{page_no}:{seq}:continues"
     if bbox_out is not None:
         # The origin comes from the (declared or protocol) basis — never
         # hard-claimed here.

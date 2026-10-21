@@ -25,7 +25,14 @@ export function TablesTab({ jobId, pageNumber }: { jobId: string; pageNumber: nu
   if (page.error) return <div className="banner error">读取失败：{String(page.error)}</div>;
   const tables = (page.data?.tables ?? []) as TableData[];
   if (tables.length === 0) {
-    return <div className="empty-state">第 {pageNumber} 页没有结构化表格（页面的表格块仍可在原文视图查看）。</div>;
+    return (
+      <div className="empty-state">
+        第 {pageNumber} 页没有结构化表格（页面的表格块仍可在原文视图查看）。
+        <div className="dim" style={{ marginTop: 6 }}>
+          若上一页的表格延续到本页，MinerU 会把两页的行合并进上一页的那一个表；打开上一页的表格可见完整内容。
+        </div>
+      </div>
+    );
   }
   return (
     <div style={{ padding: 8 }}>
@@ -64,6 +71,14 @@ function TablePanel({
           {table.structure_issues.length > 0 && (
             <span className="status conflict" title={table.structure_issues.join("；")}>
               结构问题 {table.structure_issues.length}
+            </span>
+          )}
+          {table.structure_issues.some((i) => i.startsWith("TABLE_CONTINUES_ON_NEXT_PAGE")) && (
+            <span
+              className="status review"
+              title="表格框触到页底：后面的行可能属于下一页，解析器把它们并入了这一个表"
+            >
+              跨页续表
             </span>
           )}
           {table.bbox && (

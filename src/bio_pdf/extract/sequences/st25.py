@@ -306,6 +306,12 @@ class _St25StateMachine:
                 pages.append(page)
         if not pages and builder.residue_page:
             pages = [builder.residue_page]
+        # The DECLARATION page belongs to the record too: "which page does
+        # SEQ 1 live on" is answered wrongly when a declaration on page 29
+        # and its residues on 30-32 only list 30-32 (the reviewer saw the
+        # sequence missing from its own declaration page).
+        if builder.declaration_page and builder.declaration_page not in pages:
+            pages = [builder.declaration_page, *pages]
 
         scan_entry.update(
             {
@@ -608,6 +614,27 @@ def parse_st25_blocks_with_scan(
     # Per-page raw residue text, captured while feeding (plan B09): each
     # page's evidence carries ITS OWN fragment, not a copied full sequence.
     page_fragments: dict[int, list[str]] = {}
+    # The residue REGION of each page (union of the contributing block
+    # boxes). A sequence's evidence anchors here instead of the whole page,
+    # so "jump to this sequence" lands on the listing.
+    page_residue_bbox: dict[int, tuple[float, float, float, float]] = {}
+
+    def _extend_bbox(page: int, box: Any) -> None:
+        try:
+            x0, y0, x1, y1 = (float(box[i]) for i in range(4))
+        except (TypeError, ValueError, IndexError):
+            return
+        current = page_residue_bbox.get(page)
+        if current is None:
+            page_residue_bbox[page] = (x0, y0, x1, y1)
+            return
+        page_residue_bbox[page] = (
+            min(current[0], x0),
+            min(current[1], y0),
+            max(current[2], x1),
+            max(current[3], y1),
+        )
+
     for entry in blocks:
         text = entry.get("text")
         if not text:
@@ -620,6 +647,8 @@ def parse_st25_blocks_with_scan(
             if machine.current is not None and machine.current.in_residues:
                 if line.strip():
                     page_fragments.setdefault(page_number, []).append(line.rstrip())
+                    if entry.get("bbox"):
+                        _extend_bbox(page_number, entry["bbox"])
     machine.finish()
 
     if issues is not None:
@@ -659,6 +688,9 @@ def parse_st25_blocks_with_scan(
                     text_raw=fragment_text,
                     source_locator=f"st25:{record.seq_id_no or 'seq'}:p{page}",
                     source_parser="native",
+                    # The residue region on THIS page (block precision). A
+                    # page that contributed no residue box stays page-level.
+                    bbox=page_residue_bbox.get(page),
                 )
                 evidence_index.add(span)
                 new_ids.append(span.evidence_id)

@@ -582,6 +582,12 @@ def _coerce_tables(
                 caption=str(table_dict.get("caption") or "") or None,
                 bbox=table_bbox,
                 bbox_verified=table_dict.get("bbox_verified"),
+                # Cross-page continuation identity (MinerU folds the next
+                # page's rows into this table_body; the marker lets the UI
+                # explain why the following page shows no table).
+                continuation_group=(
+                    str(table_dict.get("continuation_group") or "") or None
+                ),
                 structure_issues=list_issues,
             )
         )
