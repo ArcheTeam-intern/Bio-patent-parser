@@ -14,17 +14,82 @@ import {
  * 结构缺失时如实显示"该页无表格/文本层为空"，不显示占位句冒充功能完成。
  */
 
+/** Codes that describe a table SPANNING the page fold. Each has its own badge,
+ * so counting them under "结构问题 N" would report the same fact twice. */
+const CONTINUATION_ISSUES = [
+  "TABLE_CONTINUES_ON_NEXT_PAGE",
+  "TABLE_CONTINUED_FROM_PREVIOUS_PAGE",
+  "TABLE_MAYBE_CONTINUED_FROM_PREVIOUS_PAGE",
+];
+
+function findIssue(table: TableData, code: string): string | null {
+  return (table.structure_issues ?? []).find((i) => i.startsWith(code)) ?? null;
+}
+
+/** The note WITHOUT its machine code, for a tooltip the reader can use. */
+function issueDetail(issue: string): string {
+  const cut = issue.indexOf(":");
+  return cut < 0 ? issue : issue.slice(cut + 1).trim();
+}
+
+/** A table whose rows continue on the NEXT page (its frame ends at the fold
+ * and the next page shows no table of its own) — OR a table that is only the
+ * TAIL of the previous page's table. Only the first direction may pull a
+ * table onto the FOLLOWING page's tab: showing a "continued from previous"
+ * fragment there would repeat content that belongs to its own page. */
+function continuesOnNextPage(table: TableData): boolean {
+  const issues = table.structure_issues ?? [];
+  if (issues.some((i) => i.startsWith("TABLE_CONTINUES_ON_NEXT_PAGE"))) return true;
+  if (issues.some((i) => i.startsWith("TABLE_CONTINUED_FROM_PREVIOUS_PAGE"))) {
+    return false;
+  }
+  // Legacy jobs carry only the group.
+  return !!table.continuation_group;
+}
+
 export function TablesTab({ jobId, pageNumber }: { jobId: string; pageNumber: number }) {
   const page = useQuery({
     queryKey: ["page", jobId, pageNumber],
     queryFn: () => getPage(jobId, pageNumber),
     enabled: !!jobId,
   });
+  // A continuation page legitimately has NO table: the parser merges its rows
+  // into the previous page's table_body, so an empty tab hides content that
+  // IS on the page. Always fetch the previous page and show that table here
+  // instead of an empty state.
+  const previousPage = useQuery({
+    queryKey: ["page", jobId, pageNumber - 1],
+    queryFn: () => getPage(jobId, pageNumber - 1),
+    enabled: !!jobId && pageNumber > 1,
+  });
 
   if (page.isLoading) return <div className="empty-state">加载中…</div>;
   if (page.error) return <div className="banner error">读取失败：{String(page.error)}</div>;
   const tables = (page.data?.tables ?? []) as TableData[];
+  const previousTables = (previousPage.data?.tables ?? []) as TableData[];
   if (tables.length === 0) {
+    const continued = previousTables.filter(continuesOnNextPage);
+    if (!previousPage.isLoading && continued.length > 0) {
+      return (
+        <div style={{ padding: 8 }}>
+          <div className="wb-hint" style={{ marginBottom: 8 }}>
+            第 {pageNumber} 页没有独立表格：第 {pageNumber - 1} 页的表格延续到本页，
+            解析器把两页的行合并进了下面这一个表（本页的行在表的后半部分）。
+          </div>
+          {continued.map((table) => (
+            <TablePanel
+              key={table.table_id}
+              jobId={jobId}
+              table={table}
+              blocks={(previousPage.data?.blocks ?? []) as { block_id: string; text_raw: string }[]}
+            />
+          ))}
+        </div>
+      );
+    }
+    if (pageNumber > 1 && previousPage.isLoading) {
+      return <div className="empty-state">加载中…</div>;
+    }
     return (
       <div className="empty-state">
         第 {pageNumber} 页没有结构化表格（页面的表格块仍可在原文视图查看）。
@@ -34,8 +99,28 @@ export function TablesTab({ jobId, pageNumber }: { jobId: string; pageNumber: nu
       </div>
     );
   }
+  // The page has tables of its OWN, yet its top rows may still sit in the
+  // previous page's grid (the fold merged them there). Say so instead of
+  // letting the reader believe this page is fully represented. A table that
+  // merely CONTINUES FROM the previous page (the split direction) is already
+  // labelled "接上页" and must not be announced twice.
+  const ownGroups = new Set(
+    tables.map((table) => table.continuation_group).filter((group): group is string => !!group),
+  );
+  const foldedIntoPrevious = previousTables.filter(
+    (table) =>
+      continuesOnNextPage(table) &&
+      (!table.continuation_group || !ownGroups.has(table.continuation_group)),
+  );
   return (
     <div style={{ padding: 8 }}>
+      {foldedIntoPrevious.length > 0 && (
+        <div className="wb-hint" style={{ marginBottom: 8 }}>
+          第 {pageNumber - 1} 页的表格延续到本页（
+          {foldedIntoPrevious.map((table) => table.table_id).join("、")}
+          ）：本页顶部的行已经并进那张表，只在第 {pageNumber - 1} 页可见。
+        </div>
+      )}
       {tables.map((table) => (
         <TablePanel key={table.table_id} jobId={jobId} table={table}
           blocks={(page.data?.blocks ?? []) as { block_id: string; text_raw: string }[]} />
@@ -57,6 +142,12 @@ function TablePanel({
   const legends = (table.footnote_refs ?? [])
     .map((id) => blockText.get(id))
     .filter((t): t is string => !!t);
+  const continues = findIssue(table, "TABLE_CONTINUES_ON_NEXT_PAGE");
+  const continuedFrom = findIssue(table, "TABLE_CONTINUED_FROM_PREVIOUS_PAGE");
+  const maybeContinuedFrom = findIssue(table, "TABLE_MAYBE_CONTINUED_FROM_PREVIOUS_PAGE");
+  const structuralIssues = (table.structure_issues ?? []).filter(
+    (i) => !CONTINUATION_ISSUES.some((code) => i.startsWith(code)),
+  );
   return (
     <div className="panel" style={{ marginBottom: 12 }}>
       <div className="panel-header">
@@ -68,17 +159,24 @@ function TablePanel({
               几何重建
             </span>
           )}
-          {table.structure_issues.length > 0 && (
-            <span className="status conflict" title={table.structure_issues.join("；")}>
-              结构问题 {table.structure_issues.length}
+          {structuralIssues.length > 0 && (
+            <span className="status conflict" title={structuralIssues.join("；")}>
+              结构问题 {structuralIssues.length}
             </span>
           )}
-          {table.structure_issues.some((i) => i.startsWith("TABLE_CONTINUES_ON_NEXT_PAGE")) && (
-            <span
-              className="status review"
-              title="表格框触到页底：后面的行可能属于下一页，解析器把它们并入了这一个表"
-            >
+          {continues && (
+            <span className="status review" title={issueDetail(continues)}>
               跨页续表
+            </span>
+          )}
+          {continuedFrom && (
+            <span className="status review" title={issueDetail(continuedFrom)}>
+              接上页
+            </span>
+          )}
+          {maybeContinuedFrom && (
+            <span className="status review" title={issueDetail(maybeContinuedFrom)}>
+              可能接上页
             </span>
           )}
           {table.bbox && (
@@ -89,6 +187,28 @@ function TablePanel({
         </span>
       </div>
       {table.caption && <div className="dim" style={{ padding: "4px 8px" }}>{table.caption}</div>}
+      {!table.caption && table.continuation_caption && (
+        <div className="dim" style={{ padding: "4px 8px" }}>
+          续表标题（印在第 {table.page_number - 1} 页，本页没有印）：
+          {table.continuation_caption}
+        </div>
+      )}
+      {continuedFrom && (
+        <div className="wb-hint" style={{ margin: "0 8px 6px" }}>
+          本表是第 {table.page_number - 1} 页表格的后半：表头在那一页重复出现，上半部分的行在那一页。
+        </div>
+      )}
+      {maybeContinuedFrom && (
+        <div className="wb-hint" style={{ margin: "0 8px 6px" }}>
+          本表贴在页面顶端、以表头行开头且没有自己的标题，可能是上一页表格的后半；
+          上一页不在本次解析范围内，无法确认。
+        </div>
+      )}
+      {continues && (
+        <div className="wb-hint" style={{ margin: "0 8px 6px" }}>
+          本表的行延续到下一页{issueDetail(continues).includes("SPLIT") ? "（上半部分在本页，其余在下一页的那张表里）" : "（下一页没有自己的表格，行已并入本表）"}。
+        </div>
+      )}
       <TableGrid table={table} />
       {legends.map((text, i) => (
         <div key={i} className="dim" style={{ padding: "6px 8px", borderTop: "1px dashed var(--border-soft)" }}>
@@ -119,6 +239,11 @@ interface TableData {
   header_cell_ids: string[];
   caption: string | null;
   structure_issues: string[];
+  /** Set when the table's rows continue on the next page (cross-page grid). */
+  continuation_group?: string | null;
+  /** The title of the table this one continues — printed on the EARLIER page
+   * (a table split across the fold loses its title otherwise). */
+  continuation_caption?: string | null;
   footnote_refs?: string[];
   source?: string;
   bbox?: number[] | null;

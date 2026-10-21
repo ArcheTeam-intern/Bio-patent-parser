@@ -253,6 +253,11 @@ def _caption_metric(table: Table) -> tuple[str, str] | None:
 
     caption = str(getattr(table, "caption", "") or "").strip()
     if not caption:
+        # The title of a table SPLIT across the fold is printed on the EARLIER
+        # page; without it every value on the continuation page was dropped as
+        # "no metric anywhere" (live p26: 19x10 MIC grid, 0 measurements).
+        caption = str(getattr(table, "continuation_caption", "") or "").strip()
+    if not caption:
         return None
     from bio_pdf.extract.activities.metrics import lookup_metric
 

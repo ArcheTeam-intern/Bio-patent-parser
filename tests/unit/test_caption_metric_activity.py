@@ -25,7 +25,13 @@ from bio_pdf.extract.activities.table_classifier import TableKind, classify_tabl
 from bio_pdf.extract.activities.tables import _caption_metric, extract_table_measurements
 
 
-def _table(*, caption: str, header: list[str], rows: list[list[str]]) -> Table:
+def _table(
+    *,
+    caption: str | None = None,
+    header: list[str],
+    rows: list[list[str]],
+    continuation_caption: str | None = None,
+) -> Table:
     cells = []
     for ci, text in enumerate(header):
         cells.append(
@@ -54,7 +60,9 @@ def _table(*, caption: str, header: list[str], rows: list[list[str]]) -> Table:
             "page_number": 1,
             "row_count": len(rows) + 1,
             "column_count": len(header),
+            "header_cell_ids": [f"h{ci}" for ci in range(len(header))],
             "caption": caption,
+            "continuation_caption": continuation_caption,
             "cells": cells,
         }
     )
@@ -179,3 +187,46 @@ def test_no_caption_metric_and_no_header_metric_stays_empty() -> None:
         )
         == []
     )
+
+
+# ---- a table SPLIT across the fold ---------------------------------------
+
+
+def test_continuation_caption_drives_classification_without_becoming_caption() -> None:
+    """Page 26 opens with the tail of page 25's MIC grid. The title is printed
+    only on page 25, so the tail must borrow it for classification while its
+    OWN caption stays empty (the UI labels it as inherited)."""
+
+    table = _table(
+        header=["Bacteria*", "Strains", "Chain304"],
+        rows=[["S. aureus", "1", "16"], ["E. coli", "2", "4"]],
+        continuation_caption="Table 5. Minimum inhibitory concentration (MICs)",
+    )
+    assert table.caption is None
+    assert classify_table(table) is TableKind.ACTIVITY_NUMERIC
+    assert _caption_metric(table) == (
+        "MIC",
+        "Table 5. Minimum inhibitory concentration (MICs)",
+    )
+
+
+def test_continuation_caption_recovers_the_tail_page_measurements() -> None:
+    table = _table(
+        header=["Bacteria*", "Strains", "Chain304"],
+        rows=[["S. aureus", "1", "16"], ["E. coli", "2", "4"]],
+        continuation_caption="Table 5. Minimum inhibitory concentration (MICs)",
+    )
+    measurements = extract_table_measurements(
+        table,
+        document_id="sha256:test",
+        evidences=_evidences(table),
+        caption_metric=_caption_metric(table),
+    )
+    # One value per strain row; the "Strains" serial column is a row index,
+    # never a measurement (its integers are isolate numbers).
+    assert len(measurements) == 2
+    assert {m.metric for m in measurements} == {"MIC"}
+    # Rows are organisms, the column is the peptide → the axes travel as the
+    # reviewer reads them (entity = chain, target = strain), as on page 23.
+    assert {m.entity_raw for m in measurements} == {"Chain304"}
+    assert {m.target_raw for m in measurements} == {"S. aureus", "E. coli"}

@@ -74,6 +74,42 @@ def build_header_paths(table: Table) -> list[HeaderPath]:
         (c for c in table.cells if c.cell_id not in header_cell_ids),
         key=lambda c: (c.row_index, c.column_index),
     )
+    column_count = table.column_count or 1
+    # Where the DATA starts. A merged column header always sits above every
+    # data row; a full-width cell that appears only after data has started is
+    # a block label (see ``_is_block_banner``).
+    first_data_row = min((c.row_index for c in data_cells), default=0)
+
+    def _is_block_banner(h: TableCell) -> bool:
+        """A full-width row INSIDE the data area — a group label, not a header.
+
+        MinerU writes the last organism of live Table 4a as
+        ``<td colspan="5">Acinetobacter johnsonii</td>`` on a row of its own.
+        Read as a merged column header it becomes the TARGET of every value
+        below it and the organism is lost; it actually labels the rows
+        beneath it.
+        """
+
+        return h.colspan >= column_count and h.row_index >= first_data_row
+
+    def _block_banner(data: TableCell) -> TableCell | None:
+        """The nearest full-width banner above ``data``, if any.
+
+        Such a cell is neither a column header (it is not part of the header
+        block) nor a left label (it covers the data's column) — without this
+        rule the rows beneath it carry no entity at all and the peptide /
+        organism axes stay flipped.
+        """
+
+        best: TableCell | None = None
+        for h in headers:
+            if h.row_index >= data.row_index or not _is_block_banner(h):
+                continue
+            if not h.column_index <= data.column_index < h.column_index + h.colspan:
+                continue
+            if best is None or h.row_index > best.row_index:
+                best = h
+        return best
 
     paths: list[HeaderPath] = []
     for data in data_cells:
@@ -87,6 +123,7 @@ def build_header_paths(table: Table) -> list[HeaderPath]:
                 for h in headers
                 if h.row_index + h.rowspan <= data.row_index
                 and h.column_index <= data.column_index < h.column_index + h.colspan
+                and not _is_block_banner(h)
             ),
             key=lambda h: (h.row_index, h.column_index),
         )
@@ -99,6 +136,9 @@ def build_header_paths(table: Table) -> list[HeaderPath]:
             ),
             key=lambda h: (h.row_index, h.column_index),
         )
+        banner = _block_banner(data)
+        if banner is not None:
+            row_headers.append(banner)
         paths.append(
             HeaderPath(data_cell=data, column_headers=column_headers, row_headers=row_headers)
         )

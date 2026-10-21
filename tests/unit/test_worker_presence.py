@@ -47,3 +47,30 @@ def test_count_jobs_by_status_empty(tmp_path: Path) -> None:
         assert repo.count_jobs_by_status() == {}
     finally:
         repo.close()
+
+
+def test_prune_drops_only_long_dead_presence_rows(tmp_path: Path) -> None:
+    """Every worker restart adds a row (pid + random suffix).
+
+    Without pruning, the table — and ``GET /queue/status`` with it — grows
+    forever: the live data dir had 17 rows for one running worker.
+    """
+
+    from datetime import datetime, timedelta, timezone
+
+    repo = Repository(tmp_path / "bio.sqlite")
+    try:
+        repo.record_worker_presence("worker-now", pid=1, data_dir=str(tmp_path))
+        repo.record_worker_presence("worker-old", pid=2, data_dir=str(tmp_path))
+        stale = (
+            datetime.now(tz=timezone.utc) - timedelta(hours=48)
+        ).isoformat()
+        repo.connection.execute(
+            "UPDATE worker_presence SET last_seen_at = ? WHERE worker_id = 'worker-old'",
+            (stale,),
+        )
+
+        assert repo.prune_worker_presence() == 1
+        assert [r["worker_id"] for r in repo.list_worker_presence()] == ["worker-now"]
+    finally:
+        repo.close()

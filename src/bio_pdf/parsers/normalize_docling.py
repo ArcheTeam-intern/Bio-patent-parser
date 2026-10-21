@@ -588,6 +588,12 @@ def _coerce_tables(
                 continuation_group=(
                     str(table_dict.get("continuation_group") or "") or None
                 ),
+                # The title of the table this one continues is printed on the
+                # EARLIER page — carried separately so it is never presented
+                # as this page's own caption.
+                continuation_caption=(
+                    str(table_dict.get("continuation_caption") or "") or None
+                ),
                 structure_issues=list_issues,
             )
         )
@@ -915,6 +921,16 @@ def _expand_top_level_pages(
             caption=str(caption_raw or "") or None,
             bbox=table_bbox,
             bbox_verified=table.get("bbox_verified") if isinstance(table, dict) else None,
+            continuation_group=(
+                str(table.get("continuation_group") or "") or None
+                if isinstance(table, dict)
+                else None
+            ),
+            continuation_caption=(
+                str(table.get("continuation_caption") or "") or None
+                if isinstance(table, dict)
+                else None
+            ),
             structure_issues=issues,
         )
         tables_out.append(table_obj)

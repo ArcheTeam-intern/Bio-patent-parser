@@ -17,8 +17,11 @@ from bio_pdf.parsers.mineru_adapter import _project_mineru_payload
 from bio_pdf.parsers.normalize_docling import normalize_docling_document
 
 
-def _replay_html(html: str):
-    items = [{"type": "table", "page_idx": 0, "bbox": [100, 100, 900, 600], "table_body": html}]
+def _replay_html(html: str, caption: str | None = None):
+    item = {"type": "table", "page_idx": 0, "bbox": [100, 100, 900, 600], "table_body": html}
+    if caption:
+        item["table_caption"] = [caption]
+    items = [item]
     projected = _project_mineru_payload(
         {"content_list": items},
         page_numbers={1},
@@ -101,6 +104,64 @@ def test_severely_ragged_grid_still_refused() -> None:
     assert not [
         m for m in summary["measurements"] if m["metric"] == "antimicrobial_susceptibility"
     ]
+
+
+def test_organism_label_row_does_not_make_the_grid_ragged() -> None:
+    """Live Table 4a/4c: MinerU writes the organism in a row of its OWN
+    (label + empty placeholders) and its strains' values in the following
+    rows (empty cell in column 0, values from column 1). The label row is as
+    wide as the block it labels — otherwise a perfect 10-organism grid read
+    as "row widths range 1..5" and the severe gate refused every value."""
+
+    rows = [
+        "<tr><td>Bacteria*</td><td>Strains</td><td>Chain104</td><td>Chain105</td></tr>",
+        "<tr><td>Escherichia coli</td><td></td><td></td><td></td></tr>",
+        "<tr><td></td><td>1</td><td>4</td><td>1</td></tr>",
+        "<tr><td></td><td>2</td><td>4</td><td>4</td></tr>",
+        "<tr><td>Klebsiella pneumoniae</td><td></td><td></td><td></td></tr>",
+        "<tr><td></td><td>1</td><td>8</td><td>4</td></tr>",
+        "<tr><td></td><td>2</td><td>4</td><td>2</td></tr>",
+    ]
+    document, summary = _replay_html(
+        "<table>" + "".join(rows) + "</table>",
+        caption="Table 4a: Minimum inhibitory concentration (MIC) of peptides",
+    )
+    assert not [i for i in _issues(document) if "RAGGED" in i], _issues(document)
+    sri = [m for m in summary["measurements"] if m["metric"] == "MIC"]
+    # Two peptides x two strains per organism — the leading "Strains" number
+    # column is a row index, not a peptide, and must never become a value.
+    assert len(sri) == 8, sri
+    assert {m["entity"] for m in sri} == {"Chain104", "Chain105"}
+    assert {m["target"] for m in sri} == {"Escherichia coli", "Klebsiella pneumoniae"}
+    by_key = {(m["target"], m["entity"]): m["value_raw"] for m in sri}
+    assert by_key[("Escherichia coli", "Chain104")] == "4"
+    assert by_key[("Klebsiella pneumoniae", "Chain105")] == "2"
+
+
+def test_full_width_group_banner_names_the_rows_below_it() -> None:
+    """MinerU writes the last organism of live Table 4a as a FULL-WIDTH row
+    (``<td colspan=5>Acinetobacter johnsonii</td>``) instead of a left label.
+    That banner is the block's label: no overlap may be reported, and the
+    organism must reach the values underneath (never the other way round —
+    read as a merged column header it became their TARGET)."""
+
+    rows = [
+        "<tr><td>Bacteria*</td><td>Strains</td><td>Chain104</td><td>Chain105</td></tr>",
+        "<tr><td>Escherichia coli</td><td></td><td></td><td></td></tr>",
+        "<tr><td></td><td>1</td><td>4</td><td>1</td></tr>",
+        "<tr><td colspan='4'>Klebsiella pneumoniae</td></tr>",
+        "<tr><td></td><td>1</td><td>8</td><td>4</td></tr>",
+    ]
+    document, summary = _replay_html(
+        "<table>" + "".join(rows) + "</table>",
+        caption="Table 4a: Minimum inhibitory concentration (MIC) of peptides",
+    )
+    assert not [i for i in _issues(document) if "OVERLAP" in i], _issues(document)
+    sri = [m for m in summary["measurements"] if m["metric"] == "MIC"]
+    assert len(sri) == 4, sri
+    by_target = {(m["target"], m["entity"]): m["value_raw"] for m in sri}
+    assert by_target[("Klebsiella pneumoniae", "Chain104")] == "8"
+    assert by_target[("Escherichia coli", "Chain104")] == "4"
 
 
 def test_header_row_containing_values_is_broken_and_refused() -> None:

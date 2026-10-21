@@ -7,7 +7,7 @@ import { WorkerHint } from "../../components/WorkerHint";
 import { StageStrip, STAGE_GROUP_ORDER, stageGroup } from "./StageStrip";
 import { PageDistribution } from "./PageDistribution";
 import { PdfViewer } from "../pdf/PdfViewer";
-import { SequenceDetail } from "../sequences/SequenceList";
+import { SequenceDetail, formatValue } from "../sequences/SequenceList";
 import { SequenceInventoryPanel } from "../sequences/SequenceInventoryPanel";
 import { RelationPanel } from "../sequences/RelationPanel";
 import { MeasurementDetail, CheckList } from "../activities/ActivityList";
@@ -598,10 +598,9 @@ function ActivityTab({
           >
             <td>{m.metric}</td>
             <td className="mono">
-              {m.value.kind === "range"
-                ? "区间"
-                : m.value.raw}{" "}
-              {m.unit_raw ?? ""}
+              {/* Ranges used to render as the WORD "区间" — the reviewer could
+                  not see the numbers in the list. */}
+              {formatValue(m.value)} {m.unit_raw ?? ""}
             </td>
             <td className="dim">{m.target_raw ?? "—"}</td>
             <td className="dim">{m.evidence_kind}</td>

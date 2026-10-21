@@ -204,6 +204,7 @@ def run_job(
     from bio_pdf.application.job_service import JobPaths, JobService
     from bio_pdf.errors import WorkflowError
     from bio_pdf.ingest.inspector import parse_page_selection
+    from bio_pdf.workflow.queue_worker import LEASE_SECONDS, run_claimed_job
 
     if not input.is_file():
         typer.echo(json.dumps({"error": "INPUT_NOT_PDF", "message": f"not a file: {input}"}, ensure_ascii=False))
@@ -227,7 +228,26 @@ def run_job(
         )
         typer.echo(json.dumps({"job_id": job.job_id, "status": job.status, "pages": list(page_numbers)}, ensure_ascii=False))
 
-        result = service.run_job(job.job_id, resume=resume)
+        # Claim the row before running it. Left queued, a polling worker
+        # could claim the same job while this command runs it — the same
+        # pages submitted to the cloud parser twice, published twice.
+        import os
+
+        claimed = service.repository.claim_job(
+            job.job_id,
+            worker_id=f"cli-{os.getpid()}",
+            lease_seconds=LEASE_SECONDS,
+        )
+        if claimed is None:
+            typer.echo(
+                json.dumps(
+                    {"error": "JOB_NOT_CLAIMABLE", "job_id": job.job_id},
+                    ensure_ascii=False,
+                )
+            )
+            raise typer.Exit(code=4)
+
+        result = run_claimed_job(service, data_dir, claimed, resume=resume)
         payload = {
             "job_id": result.job_id,
             "status": result.status,

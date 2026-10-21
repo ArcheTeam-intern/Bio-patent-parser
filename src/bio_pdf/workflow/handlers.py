@@ -381,7 +381,10 @@ class LayoutParseStage(_FileStage):
     # v8: table fidelity — HTML entities decoded, stacked tables split on a
     # repeated header, and missing label-column spans re-inferred (MinerU
     # drops the merged-cell semantics, which shifted continuation rows).
-    implementation = "v8-table-fidelity"
+    # v9: cross-page continuations are detected against the NEXT page (a
+    # frame ending at the fold, next page with text and no table), and a
+    # running-header caption is no longer published as a table title.
+    implementation = "v9-table-continuation"
 
     def provider_version(self, context: StageContext) -> str:
         engine = str(context.options.get(OPT_ENGINE, "native"))
@@ -1503,6 +1506,64 @@ def _page_blocks(
     return blocks
 
 
+def _interleave_residue_tables(
+    blocks: list[dict[str, Any]], table_blocks: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Place residue-table lines in each page's reading order (K12).
+
+    A residue table is emitted as one line per row, and every line carries
+    the TABLE's own box, so it is inserted where that box sits among the
+    page's native blocks. Native blocks keep their relative order (column
+    reading order is the adapter's decision, not ours).
+    """
+
+    if not table_blocks:
+        return blocks
+
+    def _y0(item: dict[str, Any]) -> float:
+        bbox = item.get("bbox")
+        try:
+            return float(bbox[1])
+        except (TypeError, ValueError, IndexError):
+            return float("inf")
+
+    by_page: dict[int, list[dict[str, Any]]] = {}
+    for item in table_blocks:
+        by_page.setdefault(int(item.get("page_number", 1)), []).append(item)
+
+    page_order: list[int] = []
+    natives: dict[int, list[dict[str, Any]]] = {}
+    for block in blocks:
+        page = int(block.get("page_number", 1))
+        if page not in natives:
+            natives[page] = []
+            page_order.append(page)
+        natives[page].append(block)
+    for page in sorted(by_page):
+        if page in natives:
+            continue
+        natives[page] = []
+        position = len(page_order)
+        for index, existing in enumerate(page_order):
+            if existing > page:
+                position = index
+                break
+        page_order.insert(position, page)
+
+    out: list[dict[str, Any]] = []
+    for page in page_order:
+        native = natives.get(page, [])
+        index = 0
+        for item in sorted(by_page.get(page, []), key=_y0):
+            limit = _y0(item)
+            while index < len(native) and _y0(native[index]) <= limit:
+                out.append(native[index])
+                index += 1
+            out.append(item)
+        out.extend(native[index:])
+    return out
+
+
 def _sequence_links_for(
     blocks: list[dict[str, Any]], measurements: list[Any]
 ) -> dict[str, Any]:
@@ -1577,7 +1638,7 @@ def _table_context_conditions(table: Any, document: NormalizedDocument) -> list[
 
 class ExtractStage(_FileStage):
     name = "extract"
-    implementation = "v7-d04-roles"
+    implementation = "v8-st25-table-residues"
 
     def run(self, context: StageContext) -> StageOutcome:
         targets = set(
@@ -1597,6 +1658,23 @@ class ExtractStage(_FileStage):
                 normalized_ref.relative_path if normalized_ref is not None else None
             ),
         )
+        # K12: residue rows a layout parser emitted as a TABLE never reach
+        # _page_blocks (it walks page.blocks only). Page 31 of the live
+        # EP3423477B1 listing is a 16x16 three-letter grid — an entire page
+        # of the sequence used to be invisible, so ST.25 read only its
+        # footer page number and the evidence landed there. The rows are
+        # rebuilt as text lines for the LISTING feed only: activities and
+        # prose extractors keep seeing the document exactly as parsed.
+        from bio_pdf.extract.sequences.residue_tables import residue_table_blocks
+
+        residue_blocks = residue_table_blocks(
+            document,
+            parser=_source_parser_from_run(document.parser_run_id),
+            source_artifact_id=(
+                normalized_ref.relative_path if normalized_ref is not None else None
+            ),
+        )
+        listing_blocks = _interleave_residue_tables(blocks, residue_blocks)
 
         # T06: evidence is constructed at extraction time from real match
         # offsets — never reconstructed from id strings later.
@@ -1676,7 +1754,7 @@ class ExtractStage(_FileStage):
             # stayed empty then get a targeted OCR pass; the final parse —
             # with evidence — runs once over the augmented feed, so no
             # evidence ids are registered twice.
-            _, st25_scan = parse_st25_blocks_with_scan(blocks, doc_id)
+            _, st25_scan = parse_st25_blocks_with_scan(listing_blocks, doc_id)
             document_page_count: int | None = None
             try:
                 inspection = _read_input_json(
@@ -1705,7 +1783,7 @@ class ExtractStage(_FileStage):
             )
             ocr_candidates = ocr_candidates[:budget]
 
-            feed_blocks = blocks
+            feed_blocks = listing_blocks
             ocr_pages_used: list[int] = []
             conflict_pages: set[int] = set()
             ocr_text: dict[int, list[tuple[float, float, float, float, str]]] = {}
@@ -1732,7 +1810,7 @@ class ExtractStage(_FileStage):
                     ocr_text = {}
                 if ocr_text:
                     feed_blocks, merge_records, declaration_merge_records = _merge_ocr_page_lines(
-                        blocks, ocr_text
+                        listing_blocks, ocr_text
                     )
                     ocr_pages_used = sorted(ocr_text)
                     # F05/P01: split the merge records — content conflicts are
@@ -2155,6 +2233,10 @@ class ExtractStage(_FileStage):
                 for b in feed_blocks
                 if "<210>" in b["text"] or "<400>" in b["text"]
             }
+            # A page whose residues arrived as a TABLE is part of the
+            # listing too: scanning it with the prose extractor would only
+            # re-read its line-number gutter as candidate sequences.
+            st25_pages.update(int(b["page_number"]) for b in residue_blocks)
             non_st25 = [b for b in blocks if b["page_number"] not in st25_pages]
             sequences.extend(
                 extract_inline_sequences(

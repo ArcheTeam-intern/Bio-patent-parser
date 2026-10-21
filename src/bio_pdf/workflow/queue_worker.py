@@ -23,6 +23,7 @@ from pathlib import Path
 from bio_pdf.application.job_service import JobPaths, JobService
 from bio_pdf.errors import WorkflowError
 from bio_pdf.storage.repository import ClaimedJob, LeaseToken, Repository
+from bio_pdf.workflow.runner import RunResult
 
 #: Lease duration; the worker heartbeats at one fifth of this interval.
 LEASE_SECONDS = 900.0
@@ -103,6 +104,12 @@ class _PresenceKeeper:
             self._beat()
 
     def start(self) -> None:
+        # Housekeeping once per process: restarting a worker adds a new
+        # presence row (pid + random suffix), so old ones must not pile up.
+        try:
+            self._repo.prune_worker_presence()
+        except Exception:  # noqa: BLE001 - housekeeping must not block startup
+            pass
         self._beat()
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -115,6 +122,57 @@ class _PresenceKeeper:
 
     def close(self) -> None:
         self._repo.close()
+
+
+def run_claimed_job(
+    service: JobService,
+    data_dir: Path,
+    claimed: ClaimedJob,
+    *,
+    resume: bool | None = None,
+) -> RunResult:
+    """Run ONE claimed job under its lease and release the lease after.
+
+    Shared by the polling worker and by the CLI's direct ``run``: the CLI
+    claims the job it just created, so a polling worker can never claim
+    the same row and run it a second time (two MinerU submissions and two
+    publications for one request). ``resume=None`` reads the persisted
+    ``execution_mode``; the CLI passes its own flag.
+    """
+
+    job = claimed.job
+    keeper = _LeaseKeeper(data_dir, claimed)
+    keeper.start()
+    try:
+        if resume is None:
+            resume = service.job_config(job.job_id).get("execution_mode") == "resume"
+        return service.run_job(
+            job.job_id,
+            resume=resume,
+            # Fencing: the runner aborts before any status write or publish
+            # once this worker no longer holds the lease. Besides the
+            # in-memory lost flag, every stage boundary re-verifies the
+            # lease row in the database — a user cancel (or a reclaimed
+            # lease) takes effect at the next stage instead of at the next
+            # heartbeat.
+            lease_guard=lambda: (
+                not keeper.lost.is_set()
+                and service.repository.lease_is_valid(
+                    job.job_id,
+                    worker_id=claimed.worker_id,
+                    generation=claimed.generation,
+                )
+            ),
+            # B03: conditional commits re-verify this token inside their own
+            # transactions (stage completion, publication).
+            lease_token=LeaseToken.from_claim(claimed),
+        )
+    finally:
+        keeper.stop()
+        service.repository.release_lease(
+            job.job_id, worker_id=claimed.worker_id, generation=claimed.generation
+        )
+        keeper.close()
 
 
 def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False) -> int:
@@ -141,31 +199,8 @@ def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False
                 f"[queue_worker] claimed {job.job_id} (gen={claimed.generation})",
                 flush=True,
             )
-            keeper = _LeaseKeeper(data_dir, claimed)
-            keeper.start()
             try:
-                resume_mode = service.job_config(job.job_id).get("execution_mode") == "resume"
-                result = service.run_job(
-                    job.job_id,
-                    resume=resume_mode,
-                    # Fencing: the runner aborts before any status write or
-                    # publish once this worker no longer holds the lease.
-                    # Besides the in-memory lost flag, every stage boundary
-                    # re-verifies the lease row in the database — a user
-                    # cancel (or a reclaimed lease) takes effect at the next
-                    # stage instead of at the next heartbeat.
-                    lease_guard=lambda: (
-                        not keeper.lost.is_set()
-                        and service.repository.lease_is_valid(
-                            job.job_id,
-                            worker_id=claimed.worker_id,
-                            generation=claimed.generation,
-                        )
-                    ),
-                    # B03: conditional commits re-verify this token inside
-                    # their own transactions (stage completion, publication).
-                    lease_token=LeaseToken.from_claim(claimed),
-                )
+                result = run_claimed_job(service, data_dir, claimed)
                 print(
                     f"[queue_worker] {job.job_id} -> {result.status}"
                     f" (review={result.review_count})",
@@ -175,21 +210,20 @@ def run_worker(data_dir: Path, *, poll_interval: float = 1.5, once: bool = False
                 print(f"[queue_worker] {job.job_id} failed: {exc}", flush=True)
             except Exception as exc:  # noqa: BLE001 - worker must survive jobs
                 print(f"[queue_worker] {job.job_id} crashed: {exc!r}", flush=True)
-                if keeper.lost.is_set():
+                # A lost lease (cancel or reclaim) means the row is no longer
+                # ours: flipping it to failed would overwrite the new owner's
+                # state. Verify against the database, not a stale flag.
+                if service.repository.lease_is_valid(
+                    job.job_id,
+                    worker_id=claimed.worker_id,
+                    generation=claimed.generation,
+                ):
+                    service.repository.update_job_status(job.job_id, "failed")
+                else:
                     print(
                         f"[queue_worker] {job.job_id} lease lost — writes stopped",
                         flush=True,
                     )
-                else:
-                    service.repository.update_job_status(job.job_id, "failed")
-            finally:
-                keeper.stop()
-                service.repository.release_lease(
-                    job.job_id,
-                    worker_id=claimed.worker_id,
-                    generation=claimed.generation,
-                )
-                keeper.close()
             if once:
                 return 0
     except KeyboardInterrupt:

@@ -18,12 +18,18 @@ const CALL_WORDS: Record<string, string> = {
 
 export function formatValue(v: ActivityValue): string {
   switch (v.kind) {
-    case "scalar":
-      return `${v.operator ?? ""}${v.number ?? ""}`.trim();
+    case "scalar": {
+      const text = `${v.operator ?? ""}${v.number ?? ""}`.trim();
+      return text || v.raw;
+    }
     case "range":
-      return `${v.lower ?? "?"}–${v.upper ?? "?"}`;
+      return v.lower == null && v.upper == null
+        ? v.raw
+        : `${v.lower ?? "?"}–${v.upper ?? "?"}`;
     case "plus_minus":
-      return `${v.number ?? "?"} ± ${v.uncertainty ?? "?"}`;
+      return v.number == null
+        ? v.raw
+        : `${v.number} ± ${v.uncertainty ?? "?"}`;
     case "categorical": {
       const q = v.qualifier ?? "";
       const word = CALL_WORDS[q.toUpperCase()];

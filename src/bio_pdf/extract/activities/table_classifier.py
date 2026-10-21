@@ -23,6 +23,7 @@ from enum import Enum
 from bio_pdf.contracts import Table
 
 from bio_pdf.extract.activities.metrics import METRIC_REGISTRY, is_non_metric_header, lookup_metric
+from bio_pdf.extract.sequences.amino_acids import looks_like_residue_token
 
 
 class TableKind(str, Enum):
@@ -110,6 +111,12 @@ def classify_table(table: Table, *, caption: str | None = None) -> TableKind:
     headers = _header_texts(table)
     header_text = " | ".join(headers)
     caption_text = caption if caption is not None else (table.caption or "")
+    # A table SPLIT across the fold loses the title to the earlier page; the
+    # inherited title is the same physical table's declaration, so it decides
+    # the metric exactly like a caption printed on this page would (the UI
+    # still labels it as inherited).
+    if not caption_text:
+        caption_text = str(getattr(table, "continuation_caption", "") or "")
     combined = f"{caption_text} | {header_text}"
 
     # 1) Susceptibility: S/R/I values dominating the data cells.
@@ -122,6 +129,15 @@ def classify_table(table: Table, *, caption: str | None = None) -> TableKind:
 
     # 2) Sequence listing columns.
     if _SEQUENCE_WORDS.search(header_text):
+        return TableKind.SEQUENCE
+
+    # 2b) A residue LISTING: most data cells are three-letter codes
+    #     (``Glu``, ``Leu180``) instead of measurements. Residue grids carry
+    #     no "Residue" header at all (the first row is already residues), so
+    #     the header vocabulary above cannot see them — EP3423477B1 page 31
+    #     was reported as UNCLASSIFIED while being an entire page of SEQ 1.
+    residue_cells = sum(1 for v in values if looks_like_residue_token(v))
+    if values and residue_cells / len(values) >= 0.6:
         return TableKind.SEQUENCE
 
     # 3) Scoring vocabulary (before inventory: "Parameter|Animal ID|Score").

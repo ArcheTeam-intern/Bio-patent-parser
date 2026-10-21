@@ -674,23 +674,56 @@ class Repository:
         a stale worker's writes can be fenced out.
         """
 
+        return self._claim(worker_id=worker_id, lease_seconds=lease_seconds, job_id=None)
+
+    def claim_job(
+        self, job_id: str, *, worker_id: str, lease_seconds: float = 600.0
+    ) -> "ClaimedJob | None":
+        """Claim ONE named job under the same lease discipline.
+
+        Used by the CLI, which creates a job and then runs it itself: a
+        queued row left unclaimed could be picked up by a polling worker
+        at the same moment, running the job (and billing the cloud parser)
+        twice. Returns None when the job is not runnable — already leased
+        by a live worker, or terminal.
+        """
+
+        return self._claim(worker_id=worker_id, lease_seconds=lease_seconds, job_id=job_id)
+
+    def _claim(
+        self, *, worker_id: str, lease_seconds: float, job_id: str | None
+    ) -> "ClaimedJob | None":
         from datetime import datetime, timedelta, timezone
 
         conn = self._conn
         conn.execute("BEGIN IMMEDIATE")
         try:
             now = _utcnow_iso()
-            row = conn.execute(
-                """
-                SELECT j.job_id FROM jobs j
-                LEFT JOIN worker_leases w ON w.job_id = j.job_id
-                WHERE j.status = 'queued'
-                   OR (j.status = 'running' AND (w.lease_until IS NULL OR w.lease_until < ?))
-                ORDER BY j.created_at
-                LIMIT 1
-                """,
-                (now,),
-            ).fetchone()
+            runnable = (
+                "j.status = 'queued' OR "
+                "(j.status = 'running' AND (w.lease_until IS NULL OR w.lease_until < ?))"
+            )
+            if job_id is None:
+                row = conn.execute(
+                    f"""
+                    SELECT j.job_id FROM jobs j
+                    LEFT JOIN worker_leases w ON w.job_id = j.job_id
+                    WHERE {runnable}
+                    ORDER BY j.created_at
+                    LIMIT 1
+                    """,
+                    (now,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    f"""
+                    SELECT j.job_id FROM jobs j
+                    LEFT JOIN worker_leases w ON w.job_id = j.job_id
+                    WHERE j.job_id = ? AND ({runnable})
+                    LIMIT 1
+                    """,
+                    (job_id, now),
+                ).fetchone()
             if row is None:
                 conn.execute("ROLLBACK")
                 return None
@@ -821,6 +854,25 @@ class Repository:
             "SELECT worker_id, pid, data_dir, started_at, last_seen_at FROM worker_presence"
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def prune_worker_presence(self, *, older_than_seconds: float = 6 * 3600) -> int:
+        """Drop presence rows nothing has refreshed for a long time.
+
+        ``worker_id`` carries the pid and a random suffix, so every worker
+        restart adds a row; without pruning the table (and therefore
+        ``GET /queue/status``) grows forever. Returns the number of rows
+        deleted.
+        """
+
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (
+            datetime.now(tz=timezone.utc) - timedelta(seconds=older_than_seconds)
+        ).isoformat()
+        cursor = self._conn.execute(
+            "DELETE FROM worker_presence WHERE last_seen_at < ?", (cutoff,)
+        )
+        return int(cursor.rowcount or 0)
 
     def count_jobs_by_status(self) -> dict[str, int]:
         rows = self._conn.execute(

@@ -45,6 +45,22 @@ def test_worker_runs_queued_job(service) -> None:
     assert done.status in {"succeeded", "succeeded_with_review"}
 
 
+def test_claim_job_fences_the_job_from_a_polling_worker(service) -> None:
+    """The CLI claims the job it just created, then runs it itself.
+
+    Left merely queued, a polling worker could claim the same row at the
+    same moment: two MinerU submissions and two publications for one job
+    (observed live on job-6ceacbdb0c81). Once claimed, the worker's
+    ``claim_next_queued_job`` must find nothing until the lease expires.
+    """
+
+    svc, tmp_path = service
+    job, _ = svc.create_job(_make_pdf(tmp_path))
+    claimed = svc.repository.claim_job(job.job_id, worker_id="cli-1", lease_seconds=900)
+    assert claimed is not None and claimed.job.job_id == job.job_id
+    assert svc.repository.claim_next_queued_job(worker_id="w1", lease_seconds=900) is None
+
+
 def test_expired_lease_is_reclaimable(service) -> None:
     svc, tmp_path = service
     pdf = _make_pdf(tmp_path)

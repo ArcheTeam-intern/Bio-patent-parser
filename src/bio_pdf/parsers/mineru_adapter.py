@@ -42,6 +42,7 @@ from bio_pdf.errors import (
     RemoteBatchFailedError,
     UploadSlotExpiredError,
 )
+from bio_pdf.extract.sequences.amino_acids import looks_like_residue_token
 from bio_pdf.parsers.base import ParseArtifacts, ParseRequest
 from bio_pdf.parsers.normalize_docling import normalize_docling_document
 
@@ -2107,6 +2108,16 @@ def _infer_row_label_spans(cells: list[dict[str, Any]]) -> None:
     for cell in cells:
         by_row.setdefault(int(cell.get("start_row_offset_idx") or 0), []).append(cell)
     row_count = max(by_row) + 1
+    # The grid width: a cell spanning ALL of it is a BANNER row (MinerU writes
+    # the last organism of live Table 4a as ``<td colspan="5">Acinetobacter
+    # johnsonii</td>``), not a label in the left column. Extending a banner's
+    # row_span would make it overlap the value cells of the rows it covers —
+    # four fake "grid overlap" errors — so banners are left alone here and
+    # recognised as block labels by the header graph instead.
+    grid_width = max(
+        int(cell.get("start_col_offset_idx") or 0) + max(1, int(cell.get("col_span") or 1))
+        for cell in cells
+    )
 
     spanned: set[tuple[int, int]] = set()
     for cell in cells:
@@ -2166,6 +2177,8 @@ def _infer_row_label_spans(cells: list[dict[str, Any]]) -> None:
         if not data_cells:
             continue
         start = int(last_label.get("start_row_offset_idx") or 0)
+        if max(1, int(last_label.get("col_span") or 1)) >= grid_width:
+            continue  # a banner names the block; the header graph reads it
         new_span = row_index - start + 1
         if new_span > int(last_label.get("row_span") or 1):
             last_label["row_span"] = new_span
@@ -2335,6 +2348,21 @@ def _project_table_item(
             c["start_row_offset_idx"], c["start_row_offset_idx"] + c.get("row_span", 1)
         ):
             row_widths[covered_row] = max(row_widths.get(covered_row, 0), end_col)
+    # A row-spanning LABEL makes its own row look short: the row carries the
+    # label and nothing else, while the rows it covers are the full grid
+    # width. Live Table 4a is a regular 10-organism MIC grid — "Escherichia
+    # coli" in one row, its five strains' values in the next — and measuring
+    # the label row alone reported "row widths range 1..5", so the severe
+    # gate refused all 138 values (same for the 10-column Table 4c). The
+    # label row is as wide as the block it labels.
+    for c in cells:
+        row_span = int(c.get("row_span") or 1)
+        if row_span < 2:
+            continue
+        start = int(c["start_row_offset_idx"])
+        covered_widths = [row_widths.get(r, 0) for r in range(start, start + row_span)]
+        if covered_widths:
+            row_widths[start] = max(row_widths.get(start, 0), max(covered_widths))
     distinct_widths = sorted({row_widths[r] for r in sorted(row_widths)})
     if len(distinct_widths) > 1:
         spread = distinct_widths[-1] - distinct_widths[0]
@@ -2478,7 +2506,20 @@ def _project_content_list(
                 # MinerU emits them as ONE table_body, so a header row repeats
                 # mid-grid and every row after it reads as misaligned. Split
                 # on the repeated header.
-                for part in _split_repeated_header_table(table_payload):
+                parts = _split_repeated_header_table(table_payload)
+                if len(parts) > 1:
+                    # The fold marker is computed for the WHOLE table_body; only
+                    # the LAST part can reach the next page. Copied verbatim,
+                    # the first part claimed "continues on next page" and the
+                    # next page's table tab showed a table that does not continue.
+                    for part in parts[:-1]:
+                        part["structure_issues"] = [
+                            issue
+                            for issue in part.get("structure_issues") or []
+                            if not str(issue).startswith("TABLE_CONTINUES_ON_NEXT_PAGE")
+                        ]
+                        part.pop("continuation_group", None)
+                for part in parts:
                     part["self_ref"] = f"mineru:table:{page_no}:{len(page['tables'])}"
                     page["tables"].append(part)
                 continue
@@ -2560,7 +2601,354 @@ def _project_content_list(
                 }
             )
 
+    # Both passes need ALL pages at once: a caption is a running header by
+    # its SHAPE, and a continuation is only real when the next page carries
+    # text but no table of its own.
+    _demote_running_header_captions(pages)
+    _mark_cross_page_continuations(pages)
     return {"pages": [pages[k] for k in sorted(pages.keys())]}
+
+
+#: A table frame ending within this share of the page height may fold onto
+#: the next page. The live EP3423477B1 fold sat at 0.893 of the page — just
+#: under the 0.92 "touches the bottom" test, so Table 4b's continuation was
+#: never marked while its rows for page 24 sat inside the page-23 grid.
+_FOLD_BOTTOM_RATIO = 0.86
+
+#: A table frame STARTING within this share of the page height may be the
+#: TAIL of a table split across the fold — MinerU emits one item per page in
+#: that case. The live EP3423477B1 page 23 began with an 8x5 fragment at
+#: 0.10 of the page: the last rows of page 22's Table 4a, header repeated and
+#: no title of their own.
+_SPLIT_TOP_RATIO = 0.12
+
+#: A caption that is really the page's running header: a patent publication
+#: number (optionally with a "(continued)" marker) and nothing else.
+_RUNNING_HEADER_CAPTION_RE = re.compile(
+    r"^\s*(?:EP|WO|US|CN|JP|KR|DE|FR|GB)\s*[\d\s,./-]{4,}\s*[A-Z]\d?"
+    r"\s*(?:\(\s*continued\s*\))?\s*$",
+    re.IGNORECASE,
+)
+
+#: Any ST.25 tag marks a page as part of a SEQUENCE LISTING. Such a page is
+#: its own structural content, never the rows of a table folded across the
+#: fold — live page 32 starts with ``<400> 2`` while page 31's residue grid
+#: merely ENDS near the bottom of its own page.
+_ST25_TAG_ANY_RE = re.compile(r"<\s*(?:210|211|212|213|400)\s*>")
+
+
+def _page_is_sequence_listing(page: dict[str, Any]) -> bool:
+    for text in page.get("texts") or []:
+        if _ST25_TAG_ANY_RE.search(str(text.get("text") or "")):
+            return True
+    return False
+
+
+def _table_bbox(table: dict[str, Any]) -> dict[str, Any]:
+    prov = (table.get("prov") or [{}])[0]
+    bbox = prov.get("bbox") if isinstance(prov, dict) else None
+    return bbox if isinstance(bbox, dict) else {}
+
+
+def _table_edge(table: dict[str, Any], key: str) -> float | None:
+    """A frame edge in page points, or ``None`` when the box is missing."""
+
+    try:
+        return float(_table_bbox(table).get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _table_column_count(table: dict[str, Any]) -> int:
+    cells = (table.get("data") or {}).get("table_cells") or []
+    columns = 0
+    for cell in cells:
+        try:
+            end = int(cell.get("start_col_offset_idx") or 0) + int(cell.get("col_span") or 1)
+        except (TypeError, ValueError):
+            continue
+        columns = max(columns, end)
+    return columns
+
+
+def _table_header_by_column(table: dict[str, Any]) -> dict[int, str]:
+    """First-row cell texts keyed by column index (lower-cased)."""
+
+    cells = (table.get("data") or {}).get("table_cells") or []
+    by_column: dict[int, str] = {}
+    for cell in cells:
+        try:
+            if int(cell.get("start_row_offset_idx") or 0) != 0:
+                continue
+            column = int(cell.get("start_col_offset_idx") or 0)
+        except (TypeError, ValueError):
+            continue
+        text = str(cell.get("text") or "").strip().lower()
+        if text:
+            by_column[column] = text
+    return by_column
+
+
+def _share_header_labels(head: dict[str, Any], tail: dict[str, Any]) -> int:
+    """Identical first-row labels at the SAME column of two grids."""
+
+    head_by_column = _table_header_by_column(head)
+    tail_by_column = _table_header_by_column(tail)
+    return sum(
+        1
+        for column, label in tail_by_column.items()
+        if head_by_column.get(column) == label
+    )
+
+
+def _header_row_is_labels(table: dict[str, Any]) -> bool:
+    """Whether row 0 reads as column headings (``Bacteria* | Strains | …``).
+
+    A residue grid's first row is already three-letter codes, and td-only
+    tables get ``column_header`` INFERRED onto row 0 by the projector — the
+    flags alone therefore cannot tell a heading row from a listing.
+    """
+
+    cells = (table.get("data") or {}).get("table_cells") or []
+    labels = 0
+    texts: list[str] = []
+    for cell in cells:
+        try:
+            if int(cell.get("start_row_offset_idx") or 0) != 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        text = str(cell.get("text") or "").strip()
+        if not text:
+            continue
+        texts.append(text)
+        if cell.get("is_header") or cell.get("column_header"):
+            labels += 1
+    if labels < 2 or not texts:
+        return False
+    residues = sum(1 for text in texts if looks_like_residue_token(text))
+    if residues * 2 >= len(texts):
+        return False
+    return True
+
+
+def _set_issue(table: dict[str, Any], code: str, text: str) -> None:
+    """Record ``CODE: text``, replacing an earlier claim with the same code.
+
+    The projection-time fold marker is a GUESS (the next page is unknown at
+    that moment). Once the real partner table is found the guess is replaced
+    by the finding instead of stacking two contradicting notes.
+    """
+
+    issues = [
+        issue
+        for issue in (table.get("structure_issues") or [])
+        if not str(issue).startswith(f"{code}:")
+    ]
+    issues.append(f"{code}: {text}")
+    table["structure_issues"] = issues
+
+
+def _demote_running_header_captions(page_payloads: dict[int, dict[str, Any]]) -> None:
+    """Drop captions that are really the page's running header.
+
+    MinerU attaches the nearest text ABOVE a table as ``table_caption``. At
+    the top of a page that text is the running header — EP3423477B1 p23 got
+    "EP 3 423 477 B1 (continued)" as the TITLE of its susceptibility grid.
+    The text is not lost (it stays in the page's own text layer); it is only
+    removed from the table title, with a structural note recording why.
+    """
+
+    for page in page_payloads.values():
+        for table in page.get("tables", []):
+            caption = table.get("caption")
+            if not caption or not _RUNNING_HEADER_CAPTION_RE.match(str(caption)):
+                continue
+            table.pop("caption", None)
+            table["structure_issues"] = list(table.get("structure_issues") or []) + [
+                "CAPTION_DROPPED_RUNNING_HEADER: the caption text was the page's "
+                f"running header ({str(caption)[:60]!r}), not a table title"
+            ]
+
+
+def _mark_cross_page_continuations(page_payloads: dict[int, dict[str, Any]]) -> None:
+    """Flag tables that span a page fold — in BOTH directions (plan K11).
+
+    MinerU splits one physical table across two pages in two different ways,
+    and each used to leave the reader with half the content and no note:
+
+    FOLDED FORWARD — one item holds both pages' rows and the following page
+    shows no table at all (page 23's 54-row grid carried page 24's strains).
+
+    SPLIT — one item per page: the head ends at the fold and the next page
+    opens with a header-repeating fragment that carries no title of its own
+    (page 23 started with the last 7 strains of page 22's Table 4a).
+
+    Both passes only ever mark adjacency between ``page_no`` and the literal
+    ``page_no + 1``: a job may request a non-contiguous set (``4,23,24,26,…``)
+    and page 26's continuation is page 27, not the next entry in the request.
+    """
+
+    _mark_tables_folded_forward(page_payloads)
+    _mark_split_tables(page_payloads)
+
+
+def _mark_tables_folded_forward(page_payloads: dict[int, dict[str, Any]]) -> None:
+    """A frame ending at the fold whose rows continue on the next page.
+
+    A table on the next page only DISPROVES the fold when it covers the fold
+    REGION (it starts at the page top). Live page 22/23: the 57-row grid holds
+    page 22 plus the seven strains printed at the TOP of page 23, while page
+    23's own Table 4b starts 31% down the page — "the next page has a table"
+    alone is not evidence that nothing was folded in.
+    """
+
+    order = sorted(page_payloads)
+    for page_no in order:
+        page = page_payloads[page_no]
+        height = float(page.get("height") or 0.0)
+        if height <= 0 or (page_no + 1) not in page_payloads:
+            continue
+        next_page = page_payloads[page_no + 1]
+        if not next_page.get("texts"):
+            continue
+        if _page_is_sequence_listing(next_page):
+            # A declaration page belongs to the listing, not to this table.
+            continue
+        next_tables = next_page.get("tables") or []
+        next_height = float(next_page.get("height") or 0.0)
+        next_top: float | None = None
+        if next_tables:
+            next_top = _table_edge(next_tables[0], "t")
+            if next_top is None or (
+                next_height > 0 and next_top <= next_height * _SPLIT_TOP_RATIO
+            ):
+                # The next page's own table starts at the top: it IS the
+                # continuation of the fold, and this grid is complete.
+                continue
+        for table in page.get("tables", []):
+            if table.get("continuation_group"):
+                continue
+            bottom = _table_edge(table, "b")
+            if bottom is None or bottom < height * _FOLD_BOTTOM_RATIO:
+                continue
+            if next_top is None:
+                detail = (
+                    f"page {next_page.get('page')} shows no table — MinerU folds its "
+                    "rows into this one table"
+                )
+            else:
+                detail = (
+                    f"page {next_page.get('page')}'s own table starts "
+                    f"{next_top / next_height:.0%} down the page — the rows above it "
+                    "are folded into this one table"
+                )
+            _set_issue(
+                table,
+                "TABLE_CONTINUES_ON_NEXT_PAGE",
+                "table frame ends at the page fold and " + detail,
+            )
+            table["continuation_group"] = (
+                f"{table.get('self_ref') or f'mineru:table:{page_no}'}:continues"
+            )
+
+
+def _mark_split_tables(page_payloads: dict[int, dict[str, Any]]) -> None:
+    """A page opening with the TAIL of the previous page's table.
+
+    The tail is recognisable by position (frame starts at the page top) plus
+    either a repeated header row or — when the header was not repeated — the
+    combination of no caption of its own and a head frame that touches the
+    bottom. When the previous page is OUTSIDE the parsed range the pair
+    cannot be verified, so the fragment is flagged as a SUSPICION with the
+    reason stated (a reviewer can widen the page range), never linked.
+    """
+
+    for page_no in sorted(page_payloads):
+        page = page_payloads[page_no]
+        height = float(page.get("height") or 0.0)
+        tables = page.get("tables") or []
+        if height <= 0 or not tables:
+            continue
+        tail = tables[0]
+        top = _table_edge(tail, "t")
+        if top is None or top > height * _SPLIT_TOP_RATIO:
+            continue
+        if any(str(i).startswith("TABLE_SPLIT_REPEATED_HEADER")
+               for i in tail.get("structure_issues") or []):
+            # The grid was split WITHIN this page (two stacked tables in one
+            # table_body): its first part is not a cross-page fragment.
+            continue
+
+        head = None
+        previous = page_payloads.get(page_no - 1)
+        if previous is not None:
+            previous_height = float(previous.get("height") or 0.0)
+            candidates = previous.get("tables") or []
+            if candidates and previous_height > 0:
+                candidate = candidates[-1]
+                bottom = _table_edge(candidate, "b")
+                columns = _table_column_count(candidate)
+                repeated = _share_header_labels(candidate, tail)
+                touches_bottom = bottom is not None and bottom >= previous_height * 0.92
+                same_grid = columns >= 2 and columns == _table_column_count(tail)
+                # A repeated header row at the SAME headings is conclusive on
+                # its own (live page 25/26: the head ended at 0.856, just under
+                # the fold ratio, yet page 26 re-printed its exact header). The
+                # geometry only decides when the header was NOT repeated.
+                if same_grid and (
+                    repeated >= 2
+                    or (
+                        touches_bottom
+                        and not tail.get("caption")
+                        and bottom is not None
+                        and bottom >= previous_height * _FOLD_BOTTOM_RATIO
+                    )
+                ):
+                    head = candidate
+
+        if head is not None:
+            group = (
+                head.get("continuation_group")
+                or tail.get("continuation_group")
+                or f"{head.get('self_ref') or f'mineru:table:{page_no - 1}'}:split"
+            )
+            head["continuation_group"] = group
+            tail["continuation_group"] = group
+            if head.get("caption") and not tail.get("caption"):
+                # The title (which declares the METRIC) is printed only on the
+                # earlier page. Carried as a SEPARATE field: classification and
+                # extraction may use it, but the UI must never show it as this
+                # page's own caption. Without it every value on the tail page
+                # was dropped for having "no metric anywhere".
+                tail["continuation_caption"] = head.get("caption")
+            _set_issue(
+                head,
+                "TABLE_CONTINUES_ON_NEXT_PAGE",
+                f"this table is SPLIT across the fold: page {page_no} opens with a "
+                "table whose header repeats this one's, so its last rows live there",
+            )
+            _set_issue(
+                tail,
+                "TABLE_CONTINUED_FROM_PREVIOUS_PAGE",
+                f"table frame starts at the page top and repeats the header of the "
+                f"table that ends page {page_no - 1}: this is the TAIL of that table "
+                "(the rows above the fold are on the previous page)",
+            )
+            continue
+
+        if page_no <= 1 or previous is not None or not _header_row_is_labels(tail):
+            continue
+        if tail.get("caption"):
+            continue
+        _set_issue(
+            tail,
+            "TABLE_MAYBE_CONTINUED_FROM_PREVIOUS_PAGE",
+            "table starts at the page top, opens with a header row and has no "
+            f"caption of its own — it may be the tail of a table that ends page "
+            f"{page_no - 1}, which is OUTSIDE the parsed page range (widen the "
+            "range to confirm)",
+        )
 
 
 #: Chinese patents number every paragraph ("[0009]"); a merged MinerU block

@@ -32,6 +32,7 @@ from bio_pdf.extract.sequences.amino_acids import (
     ALLOWED_ALPHABETS,
     AMINO_ACID_THREE_TO_ONE,
     ResidueMapper,
+    strip_position_suffix,
 )
 
 #: Tag regexes. ``<400>`` must be matched before ``<4xx>`` fall-through.
@@ -54,6 +55,11 @@ _MOLECULE_TYPE: dict[str, MoleculeType] = {
 
 _POSITION_NUMBER_RE = re.compile(r"^\d+\s*$")
 
+#: A line that DECLARES a sequence (optionally behind a page-margin line
+#: number). Used to anchor a sequence's declaration page, which carries no
+#: residues of its own and would otherwise have page-level evidence only.
+_DECLARATION_LINE_RE = re.compile(r"^\s*(?:\d{1,4}[ \t]+)?<\s*(?:210|211|212|213)\s*>")
+
 #: Lines that cannot be residue lines: prose sentences carry sentence
 #: punctuation. A ST.25 residue line only ever contains residue tokens and
 #: bare position numbers, so any other symbol ends the current residue block.
@@ -61,6 +67,37 @@ _NON_RESIDUE_RE = re.compile(r"[.,:;()\[\]<>\"'±%–—\-/\\|=+*?!&#$@^~`{}]")
 
 #: Nucleic-acid letters for DNA/RNA chunk lines (IUPAC ambiguity included).
 _NUCLEIC_CHARS = set("ACGTUNRYSWKMBDHVacgtunryswkmbdhv")
+
+
+def _union_bbox(
+    current: tuple[float, float, float, float] | None, box: Any
+) -> tuple[float, float, float, float] | None:
+    """Union two page boxes, ignoring anything that is not a 4-number box."""
+
+    if box is None:
+        return current
+    try:
+        x0, y0, x1, y1 = (float(box[i]) for i in range(4))
+    except (TypeError, ValueError, IndexError):
+        return current
+    if current is None:
+        return (x0, y0, x1, y1)
+    return (
+        min(current[0], x0),
+        min(current[1], y0),
+        max(current[2], x1),
+        max(current[3], y1),
+    )
+
+
+def _contributes_residues(line: str) -> bool:
+    """Whether a residue-block line carries a residue (not only counters).
+
+    Bare integers are ST.25 position numbers — or the page's own footer —
+    and must not extend an evidence region.
+    """
+
+    return any(not _POSITION_NUMBER_RE.match(token) for token in line.split())
 
 
 def _looks_like_residue_line(line: str) -> bool:
@@ -115,6 +152,19 @@ class _SequenceBuilder:
     normalized_sequence: str = ""
     residues: list[dict[str, str]] = field(default_factory=list)
     representation: str = "one_letter"
+    #: THIS sequence's residue lines per page (evidence excerpts). Tracking
+    #: them per sequence — not per page — is what makes "jump to SEQ 2" land
+    #: on SEQ 2's own rows instead of the whole page's residue union.
+    page_fragments: dict[int, list[str]] = field(default_factory=dict)
+    #: THIS sequence's residue REGION per page (union of its line boxes).
+    page_bbox: dict[int, tuple[float, float, float, float]] = field(default_factory=dict)
+    #: The ``<210>/<211>/<212>`` lines that declare this sequence, and their
+    #: box — the ONLY honest anchor on a declaration page that holds no
+    #: residues of its own (live page 29).
+    declaration_text: list[str] = field(default_factory=list)
+    declaration_bbox: tuple[float, float, float, float] | None = None
+    #: Whether a ``<210>`` line was already seen (its block is the anchor).
+    declaration_has_210: bool = False
 
 
 class _St25StateMachine:
@@ -126,6 +176,12 @@ class _St25StateMachine:
         self.records: list[SequenceRecord] = []
         #: Pages each finalized record's residues appeared on (aligned).
         self.record_pages: list[list[int]] = []
+        #: The declaration page of each finalized record (aligned with
+        #: ``record_pages``): the page that carries ``<210>``, which is not
+        #: necessarily a residue page.
+        self.record_declaration_pages: list[int] = []
+        #: Per-record evidence material (aligned with ``record_pages``).
+        self.record_evidence: list[dict[str, Any]] = []
         #: Listings that closed with ZERO residues (B09): surfaced as
         #: unresolved issues instead of building an empty contract object.
         self.zero_residue_listings: list[tuple[str | None, int]] = []
@@ -139,9 +195,23 @@ class _St25StateMachine:
         #: what was removed, so evidence/diagnostics can cite the ORIGINAL
         #: line while the lexer works on the cleaned one.
         self.lex_mappings: list[dict[str, Any]] = []
+        #: Box of the block currently being fed (set by :meth:`feed_line`),
+        #: so a residue row recovered from a ``<400>`` line keeps its region.
+        self.current_line_bbox: Any = None
 
-    def feed_line(self, line: str, *, page_number: int) -> None:
+    def feed_line(
+        self, line: str, *, page_number: int, bbox: Any = None
+    ) -> None:
+        """Consume one listing line.
+
+        ``bbox`` is the box of the BLOCK the line came from: it is what makes
+        the evidence anchor at the listing region instead of the page. It is
+        optional — a caller without geometry (tests, plain text) still gets a
+        correct parse, just page-level evidence.
+        """
+
         cleaned_line = line
+        self.current_line_bbox = bbox
         margin = _MARGIN_TAG_RE.match(line)
         if margin is not None:
             cleaned_line = margin.group(2)
@@ -158,8 +228,7 @@ class _St25StateMachine:
             # Non-tag line: could be a continuation of the residue block.
             if self.current is not None and self.current.in_residues:
                 if not line.strip() or _looks_like_residue_line(line):
-                    self.current.residue_lines.append(line)
-                    self.current.residue_entries.append((page_number, line))
+                    self._note_residue(line, page_number, bbox)
                 else:
                     # Prose after the listing ends the residue block; the
                     # state machine stays open until the next <210> but no
@@ -179,6 +248,48 @@ class _St25StateMachine:
                 break
             self._apply_tag(tag, rest[: embedded.start()].strip(), page_number)
             tag, rest = embedded.group(1), rest[embedded.end():]
+
+        # K12: remember the DECLARATION lines of the sequence they open — a
+        # declaration page (live page 29) carries no residues, so the <210>
+        # block is the only region a click can land on.
+        builder = self.current
+        if builder is not None and _DECLARATION_LINE_RE.match(cleaned_line):
+            stripped = cleaned_line.strip()
+            if stripped not in builder.declaration_text:
+                builder.declaration_text.append(stripped)
+            # Anchor on the <210> block ONLY: the rest of a declaration can
+            # sit in another block far away (live page 29 carries <210>/<211>/
+            # <212> at the page bottom and <213> at the top), and unioning
+            # them would highlight the whole page instead of the declaration.
+            if "210" in _INLINE_TAG_RE.findall(cleaned_line):
+                builder.declaration_bbox = _union_bbox(
+                    builder.declaration_bbox if builder.declaration_has_210 else None,
+                    bbox,
+                )
+                builder.declaration_has_210 = True
+            elif not builder.declaration_has_210:
+                builder.declaration_bbox = _union_bbox(builder.declaration_bbox, bbox)
+
+    def _note_residue(self, line: str, page_number: int, bbox: Any) -> None:
+        """Record a residue line on the CURRENT sequence, with its region.
+
+        Only a line that actually carries a residue token contributes to the
+        evidence region: bare position counters and the footer page number
+        are residue-block CONTINUATION evidence but not an anchor — letting
+        them widen the box dragged the page-31 highlight down to the footer.
+        """
+
+        builder = self.current
+        if builder is None:
+            return
+        builder.residue_lines.append(line)
+        builder.residue_entries.append((page_number, line))
+        if not _contributes_residues(line):
+            return
+        builder.page_fragments.setdefault(page_number, []).append(line.rstrip())
+        merged = _union_bbox(builder.page_bbox.get(page_number), bbox)
+        if merged is not None:
+            builder.page_bbox[page_number] = merged
 
     def _apply_tag(self, tag: str, rest: str, page_number: int) -> None:
         if tag == "210":
@@ -220,10 +331,38 @@ class _St25StateMachine:
             self.current.saw_400 = True
             self.current.in_residues = True
             self.current.residue_page = page_number
-            # The <400> line carries the sequence number, not a residue.
-            if rest:
-                # Ignore the trailing seq id (redundant with <210>).
-                pass
+            # The <400> line USUALLY carries only the sequence number, but
+            # real listings print the first residue row on it too
+            # ("<400> 2 catatgagac tagtagctca tcctgttcct gatgc 35").
+            # Ignoring that rest silently lost every residue of the sequence
+            # — live page-32 SEQ 2/3 came out as zero-residue "missing"
+            # listings while their residues sat on the <400> line itself.
+            inline = self._residues_after_400(rest)
+            if inline:
+                self._note_residue(inline, page_number, self.current_line_bbox)
+
+    def _residues_after_400(self, rest: str) -> str:
+        """The residue row printed ON a ``<400>`` line (after its seq number).
+
+        The leading bare integer is the listing's own sequence number and is
+        stripped ONLY when it is a standalone number equal to the declared
+        SEQ ID: a residue token is never a bare number, so ``<400> Met Lys``
+        keeps every residue.
+        """
+
+        tokens = rest.split()
+        if not tokens:
+            return ""
+        if _POSITION_NUMBER_RE.match(tokens[0]):
+            declared = (self.current.seq_id_no or "").strip() if self.current else ""
+            if not declared or tokens[0] == declared:
+                tokens = tokens[1:]
+        candidate = " ".join(tokens).strip()
+        if not candidate:
+            return ""
+        # A prose sentence that happens to follow <400> must not open a
+        # residue block; no residue row carries sentence punctuation.
+        return candidate if _looks_like_residue_line(candidate) else ""
 
     def _close_current(self) -> None:
         if self.current is None:
@@ -325,6 +464,19 @@ class _St25StateMachine:
         self.scan_entries.append(scan_entry)
 
         self.record_pages.append(pages)
+        self.record_declaration_pages.append(builder.declaration_page)
+        # Material for the evidence pass, keyed by page so a region never has
+        # to be re-derived (and never widened by another sequence's lines).
+        self.record_evidence.append(
+            {
+                "declaration_text": _join_lines(builder.declaration_text) or None,
+                "declaration_bbox": builder.declaration_bbox,
+                "fragments": {
+                    page: list(lines) for page, lines in builder.page_fragments.items()
+                },
+                "boxes": dict(builder.page_bbox),
+            }
+        )
         record = SequenceRecord(
             sequence_id=f"{self.document_id}:seq:{builder.seq_id_no or 'unnamed'}",
             document_id=self.document_id,
@@ -362,11 +514,15 @@ class _St25StateMachine:
 
         tokens = raw.split()
         non_number_tokens = [t for t in tokens if not _POSITION_NUMBER_RE.match(t)]
+        # A residue TABLE glues the position onto the code (``Glu180``): the
+        # FORM must be decided on the letters, or the table's rows fall
+        # through to the single-letter path and become gibberish.
+        base_tokens = [strip_position_suffix(t) for t in non_number_tokens]
 
         three_letter_form = (
-            len(non_number_tokens) >= 1
-            and all(len(t) <= 3 and (t.isalpha() or not t.isalnum()) for t in non_number_tokens)
-            and any(len(t) == 3 and t.isalpha() for t in non_number_tokens)
+            len(base_tokens) >= 1
+            and all(len(t) <= 3 and (t.isalpha() or not t.isalnum()) for t in base_tokens)
+            and any(len(t) == 3 and t.isalpha() for t in base_tokens)
         )
 
         if three_letter_form:
@@ -611,44 +767,17 @@ def parse_st25_blocks_with_scan(
     # made PER OCCURRENCE from that occurrence's own geometry/role, so a
     # header copy can never blacklist the same text used as body residues.
     is_running_line = _running_line_filter(blocks)
-    # Per-page raw residue text, captured while feeding (plan B09): each
-    # page's evidence carries ITS OWN fragment, not a copied full sequence.
-    page_fragments: dict[int, list[str]] = {}
-    # The residue REGION of each page (union of the contributing block
-    # boxes). A sequence's evidence anchors here instead of the whole page,
-    # so "jump to this sequence" lands on the listing.
-    page_residue_bbox: dict[int, tuple[float, float, float, float]] = {}
-
-    def _extend_bbox(page: int, box: Any) -> None:
-        try:
-            x0, y0, x1, y1 = (float(box[i]) for i in range(4))
-        except (TypeError, ValueError, IndexError):
-            return
-        current = page_residue_bbox.get(page)
-        if current is None:
-            page_residue_bbox[page] = (x0, y0, x1, y1)
-            return
-        page_residue_bbox[page] = (
-            min(current[0], x0),
-            min(current[1], y0),
-            max(current[2], x1),
-            max(current[3], y1),
-        )
 
     for entry in blocks:
         text = entry.get("text")
         if not text:
             continue
         page_number = int(entry.get("page_number", 1))
+        bbox = entry.get("bbox")
         for line in str(text).splitlines():
             if is_running_line(entry, line):
                 continue
-            machine.feed_line(line, page_number=page_number)
-            if machine.current is not None and machine.current.in_residues:
-                if line.strip():
-                    page_fragments.setdefault(page_number, []).append(line.rstrip())
-                    if entry.get("bbox"):
-                        _extend_bbox(page_number, entry["bbox"])
+            machine.feed_line(line, page_number=page_number, bbox=bbox)
     machine.finish()
 
     if issues is not None:
@@ -665,7 +794,12 @@ def parse_st25_blocks_with_scan(
     if evidence_index is not None:
         from bio_pdf.extract.evidence import span_page_only, span_unlocated
 
-        for record, pages in zip(machine.records, machine.record_pages):
+        for record, pages, declaration_page, material in zip(
+            machine.records,
+            machine.record_pages,
+            machine.record_declaration_pages,
+            machine.record_evidence,
+        ):
             new_ids: list[str] = []
             if not pages:
                 # No page is known for this record: honest "unlocated",
@@ -680,17 +814,23 @@ def parse_st25_blocks_with_scan(
                 evidence_index.add(span)
                 new_ids.append(span.evidence_id)
             for page in pages:
-                fragment_text = _join_lines(page_fragments.get(page, []))[:400] or None
+                # THIS sequence's own rows on this page (never another
+                # sequence's), and on a declaration-only page the <210> block
+                # — the reviewer's first jump then lands on the sequence's own
+                # declaration instead of an un-highlighted page.
+                fragment_text = _join_lines(material["fragments"].get(page, []))[:400]
+                bbox = material["boxes"].get(page)
+                if page == declaration_page:
+                    fragment_text = fragment_text or material["declaration_text"]
+                    bbox = bbox if bbox is not None else material["declaration_bbox"]
                 span = span_page_only(
                     document_id=document_id,
                     parser_run_id=parser_run_id,
                     page_number=page,
-                    text_raw=fragment_text,
+                    text_raw=fragment_text or None,
                     source_locator=f"st25:{record.seq_id_no or 'seq'}:p{page}",
                     source_parser="native",
-                    # The residue region on THIS page (block precision). A
-                    # page that contributed no residue box stays page-level.
-                    bbox=page_residue_bbox.get(page),
+                    bbox=bbox,
                 )
                 evidence_index.add(span)
                 new_ids.append(span.evidence_id)

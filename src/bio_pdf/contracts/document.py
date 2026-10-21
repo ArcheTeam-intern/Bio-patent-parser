@@ -226,6 +226,13 @@ class Table(_StrictModel):
     header_cell_ids: list[NonEmptyStr] = Field(default_factory=list)
     caption: NonEmptyStr | None = None
     caption_refs: list[NonEmptyStr] = Field(default_factory=list)
+    #: Title of the table this one CONTINUES (MinerU split one physical table
+    #: across the fold, so the title is printed only on the earlier page).
+    #: It is real document text, but NOT printed on this table's own page —
+    #: the UI must label it as inherited. Consumers may use it for
+    #: classification (the metric lives in the title) but must never present
+    #: it as this page's caption.
+    continuation_caption: NonEmptyStr | None = None
     footnote_refs: list[NonEmptyStr] = Field(default_factory=list)
     bbox: BoundingBox | None = None
     continuation_group: NonEmptyStr | None = None
