@@ -63,6 +63,21 @@ def test_categorical_preserves_original() -> None:
     assert value.qualifier == "not tested"
 
 
+def test_dash_placeholder_is_not_determined() -> None:
+    """A lone dash is "not tested", not an unparseable value.
+
+    Live Table 4c prints "-" for every peptide/strain pair it did not run.
+    The cell was admitted by the extractor and then failed the value parser,
+    producing 35 validation conflicts whose only content was "-".
+    """
+
+    for raw in ("-", "–", "—", "−"):
+        value = parse_activity_value(raw)
+        assert value.kind == "categorical", raw
+        assert value.qualifier == raw
+        assert value.number is None
+
+
 def test_unparsed_value_keeps_raw() -> None:
     value = parse_activity_value("abc123xyz")
     assert value.kind == "unparsed"

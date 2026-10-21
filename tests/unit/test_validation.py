@@ -94,6 +94,25 @@ def test_measurement_missing_unit_flagged() -> None:
     assert any(c.check_id == "ACT_UNIT_PRESENT" and c.outcome == "unknown" for c in result.checks)
 
 
+def test_not_tested_cell_does_not_need_a_concentration_unit() -> None:
+    """A "-" cell of a MIC table is a categorical "not tested".
+
+    MIC requires a unit for a NUMERIC value; a not-tested marker has no
+    concentration, so demanding μg/mL turned every dash of live Table 4c
+    into an unfixable unit review item.
+    """
+
+    dash = ActivityValue(kind="categorical", qualifier="-", raw="-")
+    result = validate_measurement(_measurement(metric="MIC", value=dash, unit_raw=None))
+    assert "measurement has no unit" not in result.review_reasons
+    assert result.validation_state == "checks_passed"
+
+    # A numeric MIC still requires its unit.
+    numeric = ActivityValue(kind="scalar", number="4", raw="4")
+    result = validate_measurement(_measurement(metric="MIC", value=numeric, unit_raw=None))
+    assert "measurement has no unit" in result.review_reasons
+
+
 def test_evidence_missing_is_conflict() -> None:
     result = validate_evidence([], evidence_index={})
     assert result.validation_state == "conflict"

@@ -40,8 +40,15 @@ def _record_kind(record_id: str) -> str:
 
 #: ``…:meas:<page>:grid:rNcM`` — a reconstructed susceptibility cell.
 _GRID_RE = re.compile(r":meas:(\d+):grid:")
-#: ``…:meas:<page>:table:<id>:…`` or ``:meas:<page>:prose:…``.
-_PAGE_RE = re.compile(r":meas:(\d+):([a-z_]+)")
+#: ``…:meas:<page>:t<index>:rNcM`` — a cell of a parsed table (``t0`` is
+#: the first table on the page); older job data used
+#: ``…:meas:<page>:table:<id>:…``.
+_TABLE_RE = re.compile(r":meas:(\d+):(?:t\d+|table):")
+#: ``…:meas:<page>:prose:…`` — a measurement read from running text.
+_PROSE_PAGE_RE = re.compile(r":meas:(\d+):prose:")
+#: ``…:prose:<index>:<offset>`` — prose measurement whose record id never
+#: carried a page (the older extraction shape).
+_PROSE_RE = re.compile(r":prose:\d+:\d+$")
 
 
 def _group_for(record_id: str) -> tuple[str, str, int | None]:
@@ -51,13 +58,19 @@ def _group_for(record_id: str) -> tuple[str, str, int | None]:
     if grid:
         page = int(grid.group(1))
         return f"p{page}:matrix", f"第 {page} 页 · 药敏矩阵", page
-    page_match = _PAGE_RE.search(record_id)
-    if page_match:
-        page = int(page_match.group(1))
-        source = page_match.group(2)
-        if source == "table":
-            return f"p{page}:table", f"第 {page} 页 · 表格", page
+    # A table cell's id is ``…:meas:26:t0:r18c9`` — the old pattern only
+    # understood alphabetic sources, so every table measurement landed in
+    # "第 26 页 · 正文" and the queue looked like 600 prose conflicts.
+    table = _TABLE_RE.search(record_id)
+    if table:
+        page = int(table.group(1))
+        return f"p{page}:table", f"第 {page} 页 · 表格", page
+    prose = _PROSE_PAGE_RE.search(record_id)
+    if prose:
+        page = int(prose.group(1))
         return f"p{page}:prose", f"第 {page} 页 · 正文", page
+    if _PROSE_RE.search(record_id):
+        return "prose", "正文测量", None
     if ":seq:" in record_id or ":inline:" in record_id:
         return "sequences", "序列记录", None
     return "other", "其他记录", None

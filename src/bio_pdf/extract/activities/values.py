@@ -26,6 +26,16 @@ _CATEGORICAL = {
     "NO INHIBITION",
     "N/T",
     "NT",
+    # A lone dash is the universal "not tested" placeholder in patent
+    # tables (live Table 4c prints "-" for every peptide/strain pair it did
+    # not run). It reached the extractor as a value but was not recognised
+    # here, so it stayed ``unparsed`` and turned into a validation conflict
+    # (35 review items that said "value could not be parsed: '-'" people had
+    # to dismiss).
+    "-",
+    "–",
+    "—",
+    "−",
     "未测",
     "未检出",
     "无活性",

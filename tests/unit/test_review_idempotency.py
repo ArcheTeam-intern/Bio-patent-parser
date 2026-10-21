@@ -209,3 +209,24 @@ def test_group_id_binds_job_not_label() -> None:
     assert first != second
     # Same job + same page are one group.
     assert _group_id("job-a", record) == _group_id("job-a", "sha256:doc:meas:8:grid:r9c9")
+
+
+def test_table_cells_group_as_the_table_not_as_prose() -> None:
+    """A MinerU table cell's id is ``…:meas:26:t0:r18c9``.
+
+    The old source pattern only understood alphabetic sources, so all 597
+    table measurements of the live job were labelled "第 26 页 · 正文" and
+    the queue read like a wall of prose conflicts.
+    """
+
+    from bio_pdf.api.routes.reviews import _group_for
+
+    for record in ("sha256:doc:meas:26:t0:r18c9", "sha256:doc:meas:26:table:t0:r1c1"):
+        suffix, label, page = _group_for(record)
+        assert (suffix, page) == ("p26:table", 26)
+        assert label == "第 26 页 · 表格"
+
+    # A prose measurement whose id never carried a page is still a
+    # measurement — not "其他记录".
+    assert _group_for("sha256:doc:prose:14:26") == ("prose", "正文测量", None)
+    assert _group_for("sha256:doc:seq:1") == ("sequences", "序列记录", None)

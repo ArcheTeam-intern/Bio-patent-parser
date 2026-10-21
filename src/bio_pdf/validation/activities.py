@@ -51,6 +51,12 @@ def validate_measurement(
 
     definition = METRIC_REGISTRY.get(record.metric)
     unit_requirement = definition.unit_requirement if definition else "required"
+    if record.value.kind == "categorical":
+        # A categorical value is not a concentration: "not tested" / "ND"
+        # carry no unit even for a metric that normally requires one. The
+        # live MIC tables print "-" for untested pairs; demanding μg/mL of
+        # those cells produced a review item for every dash.
+        unit_requirement = "not_applicable"
     if record.unit_raw:
         checks.append(_check(CHECK_UNIT, "pass", f"unit present: {record.unit_raw}"))
     elif unit_requirement == "not_applicable":
