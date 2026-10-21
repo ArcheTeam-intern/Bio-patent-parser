@@ -271,7 +271,7 @@ def filter_exportable_figures(
 ) -> list[Figure]:
     """Keep only regions whose content is NOT already machine-extracted.
 
-    The 图表 tab exists for what text extraction cannot carry: charts,
+    The 图片 tab exists for what text extraction cannot carry: charts,
     curves, photos. Dropped deterministically:
     - tiny regions (journal logos / badges) below 2.5% of the page;
     - regions already covered (>=50%) by a table — parser-detected or

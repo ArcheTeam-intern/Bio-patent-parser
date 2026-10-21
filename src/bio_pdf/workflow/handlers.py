@@ -723,7 +723,7 @@ class NormalizeStage(_FileStage):
         # geometry, marked geometry_reconstructed — a candidate structure
         # for human review, never parser truth. Figure regions covered by
         # a (re)constructed table lose their "picture" status: their
-        # content is data now, so 图表 only shows what is not text/table.
+        # content is data now, so 图片 only shows what is not text/table.
         from bio_pdf.parsers.grid_matrix import reconstruct_call_matrices
         from bio_pdf.parsers.normalize_docling import filter_exportable_figures
 

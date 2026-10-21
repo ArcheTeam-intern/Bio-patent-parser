@@ -282,7 +282,7 @@ def list_figures(
 ) -> FiguresResponse:
     """Every detected visual region (chart / curve / diagram) across pages.
 
-    C07: ``page_number`` filters to one page (the 图表 tab follows the
+    C07: ``page_number`` filters to one page (the 图片 tab follows the
     current page by default); the unfiltered call keeps returning all
     figures for compatibility, and ``total`` always reports the document
     count so the UI can show "当前页 2 / 全文 7".
@@ -310,17 +310,17 @@ def list_figures(
     note = None
     if not out:
         if page_number is not None and total > 0:
-            note = f"第 {page_number} 页没有图表（全文共 {total} 个，可切换“全文”查看）。"
+            note = f"第 {page_number} 页没有图片（全文共 {total} 个，可切换“全文”查看）。"
         else:
             pages = [p for p in data.get("pages", []) or [] if isinstance(p, dict)]
             layout_seen = any(str(p.get("route", "")).startswith("layout_") for p in pages)
             if not layout_seen:
                 note = (
-                    "此任务未使用结构增强引擎（Docling），没有图表区域检测；"
+                    "此任务未使用结构增强引擎（Docling），没有图片区域检测；"
                     "重新创建任务并选择“结构增强”后可提取统计图/曲线图。"
                 )
             else:
-                note = "结构引擎在本文件未检测到任何图区（可能是纯文本论文或图表未被识别）。"
+                note = "结构引擎在本文件未检测到任何图区（可能是纯文本论文或图片未被识别）。"
     return FiguresResponse(
         job_id=job_id,
         figures=out,

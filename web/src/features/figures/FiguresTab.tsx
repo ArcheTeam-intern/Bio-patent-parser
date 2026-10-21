@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { figureFileUrl, listFigures } from "../../api/client";
 
 /**
- * 图表视图（C07）：默认只看“当前页”，需显式切换“全文”；同时显示
+ * 图片视图（C07）：默认只看“当前页”，需显式切换“全文”；同时显示
  * 当前页/全文两个计数；点击页标题定位到对应页；查看大图/下载是独立动作
  * （卡片本身是链接，不干扰翻页同步）。区域坐标与图题来自真实解析结果——
- * 无图表/未生成/损坏分别如实说明，不显示占位图。
+ * 无图片/未生成/损坏分别如实说明，不显示占位图。
  */
 
 const KIND_LABELS: Record<string, string> = {
@@ -42,8 +42,8 @@ export function FiguresTab({
     enabled: !!jobId,
   });
 
-  if (filtered.isLoading) return <div className="empty-state">正在检测图表…</div>;
-  if (filtered.error) return <div className="banner error">图表读取失败：{String(filtered.error)}</div>;
+  if (filtered.isLoading) return <div className="empty-state">正在检测图片…</div>;
+  if (filtered.error) return <div className="banner error">图片读取失败：{String(filtered.error)}</div>;
 
   const list = filtered.data?.figures ?? [];
   const total = totals.data?.total ?? filtered.data?.total ?? list.length;
@@ -54,7 +54,7 @@ export function FiguresTab({
         <label className="dim">
           范围：{" "}
           <select
-            aria-label="图表范围"
+            aria-label="图片范围"
             value={scope}
             onChange={(e) => onScopeChange(e.target.value === "all" ? "all" : "page")}
           >
@@ -74,8 +74,8 @@ export function FiguresTab({
           <div>
             {filtered.data?.note ??
               (scope === "page"
-                ? `第 ${currentPage} 页没有图表。`
-                : "本任务未检测到图表区域。")}
+                ? `第 ${currentPage} 页没有图片。`
+                : "本任务未检测到图片区域。")}
           </div>
           {scope === "page" && total > 0 && (
             <button onClick={() => onScopeChange("all")}>查看全文 {total} 个图</button>

@@ -1,11 +1,11 @@
 /**
- * 结果分布总览（用户需求）：序列/活性/表格/图表这些结果出现在哪些页。
+ * 结果分布总览（用户需求）：序列/活性/表格/图片这些结果出现在哪些页。
  * 页码与计数完全来自 records API 的 record_pages 与 table_pages、以及
  * figures API（真实证据位置），不做任何推断；点击一行跳转到该页。
  * 无页码定位的记录单独、如实地标注出来，绝不猜一个页码。
  *
- * 四个结果 tab（序列/活性/表格/图表）共用这一份完整分布——
- * 之前每类结果只在各自 tab 出现，序列/活性页看不到表格/图表的分布。
+ * 四个结果 tab（序列/活性/表格/图片）共用这一份完整分布——
+ * 之前每类结果只在各自 tab 出现，序列/活性页看不到表格/图片的分布。
  */
 
 export interface PageDistributionProps {
@@ -89,7 +89,7 @@ export function PageDistribution({
               {counts.seq > 0 && <span className="pd-chip seq">序列 {counts.seq}</span>}
               {counts.meas > 0 && <span className="pd-chip meas">活性 {counts.meas}</span>}
               {counts.tab > 0 && <span className="pd-chip tab">表格 {counts.tab}</span>}
-              {counts.fig > 0 && <span className="pd-chip fig">图表 {counts.fig}</span>}
+              {counts.fig > 0 && <span className="pd-chip fig">图片 {counts.fig}</span>}
             </span>
           </button>
         ))}

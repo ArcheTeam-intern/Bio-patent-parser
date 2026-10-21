@@ -51,7 +51,7 @@ export function WorkbenchPage() {
         job.data?.status === "succeeded_with_review"),
   });
   // Shared with FiguresTab (total key): the unified distribution needs
-  // per-page figure counts on every results tab, not only on 图表.
+  // per-page figure counts on every results tab, not only on 图片.
   const figures = useQuery({
     queryKey: ["figures", jobId, "total"],
     queryFn: () => listFigures(jobId!),
@@ -293,7 +293,7 @@ export function WorkbenchPage() {
                     setParams(next, { replace: true });
                   }}
                 >
-                  {{ sequences: "序列", activities: "活性", tables: "表格", figures: "图表", text: "原文", issues: "问题", run: "运行详情" }[t]}
+                  {{ sequences: "序列", activities: "活性", tables: "表格", figures: "图片", text: "原文", issues: "问题", run: "运行详情" }[t]}
                 </button>
               ))}
             </div>
@@ -342,8 +342,8 @@ export function WorkbenchPage() {
                 )}
               </div>
             )}
-            {/* 统一结果分布：四个结果 tab（序列/活性/表格/图表）看到的是
-                同一份完整分布——序列+活性+表格+图表，任何一页都有全部计数。 */}
+            {/* 统一结果分布：四个结果 tab（序列/活性/表格/图片）看到的是
+                同一份完整分布——序列+活性+表格+图片，任何一页都有全部计数。 */}
             {(tab === "sequences" || tab === "activities" || tab === "tables" || tab === "figures") &&
               !isActive(job.data?.status) &&
               (records.data || Object.keys(figureCounts).length > 0) && (
